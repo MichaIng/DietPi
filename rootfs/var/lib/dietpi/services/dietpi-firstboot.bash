@@ -156,9 +156,6 @@
 		# Apply swap settings
 		/boot/dietpi/func/dietpi-set_swapfile
 
-		# Apply headless mode if set in dietpi.txt (RPi, Odroid C1/C2)
-		(( $G_HW_MODEL < 11 || $G_HW_MODEL == 12 )) && /boot/dietpi/func/dietpi-set_hardware headless "$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_HEADLESS=1' /boot/dietpi.txt)"
-
 		# Set hostname
 		/boot/dietpi/func/change_hostname "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_HOSTNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 
