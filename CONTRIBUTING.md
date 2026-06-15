@@ -62,6 +62,9 @@ Guidance:
 - Error-handling: use `G_EXEC` to wrap any command call, so DietPi's error
   handler and consistent console output apply. Validate root permissions and
   write access using `G_CHECK_ROOT_USER` / `G_CHECK_ROOTFS_RW` where required.
+- Persistence: Write arrays or variables into a preference file `/boot/dietpi/.<prog_settings>`.
+  Persist arrays as indexed assignments (e.g. `aARRAY[index]=1`). Convert ESC bytes to `\e`
+  when saving text if needed. Load the preferences with `. "/boot/dietpi/.<prog_settings>"`
 
 ### Helper functions (G_ helpers)
 
@@ -139,9 +142,7 @@ Usage hints:
    validate, and update in-memory variables (e.g. `aENABLED[index]`).
 2. Register option: add the menu label into `Menu_Main()` (scripts use a
    case-switch dispatch). Remember to update `MENU_LASTITEM_*` indices if used.
-3. Persist: call `Save` or `Write_Settings_File()` to write to `FP_SAVEFILE`.
-   Persist arrays as `aENABLED[index]=...` lines; convert ESC bytes to `\e`
-   when saving color slots if needed.
+3. Persist: Write arrays or variables into a preference file (see the 'Core concepts' section).
 4. Test: include interactive steps in your PR Test Plan (open menu, toggle,
    verify `cat /boot/dietpi/.<prog_settings>`).
 
@@ -169,25 +170,31 @@ Below are minimal, copy-paste-ready examples that follow DietPi conventions.
   for i in $G_WHIP_RETURNED_VALUE; do aENABLED[$i]=1; done
   Save > "$FP_SAVEFILE"
   ```
+  
 - `G_WHIP_INPUTBOX` (validated input):
   ```
   G_WHIP_INPUTBOX_REGEX='^[0-9]+$' G_WHIP_INPUTBOX_REGEX_TEXT='a number' G_WHIP_DEFAULT_ITEM=10
   G_WHIP_INPUTBOX 'Set retry count:' || return
   RETRIES=$G_WHIP_RETURNED_VALUE
   ```
+  
 - `G_WHIP_YESNO` (confirmation):
   ```
   if G_WHIP_YESNO 'Delete backup?'; then
     G_EXEC rm -rf "$TARGET"
   fi
   ```
+  
 - `G_WHIP_VIEWFILE` (show a logfile):
   ```
   log=1 G_WHIP_VIEWFILE "$FP_LOG" || return
   ```
+  
 - `Save()` persistence pattern (follow dietpi-banner conventions):
   ```
   Save(){
+    # `echo` text to be evaluated when re-loading
+    # Call with `Save > "preference/filepath"`
     echo "aDESCRIPTION[10]='${aDESCRIPTION[10]}'"
     for i in "${!aENABLED[@]}"; do echo "aENABLED[$i]=${aENABLED[$i]}"; done
     for i in {0..6}; do val="${aCOLOUR[$i]}"; esc=$(printf '%s' "$val" | sed $'s/\x1b/\\e/g'); esc=${esc//\'/\\\'}; echo "aCOLOUR[$i]='$esc'"; done
