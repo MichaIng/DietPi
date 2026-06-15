@@ -29,13 +29,10 @@ Use `dietpi-services` to control which installed software has higher or lower pr
 
 The full list of code contributors can be viewed [here](https://github.com/MichaIng/DietPi/graphs/contributors).
 
----
 
-### Contributing
+## Contributing
 
 See the [Contributing Guide](https://github.com/MichaIng/DietPi?tab=contributing-ov-file)
-
----
 
 ### Contributors
 
