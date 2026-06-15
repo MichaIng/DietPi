@@ -68,9 +68,14 @@ Guidance:
 
 ### Helper functions (G_ helpers)
 
-DietPi provides many `G_` prefixed helpers in `dietpi/func/dietpi-globals`. Below
-are the most useful ones for contributors and how to use them safely.
+DietPi provides many `G_` prefixed helpers in `dietpi/func/dietpi-globals`. Usage hints:
+- Read `dietpi/func/dietpi-globals` when adding behavior that interacts
+  with the user, modifies files, or runs external commands — it documents
+  optional environment variables and exit/cancel semantics for each helper.
+- Prefer the `G_` helpers over ad-hoc implementations to keep error handling
+  consistent and reduce reviewer friction.
 
+Below are the most useful ones for contributors and how to use them safely.
 - `G_INIT` — initialize script runtime, sets up the working directory, exit
    traps, consistent locale for parsing external command outputs, and handles
    concurrent execution checks. Call early after sourcing `dietpi-globals`.
@@ -88,6 +93,17 @@ are the most useful ones for contributors and how to use them safely.
   `G_WHIP_MENU`, `G_WHIP_CHECKLIST`, `G_WHIP_INPUTBOX`, `G_WHIP_PASSWORD`,
   `G_WHIP_VIEWFILE`).
   Prefer these for user interaction to maintain consistent UX and behavior.
+
+- `G_CHECK_ROOT_USER`, `G_CHECK_ROOTFS_RW` — validate that the script runs
+  with necessary privileges and writable rootfs before performing writes.
+  Using `G_CHECK_ROOT_USER "$@"`, if the script does not have root permissions,
+  re-executes with `sudo`. "$@" passes all CLI arguments to the `sudo-ed` script.
+
+- `G_GET_NET`, `G_GET_WAN_IP` — network helpers that return standardized
+  values; use `-q` to hide error messages.
+
+- `G_DIETPI-NOTIFY` / `G_BUG_REPORT` — helpers to generate formatted bug
+  reports and diagnostics. Use when capturing logs for PRs / issues.
 
 #### G_WHIP specifics
 
@@ -120,22 +136,6 @@ These details are commonly needed when implementing menus and input boxes.
   - Set it before calling a `G_WHIP_*` helper; the helper respects it when
     calculating `WHIP_SIZE_X`.
 
-- `G_CHECK_ROOT_USER`, `G_CHECK_ROOTFS_RW` — validate that the script runs
-  with necessary privileges and writable rootfs before performing writes.
-
-- `G_GET_NET`, `G_GET_WAN_IP` — network helpers that return standardized
-  values; use `-q` to hide error messages.
-
-- `G_DIETPI-NOTIFY` / `G_BUG_REPORT` — helpers to generate formatted bug
-  reports and diagnostics. Use when capturing logs for PRs / issues.
-
-Usage hints:
-- Read `dietpi/func/dietpi-globals` when adding behavior that interacts
-  with the user, modifies files, or runs external commands — it documents
-  optional environment variables and exit/cancel semantics for each helper.
-- Prefer the `G_` helpers over ad-hoc implementations to keep error handling
-  consistent and reduce reviewer friction.
-
 ### Menu extension pattern (safe, minimal)
 
 1. Add handler: implement `Menu_<Name>()` to present inputs (use `G_WHIP_*`),
@@ -149,6 +149,15 @@ Usage hints:
 ### Practical snippets (quick reference)
 
 Below are minimal, copy-paste-ready examples that follow DietPi conventions.
+
+- A typical script header
+  ```
+  . /boot/dietpi/func/dietpi-globals
+  readonly G_PROGRAM_NAME='DietPi-DevTest'
+  G_CHECK_ROOT_USER "$@" # if the script requires root permissions
+  G_CHECK_ROOTFS_RW # if the script requires write access
+  G_INIT
+  ```
 
 - `G_WHIP_MENU` (single choice):
   ```
