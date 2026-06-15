@@ -1,5 +1,4 @@
-DietPi Project Contribution
-=============================================
+# DietPi Project Contribution
 
 Are you able to:
 
@@ -60,9 +59,6 @@ Guidance:
   first to understand helper semantics and cancel/error behavior.
 - UI: prefer `G_WHIP_*` dialog helpers for menus, input and confirmations to
   maintain a consistent user experience across scripts.
-- Persistence: use `FP_SAVEFILE` / `FP_SETTINGS` to write small shell-sourcable
-  files. Persist arrays as indexed assignments (e.g. `aENABLED[3]=1`) to
-  preserve compatibility across edits.
 - Error-handling: use `G_EXEC` to wrap any command call, so DietPi's error
   handler and consistent console output apply. Validate root permissions and
   write access using `G_CHECK_ROOT_USER` / `G_CHECK_ROOTFS_RW` where required.
@@ -75,10 +71,6 @@ are the most useful ones for contributors and how to use them safely.
 - `G_INIT` — initialize script runtime, sets up the working directory, exit
    traps, consistent locale for parsing external command outputs, and handles
    concurrent execution checks. Call early after sourcing `dietpi-globals`.
-
-- `G_EXIT` — cleanup/exit handler registered by `G_INIT`. Avoid overriding
-  unless you re-register a compatible trap; use `G_EXIT` to ensure proper
-  teardown on SIGINT/EXIT.
 
 - `G_EXEC` — robust command executor with built-in retries and an interactive
   error handler. Use instead of direct `rm`/`systemctl` in scripts so
@@ -158,9 +150,49 @@ Usage hints:
 Below are minimal, copy-paste-ready examples that follow DietPi conventions.
 
 - `G_WHIP_MENU` (single choice):
-    
+  ```
+  G_WHIP_MENU_ARRAY=( 'Start' 'Start the service' 'Stop' 'Stop the service' )
+  G_WHIP_DEFAULT_ITEM='Start'
+  G_WHIP_MENU 'Select action:' || return
+  case $G_WHIP_RETURNED_VALUE in
+    Start) echo 'Starting...';;
+    Stop) echo 'Stopping...';;
+  esac
+  ```
+  
 - `G_WHIP_CHECKLIST_ARRAY` (multi-select):
-    
+  ```
+  G_WHIP_CHECKLIST_ARRAY=()
+  G_WHIP_CHECKLIST_ARRAY+=( '5' 'Enable Foo' "${aENABLED[5]:=0}" )
+  G_WHIP_CHECKLIST_ARRAY+=( '6' 'Enable Bar' "${aENABLED[6]:=0}" )
+  G_WHIP_CHECKLIST 'Choose features to enable:' || return
+  for i in $G_WHIP_RETURNED_VALUE; do aENABLED[$i]=1; done
+  Save > "$FP_SAVEFILE"
+  ```
+- `G_WHIP_INPUTBOX` (validated input):
+  ```
+  G_WHIP_INPUTBOX_REGEX='^[0-9]+$' G_WHIP_INPUTBOX_REGEX_TEXT='a number' G_WHIP_DEFAULT_ITEM=10
+  G_WHIP_INPUTBOX 'Set retry count:' || return
+  RETRIES=$G_WHIP_RETURNED_VALUE
+  ```
+- `G_WHIP_YESNO` (confirmation):
+  ```
+  if G_WHIP_YESNO 'Delete backup?'; then
+    G_EXEC rm -rf "$TARGET"
+  fi
+  ```
+- `G_WHIP_VIEWFILE` (show a logfile):
+  ```
+  log=1 G_WHIP_VIEWFILE "$FP_LOG" || return
+  ```
+- `Save()` persistence pattern (follow dietpi-banner conventions):
+  ```
+  Save(){
+    echo "aDESCRIPTION[10]='${aDESCRIPTION[10]}'"
+    for i in "${!aENABLED[@]}"; do echo "aENABLED[$i]=${aENABLED[$i]}"; done
+    for i in {0..6}; do val="${aCOLOUR[$i]}"; esc=$(printf '%s' "$val" | sed $'s/\x1b/\\e/g'); esc=${esc//\'/\\\'}; echo "aCOLOUR[$i]='$esc'"; done
+  }
+  ```
 
 ### Banner extension pattern (example)
 
@@ -170,7 +202,10 @@ When adding banner items (e.g. `dietpi-banner`), follow this minimal pattern:
   `aENABLED[index]` during initialization.
 
 - Output: implement `Print_<ShortName>()` or add a guarded line in `Print_Banner_raw()`:
-    
+  ```
+  (( ${aENABLED[index]} )) && echo -e "$GREEN_BULLET ${aCOLOUR[1]}${aDESCRIPTION[index]} $GREEN_SEPARATOR $(Print_<ShortName>)"
+  ```
+  
 - Persist: ensure `Save()` writes `aENABLED[index]=...` and any custom
   `aDESCRIPTION[...]` lines so the state survives restarts.
 
@@ -187,8 +222,7 @@ while (( TARGETMENUID != -1 )); do
 done
 ```
 
-AWK wrapper call (word-wrap helper)
------------------------------------
+### AWK wrapper call (word-wrap helper)
 
 Purpose: wrap banner lines to a target column while ignoring terminal
 colour codes and aligning content after bullets or colons.
