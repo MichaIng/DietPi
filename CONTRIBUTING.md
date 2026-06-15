@@ -228,22 +228,3 @@ while (( TARGETMENUID != -1 )); do
   esac
 done
 ```
-
-### AWK wrapper call (word-wrap helper)
-
-Purpose: wrap banner lines to a target column while ignoring terminal
-colour codes and aligning content after bullets or colons.
-
-Call example:
-```
-mawk -v "MAXCOL=$(tput cols)" -v "INDENT_TYPE=$BW_INDENT_TYPE" -v "INDENT_FIXED=$BW_INDENT_FIXED" -f "$FP_BANNERWRAP_AWK"
-```
-Key options:
-- `INDENT_TYPE`: `colon` | `dash` | `fixed` (controls how indent is calculated)
-- `INDENT_FIXED`: integer used when `INDENT_TYPE=fixed`
-
-Quick test:
-```
-printf '%s\n' " - Example: Let's Encrypt cert status: https://example.com | long text to wrap" | mawk -v "MAXCOL=50" -v "INDENT_TYPE=colon" -v "INDENT_FIXED=3" -f "$FP_BANNERWRAP_AWK"
-```
-See `func/dietpi-banner-wrap.awk` for full implementation details.
