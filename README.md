@@ -25,14 +25,13 @@ Use `dietpi-services` to control which installed software has higher or lower pr
 
 `dietpi-update` automatically checks for updates and informs you when they are available. Update instantly, without having to write a new image. **DietPi automation** allows you to completely automate a DietPi installation with no user input, simply by configuring `dietpi.txt` before powering on.
 
-## The DietPi Project Team
-
-The full list of code contributors can be viewed [here](https://github.com/MichaIng/DietPi/graphs/contributors).
-
-
 ## Contributing
 
 See the [Contributing Guide](https://github.com/MichaIng/DietPi?tab=contributing-ov-file)
+
+## The DietPi Project Team
+
+The full list of code contributors can be viewed [here](https://github.com/MichaIng/DietPi/graphs/contributors).
 
 ### Contributors
 
