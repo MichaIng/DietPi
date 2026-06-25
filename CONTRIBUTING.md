@@ -83,7 +83,7 @@ Below are the most useful ones for contributors and how to use them safely.
 - `G_EXEC` — robust command executor with built-in retries and an interactive
   error handler. Use instead of direct `rm`/`systemctl` in scripts so
   failures are presented to the user and logged consistently. Optional
-  env vars: `G_EXEC_DESC`, `G_EXEC_RETRIES`, `G_EXEC_OUTPUT`.
+  env vars: `$G_EXEC_DESC`, `$G_EXEC_RETRIES`, `$G_EXEC_OUTPUT`.
 
 - `G_CONFIG_INJECT` — targeted config-file editing helper. Use to atomically
   replace, uncomment, or add config lines using predictable patterns rather
@@ -110,10 +110,10 @@ Below are the most useful ones for contributors and how to use them safely.
 These details are commonly needed when implementing menus and input boxes.
 
 - `G_WHIP_INPUTBOX`:
-  - Use `G_WHIP_INPUTBOX_REGEX` to provide an optional validation regex and
-    `G_WHIP_INPUTBOX_REGEX_TEXT` to describe allowed input (human-friendly).
+  - Use `$G_WHIP_INPUTBOX_REGEX` to provide an optional validation regex and
+    `$G_WHIP_INPUTBOX_REGEX_TEXT` to describe allowed input (human-friendly).
     By default, any non-empty input is allowed.
-  - `G_WHIP_DEFAULT_ITEM` pre-fills the input field. The helper loops until
+  - `$G_WHIP_DEFAULT_ITEM` pre-fills the input field. The helper loops until
     input matches the regex or the user cancels (`|| return`).
   - On success the entered value is returned in `$G_WHIP_RETURNED_VALUE`.
 
@@ -123,25 +123,25 @@ These details are commonly needed when implementing menus and input boxes.
   - Use for confirmations before destructive actions. Combine with
     `G_EXEC` for safe command execution on confirmation.
 
-- `G_WHIP_DEFAULT_ITEM`:
+- `$G_WHIP_DEFAULT_ITEM`:
   - Controls the pre-selected menu item or prefilled input box value.
   - When using `G_WHIP_MENU`, set it to a label matching one of the menu
     entries to pre-select that entry (exact match is used).
 
-- `G_WHIP_SIZE_X_MAX`:
+- `$G_WHIP_SIZE_X_MAX`:
   - Optional integer to limit dialog width (chars). Useful for dialogs with
     very few content or checklists, where too wide dialog boxes may look weird.
     By default, all `G_WHIP` dialogs are max 120 characters wide, capped by the
     terminal width.
   - Set it before calling a `G_WHIP_*` helper; the helper respects it when
-    calculating `WHIP_SIZE_X`.
+    calculating `$WHIP_SIZE_X`.
 
 ### Menu extension pattern (safe, minimal)
 
 1. Add handler: implement `Menu_<Name>()` to present inputs (use `G_WHIP_*`),
    validate, and update in-memory variables (e.g. `aENABLED[index]`).
 2. Register option: add the menu label into `Menu_Main()` (scripts use a
-   case-switch dispatch). Remember to update `MENU_LASTITEM_*` indices if used.
+   case-switch dispatch). Remember to update `$MENU_LASTITEM_*` indices if used.
 3. Persist: Write arrays or variables into a preference file (see the 'Core concepts' section).
 4. Test: include interactive steps in your PR Test Plan (open menu, toggle,
    verify `cat /boot/dietpi/.<prog_settings>`).
@@ -170,7 +170,7 @@ Below are minimal, copy-paste-ready examples that follow DietPi conventions.
   esac
   ```
   
-- `G_WHIP_CHECKLIST_ARRAY` (multi-select):
+- `$G_WHIP_CHECKLIST_ARRAY` (multi-select):
   ```
   G_WHIP_CHECKLIST_ARRAY=()
   G_WHIP_CHECKLIST_ARRAY+=( '5' 'Enable Foo' "${aENABLED[5]:=0}" )
