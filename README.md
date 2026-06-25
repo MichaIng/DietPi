@@ -27,7 +27,7 @@ Use `dietpi-services` to control which installed software has higher or lower pr
 
 ## Contributing
 
-See the [Contributing Guide](https://github.com/MichaIng/DietPi?tab=contributing-ov-file)
+See our [Contributing Guide](https://github.com/MichaIng/DietPi/blob/master/CONTRIBUTING.md) for details about how to contribute to the DietPi project.
 
 ## The DietPi Project Team
 
