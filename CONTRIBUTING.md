@@ -199,6 +199,16 @@ Below are minimal, copy-paste-ready examples that follow DietPi conventions.
   log=1 G_WHIP_VIEWFILE "$FP_LOG" || return
   ```
   
+- `G_TRUNCATE_MID` (shorten long strings by squishing the middle characters):
+  ```
+  G_TRUNCATE_MID "Long text to be shortened by removing the middle" 26
+  # -> "Long text to... the middle"
+	G_TRUNCATE_MID "Long text" 5
+  # -> "L...t"
+	G_TRUNCATE_MID "Text" 3
+  # -> "Tex"
+  ```
+
 - `Save()` persistence pattern (follow dietpi-banner conventions):
   ```
   Save(){
