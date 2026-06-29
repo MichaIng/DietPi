@@ -129,6 +129,10 @@
 	CLI_BULLET=" ${aCOLOUR[ACCENT]}-$COLOUR_RESET"
 	CLI_SEPARATOR="${aCOLOUR[ACCENT]}:$COLOUR_RESET"
 
+	# IP address detection (IPv4)
+	IP4_re='([0-9]{1,3}\.){3}[0-9]{1,3}'
+	IP4_re_cidr='([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}'
+
 	DIETPI_VERSION="$G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB.$G_DIETPI_VERSION_RC"
 	if [[ $G_GITOWNER != 'MichaIng' ]]
 	then
@@ -192,7 +196,7 @@
 			echo "aENABLED[$i]=${aENABLED[$i]}"
 		done
 
-		# Persist only the primary colour slots (0..6). Convert any actual
+		# Persist only the primary colour slots. Convert any actual
 		# ESC bytes to the two-character sequence \e so the saved file is
 		# portable when sourced in different shells.
 		for i in "${!aCOLOUR[@]}"
@@ -392,57 +396,56 @@ $CLI_LINE"
 	{
 		Get_Fail2Ban_Status_Raw()
 		{
-			# # helper function so that we can run it with sudo in non-root mode without needing to export all the above functions and variables.
-			# # also is `dash` compatible
+			if command -v fail2ban-client >/dev/null 2>&1; then
+				if [[ "$(id -u)" = "0" ]]; then
+					f2b_output="$(fail2ban-client banned 2>/dev/null)"
+				else
+					f2b_output="$(sudo -n fail2ban-client banned 2>/dev/null || return 2)"
+					[ $? = 2 ] && return 2
+				fi
 
-			# Count unique banned IPs via iptables/nftables compatibility. Try iptables first,
-			# fall back to nft if available.
-			COUNTIPS=0
-			if command -v iptables >/dev/null 2>&1; then
-				COUNTIPS=$(iptables -L -n 2>/dev/null | awk '/REJECT/ {print $0}' | uniq -c | wc -l)
-			elif command -v nft >/dev/null 2>&1; then
-				COUNTIPS=$(nft list ruleset 2>/dev/null | awk '/reject/ {print $0}' | uniq -c | wc -l)
+				if ! command -v sort >/dev/null 2>&1; then
+					sort() { cat; } # fallback if sort is not available, simply passes input through
+				fi
+
+				# get banned IP address count
+				IP_addrs="$(echo "$f2b_output" | grep -o '\[[^]]*\]' | grep -Eo "$IP4_re" | sort -u)"
+				count_banned_ips="$(echo "$IP_addrs" | wc -l)" # | grep -cve '^[[:space:]]*$')"
+				echo "$count_banned_ips"
+
+				return 0
 			else
+				# fail2ban-client command is not available
 				return 1
 			fi
-			echo "$COUNTIPS"
-			return 0
 		}
 
-		COUNTIPS=0
-		if [[ "$(id -u)" = "0" ]]
-		then
-			COUNTIPS="$(Get_Fail2Ban_Status_Raw 2>/dev/null || return 1)"
-			code=$?
-		else
-			# Running as non-root: Fail silently without NOPASSWD to avoid password prompt
-			COUNTIPS="$(sudo -n dash -c "$(declare -f Get_Fail2Ban_Status_Raw); Get_Fail2Ban_Status_Raw 2>&1" 2> /dev/null || return 2)"
-			code=$?
-		fi
+		count_banned_ips=$(Get_Fail2Ban_Status_Raw)
+		code=$?
 
 		case $code in
 			0)
-				if [[ $COUNTIPS -eq 0 ]]; then
+				if [[ $count_banned_ips -eq 0 ]]; then
 					# zero bans can be suspicious - something may not be working correctly
 					state="${aCOLOUR[HIGHLIGHT]}No IP(s) Banned${COLOUR_RESET}"
 				else
-					if [[ $COUNTIPS -gt 20 ]]; then
+					if [[ $count_banned_ips -gt 20 ]]; then
 						# high number of bans
-						state="${aCOLOUR[ALERT]}$COUNTIPS IP(s) Banned${COLOUR_RESET}"
+						state="${aCOLOUR[ALERT]}$count_banned_ips IP(s) Banned${COLOUR_RESET}"
 					else
 						# low number of bans
-						state="${aCOLOUR[WEAK]}$COUNTIPS IP(s) Banned${COLOUR_RESET}"
+						state="${aCOLOUR[WEAK]}$count_banned_ips IP(s) Banned${COLOUR_RESET}"
 					fi
 				fi
 				;;
 			1)
-				state="${aCOLOUR[ALERT]}No Fail2Ban status available${COLOUR_RESET}"
+				state="${aCOLOUR[ALERT]}fail2ban-client not available${COLOUR_RESET}"
 				;;
 			2)
 				state="${aCOLOUR[HIGHLIGHT]}NOPASSWD sudo required to obtain Fail2Ban status${COLOUR_RESET}"
 				;;
 			*)
-				state="${aCOLOUR[ALERT]}Unknown state $COUNTIPS${COLOUR_RESET}"
+				state="${aCOLOUR[ALERT]}Unknown state, code: $code count: $count_banned_ips${COLOUR_RESET}"
 				;;
 		esac
 
@@ -484,8 +487,6 @@ $CLI_LINE"
 
 	Get_Network_Usage()
 	{
-		# IP address detection (IPv4)
-		local IP_re='([0-9]{1,3}\.){3}[0-9]{1,3}'
 		# Common error substrings to detect timeouts / DNS failures (lowercase for case-insensitive check)
 		local err_re='timed out|timeout|could not resolve|not known|unknown'
 
@@ -514,38 +515,32 @@ $CLI_LINE"
 
 				case "$ifname" in
 					# wired / predictable names
-					eth*|en*|lan*) handle_iface=1 ;;
+					eth*|en*|lan*) : ;;
 					# wireless
-					wlan*|wl*) handle_iface=1 ;;
+					wlan*|wl*) : ;;
 					# vpn/tunnel/virtual
-					tun*|wg*|vpn*) handle_iface=1 ;;
+					tun*|wg*|vpn*) : ;;
 					*) continue ;;
 				esac
 
-				if (( handle_iface )); then
-					local RX="N/A" TX="N/A" rx tx ip_addr ip_addr_cidr
+				local RX="N/A" TX="N/A" rx tx ip_addr ip_addr_cidr
 
-					# Get RX data
-					if "${ns_cmd_prefix[@]}" test -r "/sys/class/net/$ifname/statistics/rx_bytes"; then
-						rx=$("${ns_cmd_prefix[@]}" cat "/sys/class/net/$ifname/statistics/rx_bytes" 2>/dev/null || :)
-						[[ $rx =~ ^[0-9]+$ ]] && RX="$(awk -v v="$rx" 'BEGIN{printf "%.2f", v/(1024^3)}') GiB"
-					fi
+				# Get RX data
+				rx=$("${ns_cmd_prefix[@]}" cat "/sys/class/net/$ifname/statistics/rx_bytes" 2>/dev/null || :)
+				[[ $rx =~ ^[0-9]+$ ]] && RX="$(awk -v v="$rx" 'BEGIN{printf "%.2f", v/(1024^3)}') GiB"
 
-					# Get TX data
-					if "${ns_cmd_prefix[@]}" test -r "/sys/class/net/$ifname/statistics/tx_bytes"; then
-						tx=$("${ns_cmd_prefix[@]}" cat "/sys/class/net/$ifname/statistics/tx_bytes" 2>/dev/null || :)
-						[[ $tx =~ ^[0-9]+$ ]] && TX="$(awk -v v="$tx" 'BEGIN{printf "%.2f", v/(1024^3)}') GiB"
-					fi
+				# Get TX data
+				tx=$("${ns_cmd_prefix[@]}" cat "/sys/class/net/$ifname/statistics/tx_bytes" 2>/dev/null || :)
+				[[ $tx =~ ^[0-9]+$ ]] && TX="$(awk -v v="$tx" 'BEGIN{printf "%.2f", v/(1024^3)}') GiB"
 
-					# Get IP address (IPv4, global scope) for this interface in this namespace. If multiple are present, just take the first. If none, show "- No IP -"
-					ip_addr=" - No IP - "
-					ip_addr_cidr=$("${ns_cmd_prefix[@]}" ip -o -4 addr show dev "$ifname" scope global 2>/dev/null | awk '{print $4}' | head -n1)
-					[[ -n "$ip_addr_cidr" ]] && ip_addr=${ip_addr_cidr%%/*}
+				# Get IP address (IPv4) for this interface in this namespace. If multiple are present, just take the first. If none, show "- No IP -"
+				ip_addr=" - No IP - "
+				ip_addr_cidr=$("${ns_cmd_prefix[@]}" ip -o -4 addr show dev "$ifname" scope global 2>/dev/null | awk '{print $4}' | head -n1 | grep -E "$IP4_re_cidr")
+				[[ -n "$ip_addr_cidr" ]] && ip_addr=${ip_addr_cidr%%/*}
 
-					if [[ "$RX" != "N/A" || "$TX" != "N/A" ]]; then
-						printf "%s %s%-20s %s%s  TX= %12s  RX= %12s%s\n" \
-							"$CLI_BULLET" "${aCOLOUR[WEAK]}" "$ip_addr ($ifname)" "$CLI_SEPARATOR" "${aCOLOUR[WEAK]}" "$TX" "$RX" "$COLOUR_RESET"
-					fi
+				if [[ "$RX" != "N/A" || "$TX" != "N/A" ]]; then
+					printf "%s %s%-20s %s%s TX= %11s  RX= %11s%s\n" \
+						"$CLI_BULLET" "${aCOLOUR[WEAK]}" "$ip_addr ($ifname)" "$CLI_SEPARATOR" "${aCOLOUR[WEAK]}" "$TX" "$RX" "$COLOUR_RESET"
 				fi
 			done
 		}
@@ -556,11 +551,11 @@ $CLI_LINE"
 
 		for ns in "${namespaces[@]}"; do
 			raw_ns="${ns:-default}"
-			display_ns="$(G_TRUNCATE_MID "$raw_ns" 30)"
+			display_ns="$(G_TRUNCATE_MID "$raw_ns" 24)"
 
 			IP=$(BANNER_GET_WAN_IP -t 1 -n "$ns" 2>&1)
 
-			if [[ $IP =~ $IP_re ]]; then
+			if [[ $IP =~ $IP4_re ]]; then
 				# Valid IP detected, keep as-is and print with namespace
 
 				# # Extract just the IP portion (use BASH_REMATCH[0]). Removes the geographic info.
