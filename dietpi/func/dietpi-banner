@@ -114,6 +114,44 @@
 				unset _tmp_enabled
 			fi
 		fi
+
+		# Migrate legacy numeric-indexed aCOLOUR (from older FP_SAVEFILE) to associative form
+		# Only perform migration when numeric indices exist in the loaded aCOLOUR
+		if declare -p aCOLOUR >/dev/null 2>&1; then
+			local has_numeric_col=0
+			for k in "${!aCOLOUR[@]}"; do
+				if [[ "$k" =~ ^[0-9]+$ ]]; then has_numeric_col=1; break; fi
+			done
+			if (( has_numeric_col )); then
+				# Prefer LEGACY_INDEXED_COLOUR_KEYS for a stable mapping
+				local -n key_map_ref_col=LEGACY_INDEXED_COLOUR_KEYS
+				declare -gA _tmp_colour=()
+				# First, map numeric indices explicitly so legacy numeric prefs take precedence
+				for (( i=0; i<${#key_map_ref_col[@]}; i++ )); do
+					if [[ -n "${aCOLOUR[$i]+x}" ]]; then
+						key=${key_map_ref_col[$i]}
+						[[ -n "$key" ]] && _tmp_colour[$key]=${aCOLOUR[$i]:-}
+					fi
+				done
+				# Then copy any remaining non-numeric keys that weren't set by numeric mapping
+				for idx in "${!aCOLOUR[@]}"; do
+					if [[ ! "$idx" =~ ^[0-9]+$ ]]; then
+						key=$idx
+						# don't overwrite keys already set by numeric mapping
+						[[ -n "${_tmp_colour[$key]+x}" ]] && continue
+						[[ -n "$key" ]] && _tmp_colour[$key]=${aCOLOUR[$idx]:-}
+					fi
+				done
+				# replace aCOLOUR with associative mapping
+				unset aCOLOUR
+				declare -gA aCOLOUR
+				for k in "${!_tmp_colour[@]}"; do aCOLOUR[$k]=${_tmp_colour[$k]}; done
+
+				# Mark that a colour migration from legacy numeric indices occurred during this run
+				declare -g DIETPI_BANNER_COLOUR_MIGRATED_DURING_RUN=1
+				unset _tmp_colour
+			fi
+		fi
 	}
 
 	# Use associative arrays keyed by short names derived from the description
@@ -151,16 +189,21 @@
 		network_usage disk_usage custom_commands useful_commands motd print_credits word_wrap
 	)
 
-	# Keep a fixed index->key mapping to support numeric-index migration even if MENU_ITEMS changes later
-	# LEGACY_INDEXED_BANNER_KEYS maps legacy numeric indices to the current key names (0 -> device_model, 1 -> uptime, ...)
 	##############
-	## DO NOT CHANGE. THIS IS REQUIRED TO MAINTAIN LEGACY INDEX->KEY MAPPING FOR MIGRATION
+	## DO NOT CHANGE. THESE ARE REQUIRED TO MAINTAIN LEGACY INDEX->KEY MAPPING FOR MIGRATION
+	## Keeps a fixed index->key mapping to support numeric-index migration of aCOLOUR and aENABLED preferences.
 	##############
+	# Fixed mapping for legacy numeric aENABLED indices -> associative keys
 	declare -ga LEGACY_INDEXED_BANNER_KEYS=(
 		device_model uptime cpu_temp hostname nis_domainname lan_ip wan_ip disk_rootfs disk_userdata weather custom_commands useful_commands motd vpn_status large_hostname print_credits letsencrypt ram_usage load_average word_wrap kernel network_usage disk_usage systemd_status fail2ban_status
 	)
+	# Fixed mapping for legacy numeric aCOLOUR indices -> associative keys
+	declare -ga LEGACY_INDEXED_COLOUR_KEYS=(
+		ACCENT STRONG WEAK ALERT GOOD HIGHLIGHT ALT
+	)
 	##############
-	## DO NOT CHANGE. THIS IS REQUIRED TO MAINTAIN LEGACY INDEX->KEY MAPPING FOR MIGRATION
+	## DO NOT CHANGE. THESE ARE REQUIRED TO MAINTAIN LEGACY INDEX->KEY MAPPING FOR MIGRATION
+	## Keeps a fixed index->key mapping to support numeric-index migration of aCOLOUR and aENABLED preferences.
 	##############
 
 	## Set default options
@@ -189,8 +232,10 @@
 	aDISK_SPACE_PATTERNS=("/" "/mnt/dietpi_userdata")
 
 	## Load user preferences
-	# Flag indicating whether a legacy numeric->associative migration happened during this run
+	# Flag indicating whether a legacy numeric->associative preference migration happened during this run
 	declare -g DIETPI_BANNER_MIGRATED_DURING_RUN=0
+	# Flag indicating whether a legacy numeric->associative colour migration happened during this run
+	declare -g DIETPI_BANNER_COLOUR_MIGRATED_DURING_RUN=0
 	# Override the above defaults as needed
 	DIETPI_BANNER_LOAD_PREFS
 
@@ -304,6 +349,7 @@
 
 		# Clear migration flag now that prefs are persisted
 		DIETPI_BANNER_MIGRATED_DURING_RUN=0
+		DIETPI_BANNER_COLOUR_MIGRATED_DURING_RUN=0
 		return 0
 	}
 
@@ -860,8 +906,10 @@ $CLI_LINE"
 		Print_Updates
 		(( ${aENABLED[useful_commands]} )) && Print_Useful_Commands
 
-		# Notify user if prefs were migrated from legacy numeric indices during this run
-		(( DIETPI_BANNER_MIGRATED_DURING_RUN )) && echo -e " ${aCOLOUR[HIGHLIGHT]}Banner needs to be migrated, run dietpi-banner and validate your settings.$COLOUR_RESET"
+		# Notify user if prefs or colors were migrated from legacy numeric indices during this run
+		if (( DIETPI_BANNER_MIGRATED_DURING_RUN )) || (( DIETPI_BANNER_COLOUR_MIGRATED_DURING_RUN )); then
+			echo -e " ${aCOLOUR[HIGHLIGHT]}Banner needs to be migrated, run dietpi-banner and validate your settings.$COLOUR_RESET"
+		fi
 	}
 
 	Print_Banner()
@@ -1014,7 +1062,7 @@ For example: '/mnt/*' or 're:^/mnt/.*/*$'"
 
 		# Before saving, create a backup of the existing prefs if migrating.
 		# FP_SAVEFILE gets truncated when calling Save() below, so we need to backup first.
-		if [[ -f "$FP_SAVEFILE" ]] && [[ $DIETPI_BANNER_MIGRATED_DURING_RUN == 1 ]]; then
+		if [[ -f "$FP_SAVEFILE" ]] && { [[ $DIETPI_BANNER_MIGRATED_DURING_RUN == 1 ]] || [[ $DIETPI_BANNER_COLOUR_MIGRATED_DURING_RUN == 1 ]]; }; then
 			backup="$FP_SAVEFILE.bak-$(date -Iseconds)"
 			cp -a "$FP_SAVEFILE" "$backup" || true
 		fi
