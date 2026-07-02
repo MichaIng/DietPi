@@ -25,6 +25,10 @@ Use `dietpi-services` to control which installed software has higher or lower pr
 
 `dietpi-update` automatically checks for updates and informs you when they are available. Update instantly, without having to write a new image. **DietPi automation** allows you to completely automate a DietPi installation with no user input, simply by configuring `dietpi.txt` before powering on.
 
+## Contributing
+
+See our [Contributing Guide](https://github.com/MichaIng/DietPi/blob/master/CONTRIBUTING.md) for details about how to contribute to the DietPi project.
+
 ## The DietPi Project Team
 
 The full list of code contributors can be viewed [here](https://github.com/MichaIng/DietPi/graphs/contributors).
@@ -135,30 +139,6 @@ Contributions to the DietPi in general, including source code and VirtualBox ima
 _Joined 2016-10-01_
 
 Created the first DietPi image for NanoPi M3/T3.
-
-## Contributing
-
-Git coders, please use the active development branch: [dev](https://github.com/MichaIng/DietPi/tree/dev)
-
-- [How to add a new software title to DietPi-Software](https://github.com/MichaIng/DietPi/wiki/How-to-add-a-new-software-title)
-
-Are you able to:
-
-- Provide feedback and/or test areas of DietPi, to improve the user experience?
-- Report bugs?
-- Improve/add more features to the [DietPi website](https://github.com/MichaIng/DietPi-Website) or [documentation](https://github.com/MichaIng/DietPi-Website)?
-- Compile software for our supported SBCs?
-- Contribute to DietPi with programming on GitHub?
-- Suggest new software that we can add to the `dietpi-software` install system?
-
-If so, let us know!
-We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
-
-- Send us an email: <micha@dietpi.com>
-- Join our forum: <https://dietpi.com/forum/>
-- GitHub: <https://github.com/MichaIng/DietPi>
-
-Also read our [contribute page](https://dietpi.com/contribute.html) for an overview of way to support DietPi.
 
 ## License
 
