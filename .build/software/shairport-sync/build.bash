@@ -4,7 +4,7 @@
 grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l'
 
 # Dependencies
-adeps_build=('automake' 'pkg-config' 'make' 'g++' 'libpopt-dev' 'libconfig-dev' 'libssl-dev' 'libsoxr-dev' 'libavahi-client-dev' 'libasound2-dev' 'libglib2.0-dev' 'libmosquitto-dev' 'avahi-daemon' 'git' 'libplist-dev' 'libsodium-dev' 'libgcrypt20-dev' 'libavformat-dev' 'xxd')
+adeps_build=('automake' 'pkg-config' 'make' 'g++' 'libpopt-dev' 'libconfig-dev' 'libssl-dev' 'libsoxr-dev' 'libavahi-client-dev' 'libasound2-dev' 'libglib2.0-dev' 'libmosquitto-dev' 'avahi-daemon' 'git' 'libplist-dev' 'libsodium-dev' 'libgcrypt20-dev' 'libavformat-dev' 'xxd' 'libplist-utils')
 adeps=('libc6' 'libavahi-client3' 'libsoxr0' 'libpopt0' 'libmosquitto1' 'avahi-daemon')
 adeps2=('libgcrypt20')
 case $G_DISTRO in
