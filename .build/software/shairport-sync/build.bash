@@ -45,7 +45,7 @@ G_EXEC rm "$version.tar.gz"
 G_DIETPI-NOTIFY 2 "Compiling $PRETTY"
 G_EXEC cd "$NAME-$version"
 G_EXEC_OUTPUT=1 G_EXEC autoreconf -fiW all
-CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --with-alsa --with-avahi --with-ssl=openssl --with-soxr --with-metadata --with-systemd-startup --with-dbus-interface --with-mpris-interface --with-mqtt-client --with-pipe --with-stdout --with-ffmpeg
+CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --with-alsa --with-avahi --with-ssl=openssl --with-soxr --with-metadata{,-pipe,-multicast} --with-systemd-startup --with-dbus-interface --with-mpris-interface --with-mqtt-client --with-pipe --with-stdout --with-ffmpeg
 G_EXEC_OUTPUT=1 G_EXEC make
 G_EXEC strip --remove-section=.comment --remove-section=.note "$NAME"
 
@@ -87,7 +87,12 @@ general =
 //				%v for the version number, e.g. 3.0 and
 //				%V for the full version string, e.g. 3.3-OpenSSL-Avahi-ALSA-soxr-metadata-sysconfdir:/etc
 //		Overall length can not exceed 50 characters. Example: "Shairport Sync %v on %H".
-//	password = "secret"; // (AirPlay 1 only) leave this commented out if you don't want to require a password
+//
+//	password = "secret"; // leave this commented out if you don't want to require a password
+//	About the "service_type" setting below: On an AirPlay-2-capable Shairport Sync, if you wish to offer only the older "classic" AirPlay (sometimes called AirPlay 1), set service_type to "classic".
+//	A potential use of this would be for Apple Music on Windows, which is not compatible with the AirPlay 2 service offered by Shairport Sync, but which is compatible with the classic service.
+//	The default is "auto", which means that the AirPlay 2 service will be provided if NQPTP is present and "classic" AirPlay will be provided otherwise, with "(Classic)" appended to the service name (see above).
+//	service_type = "auto"; // This can be "auto", "airplay2" or "classic".
 //	The interpolation setting below controls how Shairport Sync adds or removes frames of audio to keep in sync.
 //			"auto" (default) measures the processor's floating point speed and chooses "soxr" if available and it is fast enough. Otherwise, "vernier" is selected.
 //			"soxr" uses the SoX library to recode a packet of frames to a new packet containing more or fewer frames. This needs a processor with fast floating point capability.
@@ -453,7 +458,7 @@ G_EXEC strip --remove-section=.comment --remove-section=.note nqptp
 G_EXEC cd "../$NAME-$version"
 G_EXEC_OUTPUT=1 G_EXEC make clean
 G_EXEC_OUTPUT=1 G_EXEC autoreconf -fiW all
-CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --with-alsa --with-avahi --with-ssl=openssl --with-soxr --with-metadata --with-systemd-startup --with-dbus-interface --with-mpris-interface --with-mqtt-client --with-pipe --with-stdout --with-airplay-2
+CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --with-alsa --with-avahi --with-ssl=openssl --with-soxr --with-metadata{,-pipe,-multicast} --with-systemd-startup --with-dbus-interface --with-mpris-interface --with-mqtt-client --with-pipe --with-stdout --with-airplay-2
 G_EXEC_OUTPUT=1 G_EXEC make
 G_EXEC strip --remove-section=.comment --remove-section=.note "$NAME"
 
@@ -464,6 +469,9 @@ DIR=${DIR/sync_/sync-airplay2_}
 
 # Binary
 G_EXEC cp -a "$NAME-$version/$NAME" "$DIR/usr/local/bin/"
+
+# systemd service
+G_EXEC cp "$NAME-$version/scripts/$NAME.service" "$DIR/lib/systemd/system/"
 
 # NQPTP
 G_EXEC cp -a nqptp/nqptp "$DIR/usr/local/bin/"
