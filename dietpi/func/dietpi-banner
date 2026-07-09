@@ -184,7 +184,6 @@
 
 	# IP address detection (IPv4)
 	IP4_re='([0-9]{1,3}\.){3}[0-9]{1,3}'
-	IP4_re_cidr='([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}'
 
 	# DietPi version string
 	DIETPI_VERSION="$G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB.$G_DIETPI_VERSION_RC"
@@ -339,25 +338,23 @@ $CLI_LINE"
 		Get_Cert_Status_Raw()
 		{
 			# helper function so that we can run it with sudo in non-root mode without needing to export all the above functions and variables.
-			# also is `dash` compatible
+			# Keep it dash-compatible
 			local i
 			for i in /etc/letsencrypt/live/*/cert.pem
 			do
-				# disable shellcheck for 'require-double-brackets' so it is `dash` compatible
 				# shellcheck disable=SC2292
-				[[ -f $i ]] || continue
+				[ -f "$i" ] || continue
 				openssl x509 -enddate -noout -in "$i" | mawk '/notAfter=/{print "Valid until "$4"-"substr($1,10)"-"$2" "$3}'
 				return 0
 			done
-			return 1
+			echo 'No certificate found'
 		}
 
-		stat=
-		code=0
+		local stat code
 		if [[ $EUID == 0 ]]
 		then
 			# Running as root
-			stat=$(Get_Cert_Status_Raw 2> /dev/null)
+			stat=$(Get_Cert_Status_Raw 2>&1)
 			code=$?
 		else
 			# Running as non-root: Fail silently without NOPASSWD to avoid password prompt
@@ -367,75 +364,20 @@ $CLI_LINE"
 
 		case $code in
 			0)
-				# stat is valid
+				# Get_Cert_Status_Raw executed, process output
 				case $stat in
-					Valid*) stat="${aCOLOUR[weak]}$stat${COLOUR_RESET}";;
-					No\ certificate*) stat="${aCOLOUR[alert]}$stat${COLOUR_RESET}";;
-					*) stat="${aCOLOUR[highlight]}$stat${COLOUR_RESET}";;
+					'Valid until'*) stat="${aCOLOUR[weak]}$stat";; # valid cert, print line with weak color
+					'No certificate found') stat="${aCOLOUR[highlight]}$stat";; # highlight if there is no cert
+					*) stat="${aCOLOUR[alert]}$stat";; # alert if cert expired or there was another error
 				esac
 			;;
-			1) stat="${aCOLOUR[alert]}No certificate found${COLOUR_RESET}";;
-			2) stat="${aCOLOUR[highlight]}NOPASSWD sudo required${COLOUR_RESET}";;
-			*) stat="${aCOLOUR[highlight]}Unable to obtain cert status${COLOUR_RESET}";;
+			*)
+				# sudo failed, print meaningful error message
+				stat="${aCOLOUR[highlight]}NOPASSWD sudo required to obtain cert status"
+			;;
 		esac
 
 		echo "$stat"
-	}
-
-	Print_Credits()
-	{
-		echo -e " ${aCOLOUR[weak]}DietPi Team     : https://github.com/MichaIng/DietPi#the-dietpi-project-team"
-
-		[[ -f '/boot/dietpi/.prep_info' ]] && mawk 'NR==1 {sub(/^0$/,"DietPi Core Team");a=$0} NR==2 {print " Image by        : "a" (pre-image: "$0")"}' /boot/dietpi/.prep_info
-
-		echo -e " Patreon Legends : ADSB.im, Oliver C. Radke
- Website         : https://dietpi.com/ | https://x.com/DietPi_ | Bsky: @dietpi.com
- Contribute      : https://dietpi.com/contribute.html
- Web Hosting by  : https://login-online.com/$COLOUR_RESET\n"
-	}
-
-	Print_Updates()
-	{
-		# DietPi update available?
-		if [[ $AVAILABLE_UPDATE ]]
-		then
-			echo -e " ${aCOLOUR[strong]}dietpi-update$COLOUR_RESET   $CLI_SEPARATOR ${aCOLOUR[highlight]}Run now to update DietPi from v$DIETPI_VERSION to v$AVAILABLE_UPDATE$COLOUR_RESET\n"
-
-		# New DietPi live patches available?
-		elif (( $LIVE_PATCHES ))
-		then
-			echo -e " ${aCOLOUR[strong]}dietpi-update$COLOUR_RESET   $CLI_SEPARATOR ${aCOLOUR[highlight]}Run now to check out new available DietPi live patches$COLOUR_RESET\n"
-
-		# APT updates available?
-		elif (( $PACKAGE_COUNT ))
-		then
-			echo -e " ${aCOLOUR[strong]}apt upgrade$COLOUR_RESET     $CLI_SEPARATOR ${aCOLOUR[highlight]}Run now to apply $PACKAGE_COUNT available APT package upgrades$COLOUR_RESET\n"
-
-		# Reboot required to finalise kernel upgrade?
-		elif (( $REBOOT_REQUIRED ))
-		then
-			echo -e " ${aCOLOUR[strong]}reboot$COLOUR_RESET          $CLI_SEPARATOR ${aCOLOUR[alert]}A reboot is required to finalise a recent kernel upgrade$COLOUR_RESET\n"
-		fi
-	}
-
-	Print_Useful_Commands()
-	{
-		echo -e " ${aCOLOUR[strong]}dietpi-launcher$COLOUR_RESET $CLI_SEPARATOR All the DietPi programs in one place
- ${aCOLOUR[strong]}dietpi-config$COLOUR_RESET   $CLI_SEPARATOR Feature rich configuration tool for your device
- ${aCOLOUR[strong]}dietpi-software$COLOUR_RESET $CLI_SEPARATOR Select optimised software for installation
- ${aCOLOUR[strong]}htop$COLOUR_RESET            $CLI_SEPARATOR Resource monitor
- ${aCOLOUR[strong]}cpu$COLOUR_RESET             $CLI_SEPARATOR Shows CPU information and stats\n"
-	}
-
-	Print_Item_State()
-	{
-		# Print a single line item with green bullet, description "$1", green separator and state "$2"
-		# state should contain color and format codes as needed
-		local subtitle=$1
-		local state=$2
-		local width=${3:-}
-		local color=${aCOLOUR[strong]}
-		printf "%b%b %-${width}b %b %b\n" "$CLI_BULLET" "${color}" "$subtitle" "$CLI_SEPARATOR" "$state"
 	}
 
 	Get_Systemd_Status()
@@ -444,11 +386,10 @@ $CLI_LINE"
 		FAILED_CNT=$(systemctl --failed --no-legend --no-pager | wc -l 2> /dev/null)
 		if [[ ! $FAILED_CNT || $FAILED_CNT == 0 ]]
 		then
-			state="${aCOLOUR[weak]}No Services Failed${COLOUR_RESET}"
+			echo "${aCOLOUR[weak]}No services failed"
 		else
-			state="${aCOLOUR[alert]}$FAILED_CNT Service(s) Failed${COLOUR_RESET}"
+			echo "${aCOLOUR[alert]}$FAILED_CNT service(s) failed"
 		fi
-		echo "$state"
 	}
 
 	Get_Fail2Ban_Status()
@@ -459,28 +400,10 @@ $CLI_LINE"
 			then
 				if [[ $EUID == 0 ]]
 				then
-					f2b_output="$(fail2ban-client banned 2> /dev/null)"
+					fail2ban-client banned 2> /dev/null | mawk -F\' -v ip="^$IP4_re$" '{for(i=2;i<NF;i+=2){if($i ~ ip) a[$i]=1}} END{print length(a)}'
 				else
-					f2b_output="$(sudo -n fail2ban-client banned 2> /dev/null || return 2)"
-					[[ $? == 2 ]] && return 2
+					sudo -n fail2ban-client banned 2> /dev/null | mawk -F\' -v ip="^$IP4_re$" '{for(i=2;i<NF;i+=2){if($i ~ ip) a[$i]=1}} END{print length(a)}' || return 2
 				fi
-
-				if ! command -v sort > /dev/null 2>&1
-				then
-					sort() { cat; } # fallback if sort is not available, simply passes input through
-				fi
-
-				# get banned IP address count
-				IP_addrs="$(echo "$f2b_output" | grep -o '\[[^]]*\]' | grep -Eo "$IP4_re" | sort -u)"
-				if [[ ! "$IP_addrs" ]]
-				then
-					IP_addrs=
-					count_banned_ips=0
-				else
-					count_banned_ips="$(echo "$IP_addrs" | wc -l)" # | grep -cve '^[[:space:]]*$')"
-				fi
-				echo "$count_banned_ips"
-
 				return 0
 			else
 				# fail2ban-client command is not available
@@ -488,73 +411,53 @@ $CLI_LINE"
 			fi
 		}
 
+		local count_banned_ips
 		count_banned_ips=$(Get_Fail2Ban_Status_Raw)
 		code=$?
 
 		case $code in
 			0)
-				if [[ $count_banned_ips -eq 0 ]]
+				if (( $count_banned_ips == 0 ))
 				then
 					# zero bans can be suspicious - something may not be working correctly
-					state="${aCOLOUR[highlight]}No IP(s) Banned, check Fail2Ban state${COLOUR_RESET}"
+					state="${aCOLOUR[highlight]}No IPs banned, check Fail2Ban state"
+
+				elif (( $count_banned_ips > 20 ))
+				then
+					# high number of bans
+					state="${aCOLOUR[alert]}$count_banned_ips IP banned"
 				else
-					if [[ $count_banned_ips -gt 20 ]]
-					then
-						# high number of bans
-						state="${aCOLOUR[alert]}$count_banned_ips IP(s) Banned${COLOUR_RESET}"
-					else
-						# low number of bans
-						state="${aCOLOUR[weak]}$count_banned_ips IP(s) Banned${COLOUR_RESET}"
-					fi
+					# low number of bans
+					state="${aCOLOUR[weak]}$count_banned_ips IP(s) banned"
 				fi
 			;;
-			1) state="${aCOLOUR[alert]}fail2ban-client not available${COLOUR_RESET}";;
-			2) state="${aCOLOUR[highlight]}NOPASSWD sudo required to obtain Fail2Ban status${COLOUR_RESET}";;
-			*) state="${aCOLOUR[alert]}Unknown state, code: $code count: $count_banned_ips${COLOUR_RESET}";;
+			1) state="${aCOLOUR[alert]}fail2ban-client not available";;
+			2) state="${aCOLOUR[highlight]}NOPASSWD sudo required to obtain Fail2Ban status";;
+			*) state="${aCOLOUR[alert]}Unknown state, code: $code count: $count_banned_ips";;
 		esac
 
 		echo "$state"
 	}
 
-	# Print public IP address and location info
-	# - Optional arguments:
-	#   -t <timeout>:   Set timeout in seconds, supports floats, default: 3
-	#   -n <namespace>: Run curl in the given network namespace, e.g. to obtain the WAN IP of a specific
-	#                   network namespace, default: empty (no namespace = the main default namespace)
-	Get_WAN_IP()
+	Print_Network_Usage()
 	{
-		# Defaults
-		local timeout=3
-		local netns
-		# Inputs
-		while (( $# ))
-		do
-			case $1 in
-				'-t') shift; { (( ${1/.} )) && timeout=$1; } || { G_DIETPI-NOTIFY 1 "Invalid timeout \"$1\", aborting..."; return 1; };;
-				'-n') shift; netns="${1:-}";;
-				*) G_DIETPI-NOTIFY 1 "Invalid argument \"$1\", aborting..."; return 1;;
-			esac
-			shift
-		done
 
-		local ns_cmd_prefix=()
-		if [[ $netns ]]
-		then
-			# add sudo if not root
-			(( $EUID )) && ns_cmd_prefix+=(sudo -n)
-			# add netns prefix
-			ns_cmd_prefix+=(ip netns exec "$netns")
-		fi
+		# Get WAN IP for namespace $1 (default if empty)
+		Get_WAN_IP()
+		{
+			local ns_cmd_prefix=()
+			if [[ $1 ]]
+			then
+				# add sudo if not root
+				(( $EUID )) && ns_cmd_prefix+=(sudo -n)
+				# add netns prefix
+				ns_cmd_prefix+=(ip netns exec "$1")
+			fi
+			"${ns_cmd_prefix[@]}" curl -sSfLm 1 'https://dietpi.com/geoip'
+		}
 
-		"${ns_cmd_prefix[@]}" curl -sSfLm "$timeout" 'https://dietpi.com/geoip' 2>&1
-	}
-
-	Get_Network_Usage()
-	{
-		# Common error substrings to detect timeouts / DNS failures (lowercase for case-insensitive check)
-		local err_re='timed out|timeout|could not resolve|not known|unknown'
-
-		DATA_USAGE()
+		# Print usage stats for namespace $1 (default if empty)
+		Print_Data_Usage()
 		{
 			local netns=$1
 
@@ -570,7 +473,7 @@ $CLI_LINE"
 			fi
 
 			# Query interface list once inside the (optional) namespace and match names
-			mapfile -t observed_ifaces < <("${ns_cmd_prefix[@]}" ip -o link show 2> /dev/null | mawk -F': ' '{print $2}')
+			mapfile -t observed_ifaces < <("${ns_cmd_prefix[@]}" ip -br link 2> /dev/null | mawk '{print $1}')
 
 			for IFACE in "${observed_ifaces[@]}"
 			do
@@ -586,52 +489,38 @@ $CLI_LINE"
 					wlan*|wl*) :;;
 					# vpn/tunnel/virtual
 					tun*|wg*|vpn*) :;;
-					*) continue ;;
+					*) continue;;
 				esac
 
-				local RX='N/A' TX='N/A' rx tx ip_addr ip_addr_cidr
+				local RX='N/A' TX='N/A' rx tx ip_addr=' - No IP - ' ip_addr_cidr
 				local rx_path="/sys/class/net/$ifname/statistics/rx_bytes"
 				local tx_path="/sys/class/net/$ifname/statistics/tx_bytes"
 
-				if (( EUID != 0 )) && [ -z "$netns" ];
+				if [[ $netns ]];
 				then
-					# If we are not root and no netns is specified, check if we can read 
-					# the RX/TX statistics files directly, otherwise fall back to sudo
-					if [ -r "$rx_path" ];
-					then
-						rx=$(cat "$rx_path" 2> /dev/null)
-					else
-						# If we are not root and no netns is specified, use sudo
-						rx=$(sudo -n cat "$rx_path" 2> /dev/null)
-					fi
-
-					if [ -r "$tx_path" ];
-					then
-						tx=$(cat "$tx_path" 2> /dev/null)
-					else
-						tx=$(sudo -n cat "$tx_path" 2> /dev/null)
-					fi
-				else
-					# If we are root or a netns is specified, use the prefix to read the RX/TX statistics files
+					# If a netns is specified, use the prefix to read the RX/TX statistics files.
 					rx=$("${ns_cmd_prefix[@]}" cat "$rx_path" 2> /dev/null)
 					tx=$("${ns_cmd_prefix[@]}" cat "$tx_path" 2> /dev/null)
+				else
+					# Else, read the RX/TX statistics files directly.
+					read -r rx < "$rx_path"
+					read -r tx < "$tx_path"
 				fi
 
 				# Process the RX/TX values to convert to GiB if they are numeric, otherwise leave as 'N/A'
 				[[ $rx =~ ^[0-9]+$ ]] && RX="$(mawk -v v="$rx" 'BEGIN{printf "%.2f", v/(1024^3)}') GiB"
 				[[ $tx =~ ^[0-9]+$ ]] && TX="$(mawk -v v="$tx" 'BEGIN{printf "%.2f", v/(1024^3)}') GiB"
 
-				# Get IP address (IPv4) for this interface in this namespace. If multiple are present, just take the first. If none, show "- No IP -"
-				ip_addr=' - No IP - '
-				ip_addr_cidr=$("${ns_cmd_prefix[@]}" ip -o -4 addr show dev "$ifname" scope global 2> /dev/null | mawk '{print $4}' | head -1 | grep -E "$IP4_re_cidr")
+				# Get first IPv4 address for this interface in this namespace. If none, leave "- No IP -".
+				ip_addr_cidr=$("${ns_cmd_prefix[@]}" ip -br -4 addr show dev "$ifname" scope global 2> /dev/null | mawk -v re="^$IP4_re/[0-9]{1,2}$" '$3 ~ re {print $3;exit}')
 				[[ $ip_addr_cidr ]] && ip_addr=${ip_addr_cidr%%/*}
 
 				[[ $RX == 'N/A' && $TX == 'N/A' ]] && continue
-				printf '%s %s%-20s %s%s TX= %11s  RX= %11s%s\n' "$CLI_BULLET" "${aCOLOUR[weak]}" "$ip_addr ($ifname)" "$CLI_SEPARATOR" "${aCOLOUR[weak]}" "$TX" "$RX" "$COLOUR_RESET"
+				echo -e "$CLI_BULLET ${aCOLOUR[weak]}$ip_addr ($ifname) $CLI_SEPARATOR ${aCOLOUR[weak]}TX=$TX RX=$RX"
 			done
 		}
 
-		mapfile -t namespaces < <(ip netns ls | mawk 'NF>1 { print $1 }')
+		mapfile -t namespaces < <(ip netns ls | mawk 'NF>1 {print $1}')
 		# Prepend an empty entry so the default (root) namespace can be handled in the loop
 		namespaces=('' "${namespaces[@]}")
 
@@ -640,51 +529,32 @@ $CLI_LINE"
 			raw_ns=${ns:-default}
 			display_ns=$(G_TRUNCATE_MID "$raw_ns" 24)
 
-			IP=$(Get_WAN_IP -t 1 -n "$ns" 2>&1)
+			IP=$(Get_WAN_IP "$ns" 2>&1)
 
-			if [[ $IP =~ $IP4_re ]]
+			if [[ $IP =~ ^$IP4_re ]]
 			then
 				# Valid IP detected, keep as-is and print with namespace
 
 				# Extract just the IP portion (use BASH_REMATCH[0]). Removes the geographic info.
 				#IP=${BASH_REMATCH[0]}
 
-				printf ' %s%s [%s]%s\n' "${aCOLOUR[alt]}" "$IP" "$display_ns" "$COLOUR_RESET"
+				echo -e "${aCOLOUR[alt]} $IP [$display_ns]"
 
 			elif [[ ! $IP ]]
 			then
-				# If the IP is empty, it likely means the namespace is disconnected or has no internet access. Print status message.
-				printf '%s %s %s %s%s%s\n' "${aCOLOUR[alert]}" 'Disconnected' "$CLI_SEPARATOR" "${aCOLOUR[strong]}" "$display_ns" "$COLOUR_RESET"
+				# If the IP is empty, it likely means the namespace is disconnected or has no Internet access. Print status message.
+				echo -e "${aCOLOUR[alert]} Disconnected $CLI_SEPARATOR ${aCOLOUR[strong]}$display_ns"
 
 			else
-				# Treat known curl/network error messages as timeout/DNS failures
-				[[ $IP =~ $err_re ]] && IP='Timeout/DNS Failure'
-
-				# If the IP contains an unknown or error message, print it with the namespace
-				printf ' %s%s [%s]%s\n' "${aCOLOUR[highlight]}" "$IP" "$display_ns" "$COLOUR_RESET"
+				# Print curl errors as is
+				echo -e "${aCOLOUR[highlight]} $IP [$display_ns]"
 			fi
 
-			DATA_USAGE "$ns"
+			Print_Data_Usage "$ns"
 		done
 	}
 
-	Print_Custom_Commands()
-	{
-		for i in "${!aCUSTOM_COMMANDS[@]}"
-		do
-			[[ ${aCUSTOM_COMMANDS[$i]} ]] || continue
-			output=$(eval "${aCUSTOM_COMMANDS[$i]}" 2>&1)
-			status=$?
-			if (( $status ))
-			then
-				printf '%b\n' "${aCOLOUR[alert]}Error executing aCUSTOM_COMMANDS[$i] Exit Code: ${status}${COLOUR_RESET}"
-			else
-				printf '%b\n' "$output"
-			fi
-		done
-	}
-
-	Get_Disk_Usage()
+	Print_Disk_Usage()
 	{
 		# If no arguments are provided, default to '"/" "/mnt/*"'.
 		(( $# )) && aDISK_SPACE_PATTERNS=("$@")
@@ -801,6 +671,76 @@ $CLI_LINE"
 		echo "$state"
 	}
 
+	Print_Custom_Commands()
+	{
+		local output status
+		for i in "${!aCUSTOM_COMMANDS[@]}"
+		do
+			[[ ${aCUSTOM_COMMANDS[$i]} ]] || continue
+			output=$(eval "${aCUSTOM_COMMANDS[$i]}" 2>&1)
+			status=$?
+			if (( $status ))
+			then
+				echo -e "${aCOLOUR[alert]}Custom command $i failed ($status): $output"
+			else
+				echo -e "$output"
+			fi
+		done
+	}
+
+	Print_Credits()
+	{
+		echo -e " ${aCOLOUR[weak]}DietPi Team     : https://github.com/MichaIng/DietPi#the-dietpi-project-team"
+
+		[[ -f '/boot/dietpi/.prep_info' ]] && mawk 'NR==1 {sub(/^0$/,"DietPi Core Team");a=$0} NR==2 {print " Image by        : "a" (pre-image: "$0")"}' /boot/dietpi/.prep_info
+
+		echo -e " Patreon Legends : ADSB.im, Oliver C. Radke
+ Website         : https://dietpi.com/ | https://x.com/DietPi_ | Bsky: @dietpi.com
+ Contribute      : https://dietpi.com/contribute.html
+ Web Hosting by  : https://login-online.com/$COLOUR_RESET\n"
+	}
+
+	Print_Updates()
+	{
+		# DietPi update available?
+		if [[ $AVAILABLE_UPDATE ]]
+		then
+			echo -e " ${aCOLOUR[strong]}dietpi-update$COLOUR_RESET   $CLI_SEPARATOR ${aCOLOUR[highlight]}Run now to update DietPi from v$DIETPI_VERSION to v$AVAILABLE_UPDATE$COLOUR_RESET\n"
+
+		# New DietPi live patches available?
+		elif (( $LIVE_PATCHES ))
+		then
+			echo -e " ${aCOLOUR[strong]}dietpi-update$COLOUR_RESET   $CLI_SEPARATOR ${aCOLOUR[highlight]}Run now to check out new available DietPi live patches$COLOUR_RESET\n"
+
+		# APT updates available?
+		elif (( $PACKAGE_COUNT ))
+		then
+			echo -e " ${aCOLOUR[strong]}apt upgrade$COLOUR_RESET     $CLI_SEPARATOR ${aCOLOUR[highlight]}Run now to apply $PACKAGE_COUNT available APT package upgrades$COLOUR_RESET\n"
+
+		# Reboot required to finalise kernel upgrade?
+		elif (( $REBOOT_REQUIRED ))
+		then
+			echo -e " ${aCOLOUR[strong]}reboot$COLOUR_RESET          $CLI_SEPARATOR ${aCOLOUR[alert]}A reboot is required to finalise a recent kernel upgrade$COLOUR_RESET\n"
+		fi
+	}
+
+	Print_Useful_Commands()
+	{
+		echo -e " ${aCOLOUR[strong]}dietpi-launcher$COLOUR_RESET $CLI_SEPARATOR All the DietPi programs in one place
+ ${aCOLOUR[strong]}dietpi-config$COLOUR_RESET   $CLI_SEPARATOR Feature rich configuration tool for your device
+ ${aCOLOUR[strong]}dietpi-software$COLOUR_RESET $CLI_SEPARATOR Select optimised software for installation
+ ${aCOLOUR[strong]}htop$COLOUR_RESET            $CLI_SEPARATOR Resource monitor
+ ${aCOLOUR[strong]}cpu$COLOUR_RESET             $CLI_SEPARATOR Shows CPU information and stats\n"
+	}
+
+	Print_Item_State()
+	{
+		# Print a single line item with green bullet, description "$1", green separator and state "$2"
+		# state should contain color and format codes as needed
+		local subtitle=$1 state=$2 width=$3
+		printf "%b%b %-${width}b %b %b\n" "$CLI_BULLET" "${aCOLOUR[strong]}" "$subtitle" "$CLI_SEPARATOR" "$state"
+	}
+
 	Print_Banner_raw()
 	{
 		Print_Header
@@ -827,7 +767,7 @@ $CLI_LINE"
 		# LAN IP
 		(( ${aENABLED[lan_ip]} )) && Print_Item_State "${aDESCRIPTION[lan_ip]}" "$(Get_Local_Ip 2>&1)"
 		# WAN IP + location info
-		(( ${aENABLED[wan_ip]} )) && Print_Item_State "${aDESCRIPTION[wan_ip]}" "$(Get_WAN_IP 2>&1)"
+		(( ${aENABLED[wan_ip]} )) && Print_Item_State "${aDESCRIPTION[wan_ip]}" "$(G_GET_WAN_IP 2>&1)"
 		# DietPi-VPN connection status
 		(( ${aENABLED[vpn_status]} )) && Print_Item_State "${aDESCRIPTION[vpn_status]}" "$(Get_VPN_Status 2>&1)"
 		# Disk usage (RootFS)
@@ -844,13 +784,13 @@ $CLI_LINE"
 		(( ${aENABLED[fail2ban_status]} )) && Print_Item_State "${aDESCRIPTION[fail2ban_status]}" "$(Get_Fail2Ban_Status 2>&1)"
 
 		# Network usage by namespace
-		# %b required so that percent symbols are not interpreted as format specifiers by printf
-		(( ${aENABLED[network_usage]} )) && Print_Subheader "Network Traffic" && printf '%b\n' "$(Get_Network_Usage 2>&1)"
-		# Disk Usage
-		(( ${aENABLED[disk_usage]} )) && Print_Subheader "Disk Usage" && printf '%b\n' "$(Get_Disk_Usage "${aDISK_SPACE_PATTERNS[@]}" 2>&1)"
+		(( ${aENABLED[network_usage]} )) && Print_Subheader 'Network Traffic' && Print_Network_Usage 2>&1
+
+		# Disk usage
+		(( ${aENABLED[disk_usage]} )) && Print_Subheader 'Disk Usage' && Print_Disk_Usage "${aDISK_SPACE_PATTERNS[@]}" 2>&1
 
 		# Custom commands
-		(( ${aENABLED[custom_commands]} )) && Print_Subheader "Custom Commands" && Print_Custom_Commands
+		(( ${aENABLED[custom_commands]} )) && Print_Subheader 'Custom Commands' && Print_Custom_Commands
 
 		# Separator line
 		(( ${aENABLED[useful_commands]} || ${aENABLED[motd]} || ${aENABLED[print_credits]} )) && echo -e "$CLI_LINE"
