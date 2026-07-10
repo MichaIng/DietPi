@@ -203,10 +203,13 @@ Below are minimal, copy-paste-ready examples that follow DietPi conventions.
   ```
   G_TRUNCATE_MID "Long text to be shortened by removing the middle" 26
   # -> "Long text to... the middle"
-	G_TRUNCATE_MID "Long text" 5
-  # -> "L...t"
-	G_TRUNCATE_MID "Text" 3
-  # -> "Tex"
+
+  # And `G_TRUNCATE_MID "alphabetical" N` returns the below, as N decreases
+  # alp...al
+  # al...al
+  # alphab
+  # alpha
+  # ... and so on
   ```
 
 - `Save()` persistence pattern (follow dietpi-banner conventions):
