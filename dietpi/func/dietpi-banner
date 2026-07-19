@@ -553,105 +553,124 @@ $CLI_LINE"
 
 	Print_Disk_Usage()
 	{
-		# If no arguments are provided, default to '"/" "/mnt/*"'.
-		(( $# )) && aDISK_SPACE_PATTERNS=("$@")
+		local length=0 results=() explicit_mounts=() match_patterns=()
+		local -A seen=()
 
-		# TODO: is there a more efficient reader than df (stat?)
-		# Use df's output to parse numeric fields (kB units) for mounts matching the supplied patterns
-		local length=0 results=() size_kb used_kb avail_kb mnt_target name matched basename
-		while read -r size_kb used_kb avail_kb mnt_target
+		# Split patterns: explicit (no glob, not regex) vs others (glob or re:)
+		for pattern in "${aDISK_SPACE_PATTERNS[@]}"
 		do
-			matched=0
-			basename=
-			for pattern in "${aDISK_SPACE_PATTERNS[@]}"
-			do
-				# If the user supplies a pattern prefixed with 're:' treat it as regex
-				if [[ $pattern == 're:'* ]]
-				then
-					re=${pattern#re:}
-					if [[ $mnt_target =~ $re ]]
-					then
-						matched=1
-						basename=$(basename "$mnt_target")
-						break
-					fi
-				else
-					# Otherwise, treat it as a shell glob pattern and match using "case"
-					# shellcheck disable=SC2254 # disable shellcheck for $pattern in case statement
-					case "$mnt_target" in
-						$pattern)
-							matched=1
-							basename=$(basename "$mnt_target")
-							break
-						;;
-						*) :;;
-					esac
-				fi
-			done
-			if (( $matched ))
+			if [[ $pattern == 're:'* ]]
 			then
-				len=${#basename}
-				(( $len > $length )) && length=$len
-				results+=("$size_kb|$used_kb|$avail_kb|$mnt_target|$basename")
+				# This is a regex pattern, add to match_patterns
+				match_patterns+=("$pattern")
+			elif [[ $pattern == *'*'* || $pattern == *'?'* || $pattern == *'['* ]]
+			then
+				# This is a glob pattern, add to match_patterns
+				match_patterns+=("$pattern")
+			else
+				# This is an explicit mount path, add to explicit_mounts
+				explicit_mounts+=("$pattern")
 			fi
-		done < <(df -k --output=size,used,avail,target | tail +2)
+		done
 
-		# Print results with aligned columns, converting KiB to GiB and calculating percentage used
+		if (( ${#explicit_mounts[@]} == 0 && ${#match_patterns[@]} == 0 ))
+		then
+			echo -e "${aCOLOUR[highlight]}No disk patterns provided, nothing to display."
+			return
+		fi
+
+		# Convert bytes to GiB (IEC) with one decimal — returns numeric string like "62.8"
+		Bytes_To_GiB()
+		{
+			local bytes=$1
+			if [[ $bytes =~ ^[0-9]+$ ]]
+			then
+				# Use mawk for consistent floating-point formatting
+				mawk -v v="$bytes" 'BEGIN{printf "%.1f", v/(1024^3)}'
+			else
+				echo '???'
+			fi
+		}
+
+		local -a mount_order=() mount_lines
+		declare -A mount_used mount_size mount_perc mount_name
+		local line mnt_target used size perc name
+
+		# Pull all mounts once (-D -n -r) in bytes (-b). Rebuild TARGET safely
+		# (handles spaces) and compute USE% with one decimal using mawk from USED/SIZE.
+		mapfile -t mount_lines < <(findmnt -b -Dnro TARGET,USED,SIZE --real 2>/dev/null | mawk '{used=$(NF-1); size=$NF; target=$1; for(i=2;i<=NF-2;i++) target=target" "$i; perc=(size>0? used/size*100 : 0); printf "%s|%s|%s|%s\n", target, used, size, sprintf("%.1f%%", perc)}')
+
+		# Keep mount_order[] to preserve findmnt's (consistent) order and aDISK_SPACE_PATTERNS' order.
+		for line in "${mount_lines[@]}"
+		do
+			# Each line is: TARGET|USED|SIZE|USE%
+			IFS='|' read -r mnt_target used size perc <<< "$line"
+			mount_used["$mnt_target"]="$used"
+			mount_size["$mnt_target"]="$size"
+			mount_perc["$mnt_target"]="$perc"
+			mount_name["$mnt_target"]="$(basename "$mnt_target")"
+			mount_order+=("$mnt_target")
+		done
+
+		# Iterate mounts in the original findmnt order and match against patterns.
+		for mnt_target in "${mount_order[@]}"
+		do
+			# Skip mounts we've already added (avoids duplicates when patterns overlap)
+			[[ ${seen[$mnt_target]} ]] && continue
+			matched=0
+
+			# Test against explicit exact-match patterns (highest precedence)
+			for p in "${explicit_mounts[@]}"
+			do
+				[[ "$mnt_target" == "$p" ]] && { matched=1; break; }
+			done
+
+			# If not matched yet, test globs and regex patterns from match_patterns
+			if (( matched == 0 ))
+			then
+				for pattern in "${match_patterns[@]}"
+				do
+					if [[ $pattern == 're:'* ]]
+					then
+						re=${pattern#re:}
+						if [[ $mnt_target =~ $re ]]
+						then
+							matched=1; break
+						fi
+					else
+						case "$mnt_target" in
+							$pattern) matched=1; break;;
+							*) :;;
+						esac
+					fi
+				done
+			fi
+
+			if (( matched ))
+			then
+				used="${mount_used[$mnt_target]}"
+				size="${mount_size[$mnt_target]}"
+				perc="${mount_perc[$mnt_target]}"
+				name="${mount_name[$mnt_target]}"
+
+				# Convert raw bytes to GiB (IEC) numeric strings for display
+				used_fmt="$(Bytes_To_GiB "$used")"
+				size_fmt="$(Bytes_To_GiB "$size")"
+
+				# Mark seen, update name-width and collect formatted result
+				seen[$mnt_target]=1
+				(( ${#name} > length )) && length=${#name}
+				results+=("$mnt_target|$used_fmt|$size_fmt|$perc|$name")
+			fi
+		done
+
+		# Print results using the user-friendly GiB strings collected above.
+		# Each `results` entry is: TARGET|USED_GiB|SIZE_GiB|USE%|NAME
 		for entry in "${results[@]}"
 		do
-			IFS='|' read -r size_kb used_kb avail_kb mnt_target name <<< "$entry"
-
-			local values_count=0
-			# Do all math in KiB, convert to GiB for display and round to 1 decimal
-			if [[ $size_kb =~ ^[0-9]+$ ]]
-			then
-				((values_count++))
-				size_gb=$(mawk "BEGIN {printf \"%.1f \", $size_kb/1024/1024}")
-			else
-				if [[ $used_kb =~ ^[0-9]+$ && $avail_kb =~ ^[0-9]+$ ]]
-				then
-					# If used and available are available, calculate size as used + available
-					size_kb=$(( $used_kb + $avail_kb ))
-					size_gb=$(mawk "BEGIN {printf \"%.1f \", ($size_kb)/1024/1024}")
-				else
-					size_gb='???'
-				fi
-			fi
-
-			if [[ $used_kb =~ ^[0-9]+$ ]]
-			then
-				((values_count++))
-				used_gb=$(mawk "BEGIN {printf \"%.1f \", $used_kb/1024/1024}")
-			else
-				if [[ $size_kb =~ ^[0-9]+$ && $avail_kb =~ ^[0-9]+$ ]]
-				then
-					# If size and available are available, calculate used as size - available
-					used_kb=$(( $size_kb - $avail_kb ))
-					used_gb=$(mawk "BEGIN {printf \"%.1f \", ($used_kb)/1024/1024}")
-				else
-					used_gb='???'
-				fi
-			fi
-
-			if [[ $avail_kb =~ ^[0-9]+$ ]]
-			then
-				((values_count++))
-			else
-				# If size and used are available, calculate available as size - used
-				[[ $size_kb =~ ^[0-9]+$ && $used_kb =~ ^[0-9]+$ ]] && avail_kb=$(( $size_kb - $used_kb ))
-			fi
-
-			# Calculate percentage used based on available data:
-			if (( $values_count > 1 ))
-			then
-				# this should match the `df` output
-				perc=$(mawk "BEGIN {printf \"%.1f%%\", ($used_kb/($used_kb+$avail_kb))*100}")
-			else
-				perc='?? %'  # default unknown value
-			fi
-
-			# Print aligned columns: {basename} : ({percent used}) : {used} of {size}
-			printf "%b %b%-${length}s  %b %b%6s %b %b%8sGiB of %8sGiB\n" "$CLI_BULLET" "${aCOLOUR[alt]}" "$name" "$CLI_SEPARATOR" "${aCOLOUR[strong]}" "$perc" "$CLI_SEPARATOR" "${aCOLOUR[weak]}" "$used_gb" "$size_gb"
+			IFS='|' read -r mnt_target used size perc name <<< "$entry"
+			# Print aligned columns: {basename} : {percent used} : {used} of {size}
+			printf "%b %b%-${length}s %b %b%6s %b %b%8sGiB of %8sGiB\n" "$CLI_BULLET" "${aCOLOUR[alt]}" "$name" "$CLI_SEPARATOR" "${aCOLOUR[strong]}" "$perc" "$CLI_SEPARATOR" "${aCOLOUR[weak]}" "$used" "$size"
 		done
 	}
 
@@ -780,7 +799,7 @@ $CLI_LINE"
 		# Network usage by namespace
 		(( ${aENABLED[network_usage]} )) && Print_Subheader 'Network Traffic' && Print_Network_Usage 2>&1
 		# Disk usage
-		(( ${aENABLED[disk_usage]} )) && Print_Subheader 'Disk Usage' && Print_Disk_Usage "${aDISK_SPACE_PATTERNS[@]}" 2>&1
+		(( ${aENABLED[disk_usage]} )) && Print_Subheader 'Disk Usage' && Print_Disk_Usage 2>&1
 		# Custom commands
 		(( ${aENABLED[custom_commands]} )) && Print_Subheader 'Custom Commands' && Print_Custom_Commands
 
