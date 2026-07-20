@@ -590,13 +590,14 @@ $CLI_LINE"
 
 		# Pull all mounts once (-D -n -r) in bytes (-b). Rebuild TARGET safely
 		# (handles spaces) and compute USE% with one decimal using mawk from USED/SIZE.
-		mapfile -t mount_lines < <(findmnt -b -Dnro TARGET,USED,SIZE --real 2>/dev/null | mawk '{used=$(NF-1); size=$NF; target=$1; for(i=2;i<=NF-2;i++) target=target" "$i; perc=(size>0? used/size*100 : 0); printf "%s|%s|%s|%s\n", target, used, size, sprintf("%.1f%%", perc)}')
+		# Use ASCII Unit Separator (0x1F) as a safe field delimiter to avoid collisions with mount names
+		mapfile -t mount_lines < <(findmnt -b -Dnro TARGET,USED,SIZE --real 2>/dev/null | mawk -v SEP="$(printf '\037')" '{used=$(NF-1); size=$NF; target=$1; for(i=2;i<=NF-2;i++) target=target" "$i; perc=(size>0? used/size*100 : 0); printf "%s%s%s%s%s%s%s\n", target, SEP, used, SEP, size, SEP, sprintf("%.1f%%", perc)}')
 
 		# Keep mount_order[] to preserve findmnt's (consistent) order and aDISK_SPACE_PATTERNS' order.
 		for line in "${mount_lines[@]}"
 		do
-			# Each line is: TARGET|USED|SIZE|USE%
-			IFS='|' read -r mnt_target used size perc <<< "$line"
+			# Each line fields are separated by ASCII Unit Separator (0x1F): TARGET<US>USED<US>SIZE<US>USE%
+			IFS=$'\x1f' read -r mnt_target used size perc <<< "$line"
 			mount_used["$mnt_target"]="$used"
 			mount_size["$mnt_target"]="$size"
 			mount_perc["$mnt_target"]="$perc"
@@ -607,8 +608,6 @@ $CLI_LINE"
 		# Iterate mounts in the original findmnt order and match against patterns.
 		for mnt_target in "${mount_order[@]}"
 		do
-			# Skip mounts we've already added (avoids duplicates when patterns overlap)
-			[[ ${seen[$mnt_target]} ]] && continue
 			matched=0
 
 			# Test against explicit exact-match patterns (highest precedence)
@@ -630,6 +629,7 @@ $CLI_LINE"
 							matched=1; break
 						fi
 					else
+						# shellcheck disable=SC2254
 						case "$mnt_target" in
 							$pattern) matched=1; break;;
 							*) :;;
@@ -649,9 +649,9 @@ $CLI_LINE"
 				used_fmt="$(Bytes_To_GiB "$used")"
 				size_fmt="$(Bytes_To_GiB "$size")"
 
-				# Mark seen, update name-width and collect formatted result
+				# Mark seen and collect formatted result (fields separated by ASCII Unit Separator)
 				seen[$mnt_target]=1
-				results+=("$mnt_target|$used_fmt|$size_fmt|$perc|$name")
+				results+=("$mnt_target"$'\x1f'"$used_fmt"$'\x1f'"$size_fmt"$'\x1f'"$perc"$'\x1f'"$name")
 			fi
 		done
 
@@ -661,22 +661,33 @@ $CLI_LINE"
 			return
 		fi
 
+		# For explicit mounts configured but not present in findmnt, add placeholder entries
+		# at the bottom of the list.
+		for p in "${aDISK_SPACE_MOUNTS[@]}"
+		do
+			[[ -n "$p" && -z ${seen[$p]} ]] || continue
+			used_fmt="???"
+			size_fmt="???"
+			perc="${aCOLOUR[alert]}??????${COLOUR_RESET}"
+			name="$(basename "$p")"
+			results+=("$p"$'\x1f'"$used_fmt"$'\x1f'"$size_fmt"$'\x1f'"$perc"$'\x1f'"$name")
+		done
+
 		# Disambiguate duplicate basenames: if multiple mounts share the same
 		# basename (e.g. /tmp and /mnt/tmp), show the full path for those entries
 		# so the user can tell them apart. Compute display widths accordingly.
 		declare -A name_count=()
 		for entry in "${results[@]}"
 		do
-			IFS='|' read -r mnt_target used size perc name <<< "$entry"
+			IFS=$'\x1f' read -r mnt_target used size perc name <<< "$entry"
 			(( name_count["$name"]++ ))
 		done
 
-		# Compute `length` based on the display name (basename or full path)
 		length=0
 		for i in "${!results[@]}"
 		do
 			entry=${results[$i]}
-			IFS='|' read -r mnt_target used size perc name <<< "$entry"
+			IFS=$'\x1f' read -r mnt_target used size perc name <<< "$entry"
 			if (( name_count["$name"] > 1 ))
 			then
 				dname="$(G_TRUNCATE_MID "$mnt_target" 30)"
@@ -684,16 +695,15 @@ $CLI_LINE"
 				dname="$(G_TRUNCATE_MID "$name" 30)"
 			fi
 			(( ${#dname} > length )) && length=${#dname}
-			results[$i]="$mnt_target|$used|$size|$perc|$dname"
+			results[$i]="$mnt_target"$'\x1f'"$used"$'\x1f'"$size"$'\x1f'"$perc"$'\x1f'"$dname"
 		done
 
-		# Print results using the user-friendly GiB strings collected above.
-		# Each `results` entry is: TARGET|USED_GiB|SIZE_GiB|USE%|NAME
+		# Print results
 		for entry in "${results[@]}"
 		do
-			IFS='|' read -r mnt_target used size perc name <<< "$entry"
+			IFS=$'\x1f' read -r mnt_target used size perc name <<< "$entry"
 			# Print aligned columns: {name} : {percent used} : {used} of {size}
-			printf "%b %b%-${length}s %b %b%6s %b %b%8sGiB of %8sGiB\n" "$CLI_BULLET" "${aCOLOUR[alt]}" "$name" "$CLI_SEPARATOR" "${aCOLOUR[strong]}" "$perc" "$CLI_SEPARATOR" "${aCOLOUR[weak]}" "$used" "$size"
+			printf "%b %b%-${length}s %b %b%6b %b %b%7s GiB of %7s GiB\n" "$CLI_BULLET" "${aCOLOUR[alt]}" "$name" "$CLI_SEPARATOR" "${aCOLOUR[strong]}" "$perc" "$CLI_SEPARATOR" "${aCOLOUR[weak]}" "$used" "$size"
 		done
 	}
 
