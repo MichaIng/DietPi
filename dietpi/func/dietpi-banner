@@ -118,8 +118,9 @@
 	# Set default custom patterns and commands
 	# shellcheck disable=SC2016
 	aCUSTOM_COMMANDS[0]='echo -e "$CLI_BULLET ${aCOLOUR[alert]}Hello ${aCOLOUR[good]}World! ${COLOUR_RESET} :)"'
-	# Default disk patterns
-	aDISK_SPACE_PATTERNS=('/' '/mnt/dietpi_userdata')
+	# Default disk mounts (explicit paths) and patterns (globs/regex)
+	aDISK_SPACE_MOUNTS=()
+	aDISK_SPACE_PATTERNS=()
 
 	# Load settings here, to have chosen custom CLI colours applied
 	# shellcheck disable=SC1090
@@ -263,7 +264,15 @@
 			echo "aCOLOUR[$i]='$esc'"
 		done
 
-		# Persist aDISK_SPACE_PATTERNS (indices 0..N)
+		# Persist aDISK_SPACE_MOUNTS (explicit mount paths, indices 0..N)
+		for i in "${!aDISK_SPACE_MOUNTS[@]}"
+		do
+			mount=${aDISK_SPACE_MOUNTS[$i]}
+			mount=${mount//\'/\\\'}
+			echo "aDISK_SPACE_MOUNTS[$i]='$mount'"
+		done
+
+		# Persist aDISK_SPACE_PATTERNS (glob/regex patterns, indices 0..N)
 		for i in "${!aDISK_SPACE_PATTERNS[@]}"
 		do
 			patt=${aDISK_SPACE_PATTERNS[$i]}
@@ -553,27 +562,10 @@ $CLI_LINE"
 
 	Print_Disk_Usage()
 	{
-		local length=0 results=() explicit_mounts=() match_patterns=()
+		local results=()
 		local -A seen=()
 
-		# Split patterns: explicit (no glob, not regex) vs others (glob or re:)
-		for pattern in "${aDISK_SPACE_PATTERNS[@]}"
-		do
-			if [[ $pattern == 're:'* ]]
-			then
-				# This is a regex pattern, add to match_patterns
-				match_patterns+=("$pattern")
-			elif [[ $pattern == *'*'* || $pattern == *'?'* || $pattern == *'['* ]]
-			then
-				# This is a glob pattern, add to match_patterns
-				match_patterns+=("$pattern")
-			else
-				# This is an explicit mount path, add to explicit_mounts
-				explicit_mounts+=("$pattern")
-			fi
-		done
-
-		if (( ${#explicit_mounts[@]} == 0 && ${#match_patterns[@]} == 0 ))
+		if (( ${#aDISK_SPACE_MOUNTS[@]} == 0 && ${#aDISK_SPACE_PATTERNS[@]} == 0 ))
 		then
 			echo -e "${aCOLOUR[highlight]}No disk patterns provided, nothing to display."
 			return
@@ -620,7 +612,7 @@ $CLI_LINE"
 			matched=0
 
 			# Test against explicit exact-match patterns (highest precedence)
-			for p in "${explicit_mounts[@]}"
+			for p in "${aDISK_SPACE_MOUNTS[@]}"
 			do
 				[[ "$mnt_target" == "$p" ]] && { matched=1; break; }
 			done
@@ -628,7 +620,7 @@ $CLI_LINE"
 			# If not matched yet, test globs and regex patterns from match_patterns
 			if (( matched == 0 ))
 			then
-				for pattern in "${match_patterns[@]}"
+				for pattern in "${aDISK_SPACE_PATTERNS[@]}"
 				do
 					if [[ $pattern == 're:'* ]]
 					then
@@ -659,9 +651,40 @@ $CLI_LINE"
 
 				# Mark seen, update name-width and collect formatted result
 				seen[$mnt_target]=1
-				(( ${#name} > length )) && length=${#name}
 				results+=("$mnt_target|$used_fmt|$size_fmt|$perc|$name")
 			fi
+		done
+
+		if (( ${#results[@]} == 0 ))
+		then
+			echo -e "${aCOLOUR[highlight]}No mounts were matched, check your configuration."
+			return
+		fi
+
+		# Disambiguate duplicate basenames: if multiple mounts share the same
+		# basename (e.g. /tmp and /mnt/tmp), show the full path for those entries
+		# so the user can tell them apart. Compute display widths accordingly.
+		declare -A name_count=()
+		for entry in "${results[@]}"
+		do
+			IFS='|' read -r mnt_target used size perc name <<< "$entry"
+			(( name_count["$name"]++ ))
+		done
+
+		# Compute `length` based on the display name (basename or full path)
+		length=0
+		for i in "${!results[@]}"
+		do
+			entry=${results[$i]}
+			IFS='|' read -r mnt_target used size perc name <<< "$entry"
+			if (( name_count["$name"] > 1 ))
+			then
+				dname="$(G_TRUNCATE_MID "$mnt_target" 30)"
+			else
+				dname="$(G_TRUNCATE_MID "$name" 30)"
+			fi
+			(( ${#dname} > length )) && length=${#dname}
+			results[$i]="$mnt_target|$used|$size|$perc|$dname"
 		done
 
 		# Print results using the user-friendly GiB strings collected above.
@@ -669,7 +692,7 @@ $CLI_LINE"
 		for entry in "${results[@]}"
 		do
 			IFS='|' read -r mnt_target used size perc name <<< "$entry"
-			# Print aligned columns: {basename} : {percent used} : {used} of {size}
+			# Print aligned columns: {name} : {percent used} : {used} of {size}
 			printf "%b %b%-${length}s %b %b%6s %b %b%8sGiB of %8sGiB\n" "$CLI_BULLET" "${aCOLOUR[alt]}" "$name" "$CLI_SEPARATOR" "${aCOLOUR[strong]}" "$perc" "$CLI_SEPARATOR" "${aCOLOUR[weak]}" "$used" "$size"
 		done
 	}
