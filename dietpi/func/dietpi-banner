@@ -51,8 +51,6 @@
 		[nis_domainname]='NIS domainname'
 		[lan_ip]='LAN IP'
 		[wan_ip]='WAN IP'
-		[disk_rootfs]='Disk usage (RootFS)'
-		[disk_userdata]='Disk usage (userdata)'
 		[weather]='Weather (wttr.in)'
 		[custom_commands]='Custom commands'
 		[dietpi_commands]='Display useful DietPi commands?'
@@ -67,13 +65,14 @@
 		[kernel]='Kernel'
 		[network_usage]='Network usage'
 		[disk_usage]='Disk usage'
+		[disk_patterns]='does not show in the menu. allows disk patterns to be enabled/disabled'
 		[systemd]='Systemd status'
 		[fail2ban]='Fail2Ban status'
 	)
 	# Set the array order for the menu, items must be listed here to show up
 	MENU_ITEMS=(
 		large_hostname device_model uptime kernel cpu_temp ram_usage load_average hostname nis_domainname
-		lan_ip wan_ip vpn_status disk_rootfs disk_userdata weather letsencrypt systemd fail2ban
+		lan_ip wan_ip vpn_status weather letsencrypt systemd fail2ban
 		network_usage disk_usage custom_commands dietpi_commands motd credits word_wrap
 	)
 
@@ -87,7 +86,7 @@
 	# Set default options
 	aENABLED[device_model]=1
 	aENABLED[lan_ip]=1
-	aENABLED[disk_rootfs]=1
+	aENABLED[disk_usage]=1
 	aENABLED[dietpi_commands]=1
 	aENABLED[motd]=1
 	aENABLED[credits]=1
@@ -153,6 +152,28 @@
 			# Mark that a migration from legacy numeric indices occurred during this run
 			DIETPI_BANNER_MIGRATED_DURING_RUN=1
 		done
+
+		# Upgrade disk display options
+		if [[ -v aENABLED[disk_rootfs] ]]
+		then
+			if (( aENABLED[disk_rootfs] ))
+			then
+				aDISK_SPACE_MOUNTS+=('/')
+				aENABLED[disk_usage]=1
+			fi
+			unset "aENABLED[disk_rootfs]"
+			DIETPI_BANNER_MIGRATED_DURING_RUN=1
+		fi
+		if [[ -v aENABLED[disk_userdata] ]]
+		then
+			if (( aENABLED[disk_userdata] ))
+			then
+				aDISK_SPACE_MOUNTS+=('/mnt/dietpi_userdata')
+				aENABLED[disk_usage]=1
+			fi
+			unset "aENABLED[disk_userdata]"
+			DIETPI_BANNER_MIGRATED_DURING_RUN=1
+		fi
 
 		# Migrate legacy numeric-indexed aCOLOUR (from older FP_SAVEFILE) to associative form
 		local legacy_indexed_colour_keys=(accent strong weak alert good highlight alt)
@@ -457,7 +478,7 @@ $CLI_LINE"
 			# Use mawk for consistent floating-point formatting
 			mawk -v v="$bytes" 'BEGIN{printf "%.1f", v/(1024*1024*1024)}'
 		else
-			echo -e "${aCOLOUR[highlight]}???${COLOUR_RESET}"
+			echo -e "???"
 		fi
 	}
 
@@ -573,17 +594,78 @@ $CLI_LINE"
 		done
 	}
 
+	# Manage disk space pattern list (globs / regex)
+	Manage_Disk_Patterns()
+	{
+		local pattern_hint sel idx
+
+		# Multi-line help text for the patterns submenu
+		pattern_hint="To use regex, start the pattern with 're:', otherwise shell globbing is used.
+For example: '/mnt/*' or 're:^/mnt/.*/*$'"
+
+		while :
+		do
+			# Build menu: Add first, then each active pattern, then Done
+			G_WHIP_MENU_ARRAY=()
+			G_WHIP_MENU_ARRAY+=( 'Add' 'Add a new pattern' )
+			for idx in "${!aDISK_SPACE_PATTERNS[@]}"; do
+				G_WHIP_MENU_ARRAY+=("$idx" "${aDISK_SPACE_PATTERNS[$idx]}")
+			done
+			G_WHIP_MENU_ARRAY+=( 'Done' 'Finish pattern configuration' )
+			G_WHIP_DEFAULT_ITEM='Done'
+			G_WHIP_MENU "Manage disk space match patterns. The matching mounts returned by 'findmnt' will be reported.\n$pattern_hint" || break
+
+			sel=$G_WHIP_RETURNED_VALUE
+			case "$sel" in
+				Add)
+					G_WHIP_DEFAULT_ITEM=''
+					G_WHIP_INPUTBOX_REGEX='.*' # Allow empty input to clear a pattern
+					G_WHIP_INPUTBOX_REGEX_TEXT='may be empty (clear to remove entry)'
+					G_WHIP_INPUTBOX "$pattern_hint\n\nEdit pattern (empty removes it):" || continue
+					aDISK_SPACE_PATTERNS+=("$G_WHIP_RETURNED_VALUE")
+				;;
+				Done)
+					break
+				;;
+				*)
+					# Selected an existing pattern index -> edit in-place
+					if [[ $sel =~ ^[0-9]+$ && -n "${aDISK_SPACE_PATTERNS[$sel]:-}" ]]
+					then
+						G_WHIP_DEFAULT_ITEM=${aDISK_SPACE_PATTERNS[$sel]}
+						G_WHIP_INPUTBOX_REGEX='.*' # Allow empty input to clear a pattern
+						G_WHIP_INPUTBOX_REGEX_TEXT='may be empty (clear to remove entry)'
+						G_WHIP_INPUTBOX "$pattern_hint\n\nEdit pattern (empty removes it):"
+						aDISK_SPACE_PATTERNS[$sel]="$G_WHIP_RETURNED_VALUE"
+					else
+						# Unknown selection, ignore
+						continue
+					fi
+				;;
+			esac
+
+			for idx in "${!aDISK_SPACE_PATTERNS[@]}"; do
+				# Remove any empty entries (cleared by user)
+				[[ -n "${aDISK_SPACE_PATTERNS[$idx]:-}" ]] || unset 'aDISK_SPACE_PATTERNS[$idx]'
+			done
+		done
+
+		# Re-index the array to remove gaps caused by unset
+		aDISK_SPACE_PATTERNS=("${aDISK_SPACE_PATTERNS[@]}")
+
+		# Disable pattern matching if there are none to match
+		(( ${#aDISK_SPACE_PATTERNS[@]} > 0 )) && aENABLED[disk_patterns]=1
+	}
+
 	Print_Disk_Usage()
 	{
 		local results=()
 		local -A seen=()
 
-		if (( ${#aDISK_SPACE_MOUNTS[@]} == 0 && ${#aDISK_SPACE_PATTERNS[@]} == 0 ))
+		if (( ( ${#aDISK_SPACE_PATTERNS[@]} == 0 ) || ( ${aENABLED[disk_patterns]} == 0 ) )) && (( ${#aDISK_SPACE_MOUNTS[@]} == 0 ))
 		then
 			echo -e "${aCOLOUR[highlight]}No disk patterns provided, nothing to display."
 			return
 		fi
-
 
 		local -a mount_order=() mount_lines
 		declare -A mount_used mount_size mount_perc mount_name
@@ -609,7 +691,7 @@ $CLI_LINE"
 		# Iterate mounts in the original findmnt order and match against patterns.
 		for mnt_target in "${mount_order[@]}"
 		do
-			matched=0
+			local matched=0
 
 			# Test against explicit exact-match patterns (highest precedence)
 			for p in "${aDISK_SPACE_MOUNTS[@]}"
@@ -617,8 +699,8 @@ $CLI_LINE"
 				[[ "$mnt_target" == "$p" ]] && { matched=1; break; }
 			done
 
-			# If not matched yet, test globs and regex patterns from match_patterns
-			if (( matched == 0 ))
+			# If not matched yet, test globs and regex patterns from match_patterns if enabled
+			if (( matched == 0 )) && (( aENABLED[disk_patterns] == 1 ))
 			then
 				for pattern in "${aDISK_SPACE_PATTERNS[@]}"
 				do
@@ -669,7 +751,7 @@ $CLI_LINE"
 			[[ -n "$p" && -z ${seen[$p]} ]] || continue
 			used_fmt="???"
 			size_fmt="???"
-			perc="${aCOLOUR[alert]}??????${COLOUR_RESET}"
+			perc="???"
 			name="$(basename "$p")"
 			results+=("$p"$'\x1f'"$used_fmt"$'\x1f'"$size_fmt"$'\x1f'"$perc"$'\x1f'"$name")
 		done
@@ -684,7 +766,7 @@ $CLI_LINE"
 			(( name_count["$name"]++ ))
 		done
 
-		length=0
+		local length=0
 		for i in "${!results[@]}"
 		do
 			entry=${results[$i]}
@@ -855,7 +937,7 @@ $CLI_LINE"
 		(( ${aENABLED[dietpi_commands]} )) && Print_Useful_Commands
 
 		# Notify user if prefs or colors were migrated from legacy numeric indices during this run
-		(( $DIETPI_BANNER_MIGRATED_DURING_RUN )) && echo -e " ${aCOLOUR[highlight]}Banner needs to be migrated, run dietpi-banner and validate your settings.$COLOUR_RESET"
+		(( $DIETPI_BANNER_MIGRATED_DURING_RUN )) && echo -e " ${aCOLOUR[highlight]}Your preferences need to be migrated, run dietpi-banner and validate your settings.$COLOUR_RESET"
 	}
 
 	Print_Banner()
@@ -963,48 +1045,78 @@ $CLI_LINE"
 			then
 				# ignore check for single/double quote expansion issue; single/double quotes for glob;
 				# shellcheck disable=SC2016,SC2086
-				pattern_hint="The matching mount 'target's returned by the 'df' command will be reported.
+				pattern_hint="The matching mount 'target's returned by the 'findmnt' command will be reported.
 To use regex, start the pattern with 're:', otherwise shell globbing is used.
 For example: '/mnt/*' or 're:^/mnt/.*/*$'"
 
-				# Manage aDISK_SPACE_PATTERNS list
-				while :
-				do
-					G_WHIP_MENU_ARRAY=( 'Add' 'Add a new pattern' 'Edit' 'Edit an existing pattern' 'Remove' 'Remove a pattern' 'Done' 'Finish pattern configuration' )
-					G_WHIP_DEFAULT_ITEM='Done'
-					G_WHIP_MENU "Manage disk space match patterns. $pattern_hint" || break
-					case "$G_WHIP_RETURNED_VALUE" in
-						Add)
-							G_WHIP_INPUTBOX "Enter new pattern:\n$pattern_hint" || continue
-							aDISK_SPACE_PATTERNS+=("$G_WHIP_RETURNED_VALUE")
-						;;
-						Edit)
-							(( ${#aDISK_SPACE_PATTERNS[@]} == 0 )) && { G_WHIP_MSG 'No patterns to edit'; continue; }
-							G_WHIP_MENU_ARRAY=()
-							for idx in "${!aDISK_SPACE_PATTERNS[@]}"; do G_WHIP_MENU_ARRAY+=("$idx" "${aDISK_SPACE_PATTERNS[$idx]}"); done
-							G_WHIP_MENU 'Select pattern to edit:' || continue
-							sel=$G_WHIP_RETURNED_VALUE
-							G_WHIP_DEFAULT_ITEM=${aDISK_SPACE_PATTERNS[$sel]}
-							G_WHIP_INPUTBOX "Edit pattern:\n$pattern_hint" || continue
-							aDISK_SPACE_PATTERNS[$sel]="$G_WHIP_RETURNED_VALUE"
-						;;
-						Remove)
-							(( ${#aDISK_SPACE_PATTERNS[@]} == 0 )) && { G_WHIP_MSG 'No patterns to remove'; continue; }
-							G_WHIP_MENU_ARRAY=()
-							for idx in "${!aDISK_SPACE_PATTERNS[@]}"; do G_WHIP_MENU_ARRAY+=("$idx" "${aDISK_SPACE_PATTERNS[$idx]}"); done
-							G_WHIP_MENU 'Select pattern to remove:' || continue
-							sel=$G_WHIP_RETURNED_VALUE
-							unset 'aDISK_SPACE_PATTERNS[$sel]'
-							# reindex array
-							aDISK_SPACE_PATTERNS=("${aDISK_SPACE_PATTERNS[@]}")
-						;;
-						Done) break;;
-						*) ;;
-					esac
+				# Build mount list from findmnt (preserve findmnt order)
+				local -a available_mounts
+				mapfile -t available_mounts < <(findmnt -Dnro TARGET --real 2>/dev/null)
+				# Build quick lookup maps used to determine which mounts are present
+				# and which are configured by the user:
+				# - `avail_map`: mounts currently detected on the system
+				# - `cfg_map`  : mounts the user has previously configured to track
+				declare -A avail_map=() cfg_map=()
+				for m in "${available_mounts[@]}"; do avail_map["$m"]=1; done
+				for p in "${aDISK_SPACE_MOUNTS[@]}"; do cfg_map["$p"]=1; done
+
+				# Prepare the checklist array and a mapping from generated tags back to
+				# mount paths. Entries are added in this order:
+				# 1) configured-but-missing mounts (so the user notices them),
+				# 2) a 'Custom matching' toggle, and
+				# 3) currently available mounts.
+				G_WHIP_CHECKLIST_ARRAY=()
+				declare -A tag2mount=()
+				local idx=0 tag desc default
+
+				# Add configured-but-missing mounts at the top.
+				# Tags are created to be safe for G_WHIP_CHECKLIST (no spaces, no special characters).
+				# The tag is used to map back to the mount path.
+				for p in "${aDISK_SPACE_MOUNTS[@]}"; do
+					[[ -n "$p" && -z ${avail_map[$p]} ]] || continue
+					tag="m$idx"
+					desc="[not found] $p"
+					default='on'
+					G_WHIP_CHECKLIST_ARRAY+=("$tag" "$desc" "$default")
+					tag2mount["$tag"]="$p"
+					((idx++))
 				done
 
-				# If no patterns are configured, disable the disk usage option
-				(( ${#aDISK_SPACE_PATTERNS[@]} == 0 )) && aENABLED[disk_usage]=0
+				# Add Custom matching option to allow adding user patterns.
+				local custom_tag='CUSTOM_MATCHING'
+				if (( ${aENABLED[disk_patterns]} )); then default='on'; else default='off'; fi
+				G_WHIP_CHECKLIST_ARRAY+=("$custom_tag" "Custom matching (globs/regex patterns)" "$default")
+
+				# Add available mounts from `findmnt` to the list.
+				for m in "${available_mounts[@]}"; do
+					tag="m$idx"
+					desc="$m"
+					if [[ ${cfg_map[$m]} ]]; then default='on'; else default='off'; fi
+					G_WHIP_CHECKLIST_ARRAY+=("$tag" "$desc" "$default")
+					tag2mount["$tag"]="$m"
+					((idx++))
+				done
+
+				# Display checklist (enumerated)
+				G_WHIP_CHECKLIST_ENUM=1
+				G_WHIP_CHECKLIST "Select mounts to track. Use 'Custom matching' to manage globs/regex patterns."
+
+				local sel
+				aENABLED[disk_patterns]=0 # Manage_Disk_Patterns sets to 1 if applicable
+				aDISK_SPACE_MOUNTS=() # Reset the mount list, it will be re-filled based on user selection below
+
+				# Process selections: G_WHIP_RETURNED_VALUE contains selected tags
+				for sel in $G_WHIP_RETURNED_VALUE; do
+					if [[ $sel == "$custom_tag" ]]; then Manage_Disk_Patterns; continue; fi
+					if [[ ${tag2mount[$sel]} ]]; then aDISK_SPACE_MOUNTS+=("${tag2mount[$sel]}"); fi
+				done
+
+				# If no disks are configured, disable the disk usage option
+				if (( ( ${#aDISK_SPACE_PATTERNS[@]} == 0 ) || ( aENABLED[disk_patterns] == 0 ) ))
+				then
+					(( ${#aDISK_SPACE_MOUNTS[@]} == 0 )) && aENABLED[disk_usage]=0
+				fi
+
 			fi
 		done
 
