@@ -114,9 +114,11 @@
 	BW_INDENT_TYPE='colon'
 	BW_INDENT_FIXED=3
 
-	# Set default custom patterns and commands
+	# Set default custom patterns and commands. If the user has a legacy .dietpi-banner_custom file,
+	# it will be migrated into aCUSTOM_COMMANDS later.
 	# shellcheck disable=SC2016
-	aCUSTOM_COMMANDS[0]='echo -e "$CLI_BULLET ${aCOLOUR[alert]}Hello ${aCOLOUR[good]}World! ${COLOUR_RESET} :)"'
+	declare -A aCUSTOM_COMMANDS=()
+
 	# Default disk mounts (explicit paths) and patterns (globs/regex)
 	aDISK_SPACE_MOUNTS=()
 	aDISK_SPACE_PATTERNS=()
@@ -124,6 +126,21 @@
 	# Load settings here, to have chosen custom CLI colours applied
 	# shellcheck disable=SC1090
 	[[ -f $FP_SAVEFILE ]] && . "$FP_SAVEFILE"
+
+	# Set aCUSTOM_COMMANDS_ORDER from the assignments in the prefs file.
+	# Runtime order of custom command keys (stores user-defined order for display, saving, and menu).
+	aCUSTOM_COMMANDS_ORDER=()
+
+	if [[ -f $FP_SAVEFILE ]]; then
+		while IFS= read -r line; do
+			# match patterns like: aCUSTOM_COMMANDS['key']='value' OR aCUSTOM_COMMANDS[0]='value'
+			if [[ $line =~ ^aCUSTOM_COMMANDS\[\'([^\']+)\'\]= ]]; then
+				aCUSTOM_COMMANDS_ORDER+=("${BASH_REMATCH[1]}")
+			elif [[ $line =~ ^aCUSTOM_COMMANDS\[([0-9]+)\]= ]]; then
+				aCUSTOM_COMMANDS_ORDER+=("${BASH_REMATCH[1]}")
+			fi
+		done < "$FP_SAVEFILE"
+	fi
 
 	# ----------------------------------------------------------------------------
 	# Legacy config migration helper
@@ -153,7 +170,7 @@
 			DIETPI_BANNER_MIGRATED_DURING_RUN=1
 		done
 
-		# Upgrade disk display options
+		# Migrate legacy disk display options
 		if [[ -v aENABLED[disk_rootfs] ]]
 		then
 			if (( aENABLED[disk_rootfs] ))
@@ -173,6 +190,18 @@
 			fi
 			unset "aENABLED[disk_userdata]"
 			DIETPI_BANNER_MIGRATED_DURING_RUN=1
+		fi
+
+		# Migrate legacy custom command file to aCUSTOM_COMMANDS array if present
+		readonly FP_CUSTOM='/boot/dietpi/.dietpi-banner_custom'
+		if [[ -f $FP_CUSTOM ]]
+		then
+			migrated_command_key="migrated-$(date '+%Y-%m-%d_%H-%M-%S')"
+			# Add a custom command that runs the external file with bash
+			aCUSTOM_COMMANDS=([$migrated_command_key]="bash \"$FP_CUSTOM\"")
+			aCUSTOM_COMMANDS_ORDER=("$migrated_command_key")
+			DIETPI_BANNER_MIGRATED_DURING_RUN=1
+			DIETPI_BANNER_MIGRATED_CUSTOM_COMMAND=1
 		fi
 
 		# Migrate legacy numeric-indexed aCOLOUR (from older FP_SAVEFILE) to associative form
@@ -195,6 +224,7 @@
 	}
 	# Flag indicating whether a legacy numeric->associative config migration happened during this run
 	DIETPI_BANNER_MIGRATED_DURING_RUN=0
+	DIETPI_BANNER_MIGRATED_CUSTOM_COMMAND=0
 	# Run migration
 	DIETPI_BANNER_LEGACY_MIGRATION
 	# ----------------------------------------------------------------------------
@@ -301,12 +331,22 @@
 			echo "aDISK_SPACE_PATTERNS[$i]='$patt'"
 		done
 
-		# Persist aCUSTOM_COMMANDS (indices 0..N)
-		for i in "${!aCUSTOM_COMMANDS[@]}"
+		# Don't save a migrated custom command script
+		if (( DIETPI_BANNER_MIGRATED_CUSTOM_COMMAND ))
+		then
+			unset "aCUSTOM_COMMANDS[$migrated_command_key]"
+		fi
+
+		# Persist aCUSTOM_COMMANDS (associative indices) in user-specified order
+		for i in "${aCUSTOM_COMMANDS_ORDER[@]}"
 		do
+			[[ -n "${aCUSTOM_COMMANDS[$i]:-}" ]] || continue
+			# Escape single quotes in the key and value for safe embedding
+			key=${i}
+			key=${key//\'/\\\'}
 			cmd=${aCUSTOM_COMMANDS[$i]}
 			cmd=${cmd//\'/\\\'}
-			echo "aCUSTOM_COMMANDS[$i]='$cmd'"
+			echo "aCUSTOM_COMMANDS['$key']='$cmd'"
 		done
 
 		# Persist BW indent settings
@@ -315,6 +355,7 @@
 
 		# Clear migration flag now that prefs are persisted
 		DIETPI_BANNER_MIGRATED_DURING_RUN=0
+		DIETPI_BANNER_MIGRATED_CUSTOM_COMMAND=0
 	}
 
 	Print_Header()
@@ -803,17 +844,18 @@ For example: '/mnt/*' or 're:^/mnt/.*/*$'"
 
 	Print_Custom_Commands()
 	{
-		local output status
-		for i in "${!aCUSTOM_COMMANDS[@]}"
+		local key output status
+		for key in "${aCUSTOM_COMMANDS_ORDER[@]}"
 		do
-			[[ ${aCUSTOM_COMMANDS[$i]} ]] || continue
-			output=$(eval "${aCUSTOM_COMMANDS[$i]}" 2>&1)
+			[[ -n "${aCUSTOM_COMMANDS[$key]:-}" ]] || continue
+			# Capture output and exit code
+			output=$(eval "${aCUSTOM_COMMANDS[$key]}" 2>&1)
 			status=$?
-			if (( $status ))
+			if (( status ))
 			then
-				echo -e "${aCOLOUR[alert]}Custom command $i failed ($status): $output"
+				Print_Item_State "$key" "${aCOLOUR[alert]}Command failed (code $status): $output${COLOUR_RESET}"
 			else
-				echo -e "$output"
+				Print_Item_State "$key" "$output"
 			fi
 		done
 	}
@@ -867,8 +909,8 @@ For example: '/mnt/*' or 're:^/mnt/.*/*$'"
 	{
 		# Print a single line item with green bullet, description "$1", green separator and state "$2"
 		# state should contain color and format codes as needed
-		local subtitle=$1 state=$2
-		printf "%b%b %b %b %b\n" "$CLI_BULLET" "${aCOLOUR[strong]}" "$subtitle" "$CLI_SEPARATOR" "$state"
+		local subtitle="$1" state="$2"
+		echo -e "$CLI_BULLET ${aCOLOUR[strong]} $subtitle $CLI_SEPARATOR $state$COLOUR_RESET"
 	}
 
 	Print_Banner_raw()
