@@ -635,8 +635,80 @@ $CLI_LINE"
 		done
 	}
 
+	Menu_Disk_Mounts()
+	{
+		# ignore check for single/double quote expansion issue; single/double quotes for glob;
+		# shellcheck disable=SC2016,SC2086
+		pattern_hint="The matching mount 'target's returned by the 'findmnt' command will be reported.
+To use regex, start the pattern with 're:', otherwise shell globbing is used.
+For example: '/mnt/*' or 're:^/mnt/.*/*$'"
+
+		# Build mount list from findmnt (preserve findmnt order)
+		local -a available_mounts
+		mapfile -t available_mounts < <(findmnt -Dnro TARGET --real 2>/dev/null)
+		# Build quick lookup maps used to determine which mounts are present
+		# and which are configured by the user:
+		# - `avail_map`: mounts currently detected on the system
+		# - `cfg_map`  : mounts the user has previously configured to track
+		declare -A avail_map=() cfg_map=()
+		for m in "${available_mounts[@]}"; do avail_map["$m"]=1; done
+		for p in "${aDISK_SPACE_MOUNTS[@]}"; do cfg_map["$p"]=1; done
+
+		# Prepare the checklist array and a mapping from generated tags back to
+		# mount paths. Entries are added in this order:
+		# 1) configured-but-missing mounts (so the user notices them),
+		# 2) a 'Custom matching' toggle, and
+		# 3) currently available mounts.
+		G_WHIP_CHECKLIST_ARRAY=()
+		declare -A tag2mount=()
+		local idx=0 tag desc default
+
+		# Add configured-but-missing mounts at the top.
+		# Tags are created to be safe for G_WHIP_CHECKLIST (no spaces, no special characters).
+		# The tag is used to map back to the mount path.
+		for p in "${aDISK_SPACE_MOUNTS[@]}"; do
+			[[ -n "$p" && -z ${avail_map[$p]} ]] || continue
+			tag="m$idx"
+			desc="[not found] $p"
+			default='on'
+			G_WHIP_CHECKLIST_ARRAY+=("$tag" "$desc" "$default")
+			tag2mount["$tag"]="$p"
+			((idx++))
+		done
+
+		# Add Custom matching option to allow adding user patterns.
+		local custom_tag='CUSTOM_MATCHING'
+		if (( ${aENABLED[disk_patterns]} )); then default='on'; else default='off'; fi
+		G_WHIP_CHECKLIST_ARRAY+=("$custom_tag" "Custom matching (globs/regex patterns)" "$default")
+
+		# Add available mounts from `findmnt` to the list.
+		for m in "${available_mounts[@]}"; do
+			tag="m$idx"
+			desc="$m"
+			if [[ ${cfg_map[$m]} ]]; then default='on'; else default='off'; fi
+			G_WHIP_CHECKLIST_ARRAY+=("$tag" "$desc" "$default")
+			tag2mount["$tag"]="$m"
+			((idx++))
+		done
+
+		# Display checklist (enumerated)
+		G_WHIP_CHECKLIST_ENUM=1
+		G_WHIP_CHECKLIST "Select mounts to track. Use 'Custom matching' to manage globs/regex patterns."
+
+		local sel
+		aENABLED[disk_patterns]=0 # Manage_Disk_Patterns sets to 1 if applicable
+		aDISK_SPACE_MOUNTS=() # Reset the mount list, it will be re-filled based on user selection below
+
+		# Process selections: G_WHIP_RETURNED_VALUE contains selected tags.
+		# Rebuild mounts array and call Manage_Disk_Patterns if the user selected the custom matching option.
+		for sel in $G_WHIP_RETURNED_VALUE; do
+			if [[ $sel == "$custom_tag" ]]; then Menu_Disk_Patterns; continue; fi
+			if [[ ${tag2mount[$sel]} ]]; then aDISK_SPACE_MOUNTS+=("${tag2mount[$sel]}"); fi
+		done
+	}
+
 	# Manage disk space pattern list (globs / regex)
-	Manage_Disk_Patterns()
+	Menu_Disk_Patterns()
 	{
 		local pattern_hint sel idx
 
@@ -693,7 +765,7 @@ For example: '/mnt/*' or 're:^/mnt/.*/*$'"
 		# Re-index the array to remove gaps caused by unset
 		aDISK_SPACE_PATTERNS=("${aDISK_SPACE_PATTERNS[@]}")
 
-		# Disable pattern matching if there are none to match
+		# If any patterns are configured, enable the disk_patterns option
 		(( ${#aDISK_SPACE_PATTERNS[@]} > 0 )) && aENABLED[disk_patterns]=1
 	}
 
@@ -842,6 +914,135 @@ For example: '/mnt/*' or 're:^/mnt/.*/*$'"
 		echo "$state"
 	}
 
+	Menu_Custom_Commands()
+	{
+		local hint sel key cmd
+
+		# Help text
+		# shellcheck disable=SC2016
+		hint='Example:\necho -e "${aCOLOUR[good]}Hello World! :)"'
+		name_hint="Enter a name for the command. It must be unique, safe, and not empty."
+
+		while :
+		do
+			# Build menu: `Add` first, then each active command, then `Done`
+			G_WHIP_MENU_ARRAY=()
+			G_WHIP_MENU_ARRAY+=( 'Add' 'Add a new pattern' )
+			for key in "${aCUSTOM_COMMANDS_ORDER[@]}"; do
+				G_WHIP_MENU_ARRAY+=("$key" "${aCUSTOM_COMMANDS[$key]}")
+			done
+			G_WHIP_MENU_ARRAY+=( 'Done' 'Finish commands configuration' )
+			G_WHIP_DEFAULT_ITEM='Done'
+			G_WHIP_MENU "Manage custom commands. Each command gets a name and a corresponding shell command.\n$hint" || break
+
+			sel=$G_WHIP_RETURNED_VALUE
+			case "$sel" in
+				Add)
+					# Add a new command
+					G_WHIP_DEFAULT_ITEM=''
+					G_WHIP_INPUTBOX_REGEX='.*' # Allow empty input to clear a command
+					G_WHIP_INPUTBOX_REGEX_TEXT='may be empty (clear to remove entry)'
+
+					G_WHIP_INPUTBOX "$hint\n\nEdit command (empty removes it):" || continue
+					cmd="$G_WHIP_RETURNED_VALUE"
+
+					if [[ -z "$cmd" ]]
+					then
+						# Empty command, do not add to array
+						continue
+					else
+						G_WHIP_DEFAULT_ITEM=''
+						G_WHIP_INPUTBOX_REGEX='.+' # Non-empty
+						G_WHIP_INPUTBOX_REGEX_TEXT='must be unique, safe, and must not be empty'
+
+						while :;
+						do
+							# New command entered, prompt for a name
+							G_WHIP_INPUTBOX "$name_hint" || continue
+							key="$G_WHIP_RETURNED_VALUE"
+							if [[ -n "${aCUSTOM_COMMANDS[$key]:-}" ]]
+							then
+								# Key already exists, prompt again
+								continue
+							else
+								# Key is new and valid, accept it
+								break
+							fi
+						done
+						aCUSTOM_COMMANDS+=([$key]="$cmd")
+						aCUSTOM_COMMANDS_ORDER+=("$key")
+					fi
+				;; # End adding of command
+				Done)
+					break
+				;;
+				*)
+					# Edit a command
+					if [[ -n "$sel" ]]
+					then
+						G_WHIP_DEFAULT_ITEM="${aCUSTOM_COMMANDS[$sel]}"
+						G_WHIP_INPUTBOX_REGEX='.*' # Allow empty input to clear a command
+						G_WHIP_INPUTBOX_REGEX_TEXT='may be empty (clear to remove entry)'
+						G_WHIP_INPUTBOX "$hint\n\nEdit command (empty removes it):"
+						cmd="$G_WHIP_RETURNED_VALUE"
+
+						if [[ -z "$cmd" ]]
+						then
+							# Empty command, remove from array
+							unset "aCUSTOM_COMMANDS[$sel]"
+							# Re-index array
+							for i in "${!aCUSTOM_COMMANDS_ORDER[@]}"; do
+								[[ "${aCUSTOM_COMMANDS_ORDER[$i]}" == "$sel" ]] && unset 'aCUSTOM_COMMANDS_ORDER[$i]'
+							done
+							aCUSTOM_COMMANDS_ORDER=("${aCUSTOM_COMMANDS_ORDER[@]}")
+							continue
+						else
+							# New command entered, prompt for a name
+							G_WHIP_DEFAULT_ITEM="$sel"
+							G_WHIP_INPUTBOX_REGEX='.+' # Non-empty
+							G_WHIP_INPUTBOX_REGEX_TEXT='must be unique, safe, and must not be empty'
+
+							while :;
+							do
+								G_WHIP_INPUTBOX "$name_hint" || continue
+								key="$G_WHIP_RETURNED_VALUE"
+								if [[ $key == "$sel" ]]
+								then
+									# Key unchanged, just update the command
+									aCUSTOM_COMMANDS[$key]="$cmd"
+									break
+								elif [[ -n "${aCUSTOM_COMMANDS[$key]:-}" && "$key" != "$sel" ]]
+								then
+									# Key changed to an existing key, prompt again
+									continue
+								else
+									# Key is new and valid, accept it
+									# Re-index array
+									for i in "${!aCUSTOM_COMMANDS_ORDER[@]}"; do
+										[[ "${aCUSTOM_COMMANDS_ORDER[$i]}" == "$sel" ]] && unset 'aCUSTOM_COMMANDS_ORDER[$i]'
+									done
+									aCUSTOM_COMMANDS_ORDER=("${aCUSTOM_COMMANDS_ORDER[@]}")
+									unset "aCUSTOM_COMMANDS[$sel]"
+
+									# Add the new key and command
+									aCUSTOM_COMMANDS+=([$key]="$cmd")
+									aCUSTOM_COMMANDS_ORDER+=("$key")
+									break
+								fi
+							done
+						fi
+					else
+						# Unknown selection, ignore
+						continue
+					fi
+				;; # End editing of command
+			esac # End case "$sel"
+		done # End command menu loop
+
+		# If any commands are configured, enable the custom_commands option
+		(( ${#aCUSTOM_COMMANDS_ORDER[@]} > 0 )) && aENABLED[custom_commands]=1
+	}
+
 	Print_Custom_Commands()
 	{
 		local key output status
@@ -942,10 +1143,6 @@ For example: '/mnt/*' or 're:^/mnt/.*/*$'"
 		(( ${aENABLED[wan_ip]} )) && Print_Item_State "${aDESCRIPTION[wan_ip]}" "$(G_GET_WAN_IP 2>&1)"
 		# DietPi-VPN connection status
 		(( ${aENABLED[vpn_status]} )) && Print_Item_State "${aDESCRIPTION[vpn_status]}" "$(Get_VPN_Status 2>&1)"
-		# Disk usage (RootFS)
-		(( ${aENABLED[disk_rootfs]} )) && echo -e "$CLI_BULLET ${aCOLOUR[strong]}${aDESCRIPTION[disk_rootfs]} $CLI_SEPARATOR $(df -h --output=used,size,pcent / | mawk 'NR==2 {print $1" of "$2" ("$3")"}' 2>&1)"
-		# Disk usage (DietPi userdata)
-		(( ${aENABLED[disk_userdata]} )) && echo -e "$CLI_BULLET ${aCOLOUR[strong]}${aDESCRIPTION[disk_userdata]} $CLI_SEPARATOR $(df -h --output=used,size,pcent /mnt/dietpi_userdata | mawk 'NR==2 {print $1" of "$2" ("$3")"}' 2>&1)"
 		# Weather
 		(( ${aENABLED[weather]} )) && Print_Item_State "${aDESCRIPTION[weather]}" "$(curl -sSfLm 3 'https://wttr.in/?format=4' 2>&1)"
 		# Let's Encrypt cert status
@@ -1015,151 +1212,43 @@ For example: '/mnt/*' or 're:^/mnt/.*/*$'"
 
 		for selection in $G_WHIP_RETURNED_VALUE
 		do
+			# Enable options (the typical action for the checklist)
 			aENABLED[$selection]=1
 
-			if [[ $selection == 'custom_commands' ]]
-			then
-				# ignore check for single/double quote expansion issue; unassigned var is referenced;
-				# shellcheck disable=SC2016,SC2154
-				example_command='echo -e "$CLI_BULLET ${aCOLOUR[alert]}Hello ${aCOLOUR[good]}World! ${COLOUR_RESET} :)"\n\n-- or with the standard format --\n\nPrint_Item_State "Description" "value"'
-
-				# Manage custom commands list
-				while :
-				do
+			# Special actions for some items (like submenus) that require additional configuration
+			case $selection in
+			    'custom_commands')
+					Menu_Custom_Commands
+					# If no commands are configured, disable the custom commands option
+					(( ${#aCUSTOM_COMMANDS[@]} )) || aENABLED[custom_commands]=0
+				;;
+				'word_wrap')
+					# Banner word-wrap options
 					G_WHIP_MENU_ARRAY=(
-						'Add' 'Add a new command'
-						'Edit' 'Edit an existing command'
-						'Remove' 'Remove a command'
-						'Done' 'Finish custom commands configuration'
+						'colon' 'Indent to the green colon if present, else to the green dash'
+						'dash' 'Indent to the green dash character'
+						'fixed' 'Indent to a fixed offset'
 					)
-					G_WHIP_DEFAULT_ITEM='Done'
-					G_WHIP_MENU 'Manage custom banner commands.\n\n!CAUTION!\nThese commands are executed with the same privileges as dietpi-banner, and DO NOT have a time limit:' || break
-					case "$G_WHIP_RETURNED_VALUE" in
-						Add)
-							G_WHIP_INPUTBOX "Enter new command, for example:\n$example_command" || continue
-							aCUSTOM_COMMANDS+=("$G_WHIP_RETURNED_VALUE")
-						;;
-						Edit)
-							(( ${#aCUSTOM_COMMANDS[@]} == 0 )) && { G_WHIP_MSG 'No commands to edit'; continue; }
-							G_WHIP_MENU_ARRAY=()
-							for idx in "${!aCUSTOM_COMMANDS[@]}"; do G_WHIP_MENU_ARRAY+=("$idx" "${aCUSTOM_COMMANDS[$idx]}"); done
-							G_WHIP_MENU 'Select command to edit:' || continue
-							sel=$G_WHIP_RETURNED_VALUE
-							G_WHIP_DEFAULT_ITEM=${aCUSTOM_COMMANDS[$sel]}
-							G_WHIP_INPUTBOX "Edit command, for example:\n$example_command" || continue
-							aCUSTOM_COMMANDS[$sel]="$G_WHIP_RETURNED_VALUE"
-						;;
-						Remove)
-							(( ${#aCUSTOM_COMMANDS[@]} == 0 )) &&  { G_WHIP_MSG 'No commands to remove'; continue; }
-							G_WHIP_MENU_ARRAY=()
-							for idx in "${!aCUSTOM_COMMANDS[@]}"; do G_WHIP_MENU_ARRAY+=("$idx" "${aCUSTOM_COMMANDS[$idx]}"); done
-							G_WHIP_MENU 'Select command to remove:' || continue
-							sel=$G_WHIP_RETURNED_VALUE
-							unset 'aCUSTOM_COMMANDS[$sel]'
-							# reindex array
-							aCUSTOM_COMMANDS=("${aCUSTOM_COMMANDS[@]}")
-						;;
-						Done) break;;
-						*) ;;
-					esac
-				done
-
-				# If no commands are configured, disable the custom commands option
-				(( ${#aCUSTOM_COMMANDS[@]} )) || aENABLED[custom_commands]=0
-
-			elif [[ $selection == 'word_wrap' ]]
-			then
-				# Banner word-wrap options
-				G_WHIP_MENU_ARRAY=(
-					'colon' 'Indent to the green colon if present, else to the green dash'
-					'dash' 'Indent to the green dash character'
-					'fixed' 'Indent to a fixed offset'
-				)
-				G_WHIP_DEFAULT_ITEM=$BW_INDENT_TYPE
-				G_WHIP_MENU 'Choose how word-wrapped lines shall be indented:' || continue
-				BW_INDENT_TYPE=$G_WHIP_RETURNED_VALUE
-				[[ $BW_INDENT_TYPE == 'fixed' ]] || continue
-				G_WHIP_DEFAULT_ITEM=$BW_INDENT_FIXED
-				G_WHIP_INPUTBOX_REGEX='^[1-9][0-9]*$' G_WHIP_INPUTBOX_REGEX_TEXT='be a number'
-				G_WHIP_INPUTBOX 'Please set the fixed offset column to indent word-wrapped lines to:' && BW_INDENT_FIXED=$G_WHIP_RETURNED_VALUE
-
-			elif [[ $selection == 'disk_usage' ]]
-			then
-				# ignore check for single/double quote expansion issue; single/double quotes for glob;
-				# shellcheck disable=SC2016,SC2086
-				pattern_hint="The matching mount 'target's returned by the 'findmnt' command will be reported.
-To use regex, start the pattern with 're:', otherwise shell globbing is used.
-For example: '/mnt/*' or 're:^/mnt/.*/*$'"
-
-				# Build mount list from findmnt (preserve findmnt order)
-				local -a available_mounts
-				mapfile -t available_mounts < <(findmnt -Dnro TARGET --real 2>/dev/null)
-				# Build quick lookup maps used to determine which mounts are present
-				# and which are configured by the user:
-				# - `avail_map`: mounts currently detected on the system
-				# - `cfg_map`  : mounts the user has previously configured to track
-				declare -A avail_map=() cfg_map=()
-				for m in "${available_mounts[@]}"; do avail_map["$m"]=1; done
-				for p in "${aDISK_SPACE_MOUNTS[@]}"; do cfg_map["$p"]=1; done
-
-				# Prepare the checklist array and a mapping from generated tags back to
-				# mount paths. Entries are added in this order:
-				# 1) configured-but-missing mounts (so the user notices them),
-				# 2) a 'Custom matching' toggle, and
-				# 3) currently available mounts.
-				G_WHIP_CHECKLIST_ARRAY=()
-				declare -A tag2mount=()
-				local idx=0 tag desc default
-
-				# Add configured-but-missing mounts at the top.
-				# Tags are created to be safe for G_WHIP_CHECKLIST (no spaces, no special characters).
-				# The tag is used to map back to the mount path.
-				for p in "${aDISK_SPACE_MOUNTS[@]}"; do
-					[[ -n "$p" && -z ${avail_map[$p]} ]] || continue
-					tag="m$idx"
-					desc="[not found] $p"
-					default='on'
-					G_WHIP_CHECKLIST_ARRAY+=("$tag" "$desc" "$default")
-					tag2mount["$tag"]="$p"
-					((idx++))
-				done
-
-				# Add Custom matching option to allow adding user patterns.
-				local custom_tag='CUSTOM_MATCHING'
-				if (( ${aENABLED[disk_patterns]} )); then default='on'; else default='off'; fi
-				G_WHIP_CHECKLIST_ARRAY+=("$custom_tag" "Custom matching (globs/regex patterns)" "$default")
-
-				# Add available mounts from `findmnt` to the list.
-				for m in "${available_mounts[@]}"; do
-					tag="m$idx"
-					desc="$m"
-					if [[ ${cfg_map[$m]} ]]; then default='on'; else default='off'; fi
-					G_WHIP_CHECKLIST_ARRAY+=("$tag" "$desc" "$default")
-					tag2mount["$tag"]="$m"
-					((idx++))
-				done
-
-				# Display checklist (enumerated)
-				G_WHIP_CHECKLIST_ENUM=1
-				G_WHIP_CHECKLIST "Select mounts to track. Use 'Custom matching' to manage globs/regex patterns."
-
-				local sel
-				aENABLED[disk_patterns]=0 # Manage_Disk_Patterns sets to 1 if applicable
-				aDISK_SPACE_MOUNTS=() # Reset the mount list, it will be re-filled based on user selection below
-
-				# Process selections: G_WHIP_RETURNED_VALUE contains selected tags
-				for sel in $G_WHIP_RETURNED_VALUE; do
-					if [[ $sel == "$custom_tag" ]]; then Manage_Disk_Patterns; continue; fi
-					if [[ ${tag2mount[$sel]} ]]; then aDISK_SPACE_MOUNTS+=("${tag2mount[$sel]}"); fi
-				done
-
-				# If no disks are configured, disable the disk usage option
-				if (( ( ${#aDISK_SPACE_PATTERNS[@]} == 0 ) || ( aENABLED[disk_patterns] == 0 ) ))
-				then
-					(( ${#aDISK_SPACE_MOUNTS[@]} == 0 )) && aENABLED[disk_usage]=0
-				fi
-
-			fi
+					G_WHIP_DEFAULT_ITEM=$BW_INDENT_TYPE
+					G_WHIP_MENU 'Choose how word-wrapped lines shall be indented:' || continue
+					BW_INDENT_TYPE=$G_WHIP_RETURNED_VALUE
+					[[ $BW_INDENT_TYPE == 'fixed' ]] || continue
+					G_WHIP_DEFAULT_ITEM=$BW_INDENT_FIXED
+					G_WHIP_INPUTBOX_REGEX='^[1-9][0-9]*$' G_WHIP_INPUTBOX_REGEX_TEXT='be a number'
+					G_WHIP_INPUTBOX 'Please set the fixed offset column to indent word-wrapped lines to:' && BW_INDENT_FIXED=$G_WHIP_RETURNED_VALUE
+				;;
+				'disk_usage')
+					Menu_Disk_Mounts
+					# If no disks are configured, disable the disk usage option
+					if (( ( ${#aDISK_SPACE_PATTERNS[@]} == 0 ) || ( aENABLED[disk_patterns] == 0 ) ))
+					then
+						(( ${#aDISK_SPACE_MOUNTS[@]} == 0 )) && aENABLED[disk_usage]=0
+					fi
+				;;
+				*)
+					G_DIETPI-NOTIFY 1 "Unknown menu selection: $selection" >&2
+				;;
+			esac
 		done
 
 		# Before saving, create a backup of the existing prefs if migrating.
