@@ -180,7 +180,7 @@ sessioncontrol =
 //	  Shairport Sync will not exit automatically after executing this handler. To exit, the handler must do it itself, perhaps via a script with "/usr/bin/kill $PPID" as its last line.
 //	  Many of these "unfixable" problems are caused by malfunctioning output devices, and sometimes it is necessary to restart the whole device to clear the problem.
 //	  You could hook on a program to do this automatically, but beware -- the device may then power off and restart without warning!
-//	wait_for_completion = "no"; // set to "yes" to get Shairport Sync to wait until the "run_this..." applications have terminated before continuing, 
+//	wait_for_completion = "no"; // set to "yes" to get Shairport Sync to wait until the "run_this..." applications have terminated before continuing,
 //	  except the "run_this_if_an_unfixable_error_is_detected" handler, which will always wait for completion, irrespective of this setting.
 
 //	allow_session_interruption = "no"; // (Classic AirPlay only) Set to "yes" to allow another device to interrupt Shairport Sync while it's playing from an existing audio source
