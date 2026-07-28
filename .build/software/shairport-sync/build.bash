@@ -94,7 +94,7 @@ general =
 //	The default is "auto", which means that the AirPlay 2 service will be provided if NQPTP is present and "classic" AirPlay will be provided otherwise, with "(Classic)" appended to the service name (see above).
 //	service_type = "auto"; // This can be "auto", "airplay2" or "classic".
 //	The interpolation setting below controls how Shairport Sync adds or removes frames of audio to keep in sync.
-//			"auto" (default) measures the processor's floating point speed and chooses "soxr" if available and it is fast enough. Otherwise, "vernier" is selected.
+//			"auto" (default) measures the processor's floating point speed and chooses "soxr" if available and if the processor is fast enough. Otherwise, "vernier" is selected.
 //			"soxr" uses the SoX library to recode a packet of frames to a new packet containing more or fewer frames. This needs a processor with fast floating point capability.
 //			"vernier" recodes a packet of frames to a new packet containing more or fewer frames. This is recommended for low powered devices.
 //			"basic" causes the simple removal or insertion of frames in a packet of frames. Not recommended.
@@ -174,13 +174,17 @@ sessioncontrol =
 //	run_this_before_play_begins = "/full/path/to/application and args"; // make sure the application has executable permission. If it's a script, include the shebang (#!/bin/...) on the first line
 //	run_this_after_play_ends = "/full/path/to/application and args"; // make sure the application has executable permission. If it's a script, include the shebang (#!/bin/...) on the first line
 
-//	run_this_if_an_unfixable_error_is_detected = "/full/path/to/application and args"; // if a problem occurs that can't be cleared by Shairport Sync itself, hook a program on here to deal with it.
+//	run_this_if_an_unfixable_error_is_detected = "/full/path/to/application and args"; // if a problem occurs that can't be cleared by Shairport Sync itself, hook a handler program on here to deal with it.
 //	  An error code-string is passed as the last argument.
+//	  Shairport Sync will always wait for this handler to complete.
+//	  Shairport Sync will not exit automatically after executing this handler. To exit, the handler must do it itself, perhaps via a script with "/usr/bin/kill $PPID" as its last line.
 //	  Many of these "unfixable" problems are caused by malfunctioning output devices, and sometimes it is necessary to restart the whole device to clear the problem.
 //	  You could hook on a program to do this automatically, but beware -- the device may then power off and restart without warning!
-//	wait_for_completion = "no"; // set to "yes" to get Shairport Sync to wait until the "run_this..." applications have terminated before continuing
+//	wait_for_completion = "no"; // set to "yes" to get Shairport Sync to wait until the "run_this..." applications have terminated before continuing, 
+//	  except the "run_this_if_an_unfixable_error_is_detected" handler, which will always wait for completion, irrespective of this setting.
 
-//	allow_session_interruption = "no"; // set to "yes" to allow another device to interrupt Shairport Sync while it's playing from an existing audio source
+//	allow_session_interruption = "no"; // (Classic AirPlay only) Set to "yes" to allow another device to interrupt Shairport Sync while it's playing from an existing audio source
+
 //	session_timeout = 60; // wait for this number of seconds after a source disappears before terminating the session and becoming available again.
 };
 
@@ -316,7 +320,6 @@ mqtt =
 diagnostics =
 {
 //	disable_resend_requests = "no"; // set this to yes to stop Shairport Sync from requesting the retransmission of missing packets. Default is "no".
-//	log_output_to = "syslog"; // set this to "syslog" (default), "stderr" or "stdout" or a file or pipe path to specify were all logs, statistics and diagnostic messages are written to. If there's anything wrong with the file spec, output will be to "stderr".
 //	statistics = "no"; // set to "yes" to print statistics in the log
 //	log_verbosity = 0; // "0" means no debug verbosity, "3" is most verbose.
 //	log_show_file_and_line = "yes"; // set this to yes if you want the file and line number of the message source in the log file
@@ -324,6 +327,7 @@ diagnostics =
 //	log_show_time_since_last_message = "yes"; // set this to yes if you want the time since the last debug message in the debug message -- seconds down to nanoseconds
 //	drop_this_fraction_of_audio_packets = 0.0; // use this to simulate a noisy network where this fraction of UDP packets are lost in transmission. E.g. a value of 0.001 would mean an average of 0.1% of packets are lost, which is actually quite a high figure.
 //	retain_cover_art = "no"; // artwork is deleted when its corresponding track has been played. Set this to "yes" to retain all artwork permanently. Warning -- your directory might fill up.
+//	get_plist_metadata = "no"; // set this temporary setting to "yes" to get the new richer metadata stream.
 };
 _EOF_
 
