@@ -209,7 +209,7 @@ Below are minimal, copy-paste-ready examples that follow DietPi conventions.
   }
   ```
 
-### Dietpi-banner extension pattern
+### DietPi-Banner extension pattern
 
 When adding banner items, follow this minimal pattern:
 
