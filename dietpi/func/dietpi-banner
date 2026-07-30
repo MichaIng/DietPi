@@ -238,9 +238,6 @@
 	CLI_BULLET=" ${aCOLOUR[accent]}-$COLOUR_RESET"
 	CLI_SEPARATOR="${aCOLOUR[accent]}:$COLOUR_RESET"
 
-	# IP address detection (IPv4) - mawk-friendly (avoid + and {m,n})
-	IP4_re='[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*'
-
 	# DietPi version string
 	DIETPI_VERSION="$G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB.$G_DIETPI_VERSION_RC"
 	if [[ $G_GITOWNER != 'MichaIng' ]]
@@ -465,11 +462,13 @@ $CLI_LINE"
 		{
 			if command -v fail2ban-client > /dev/null
 			then
+				# IP address detection (very sloppy for IPv6) - avoid {m,n} to support mawk on Debian Bookworm
+				local IP_re='^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|[0-9a-f:]*:[0-9a-f:]*)$'
 				if [[ $EUID == 0 ]]
 				then
-					fail2ban-client banned 2> /dev/null | mawk -F\' -v ip="^$IP4_re$" '{for(i=2;i<NF;i+=2){if($i ~ ip) a[$i]=1}} END{print length(a)}'
+					fail2ban-client banned 2> /dev/null | mawk -F\' -v ip="$IP_re" '{for(i=2;i<NF;i+=2){if($i ~ ip) a[$i]=1}} END{print length(a)}'
 				else
-					sudo -n fail2ban-client banned 2> /dev/null | mawk -F\' -v ip="^$IP4_re$" '{for(i=2;i<NF;i+=2){if($i ~ ip) a[$i]=1}} END{print length(a)}' || return 2
+					sudo -n fail2ban-client banned 2> /dev/null | mawk -F\' -v ip="$IP_re" '{for(i=2;i<NF;i+=2){if($i ~ ip) a[$i]=1}} END{print length(a)}' || return 2
 				fi
 				return 0
 			else
@@ -521,48 +520,51 @@ $CLI_LINE"
 
 	Print_Network_Usage()
 	{
-
-		# Get WAN IP for namespace $1 (default if empty)
-		Get_WAN_IP()
-		{
-			local ns_cmd_prefix=()
-			if [[ $1 ]]
-			then
-				# add sudo if not root
-				(( $EUID )) && ns_cmd_prefix+=(sudo -n)
-				# add netns prefix
-				ns_cmd_prefix+=(ip netns exec "$1")
-			fi
-			"${ns_cmd_prefix[@]}" curl -sSfLm 1 'https://dietpi.com/geoip'
-		}
-
 		# Print usage stats for namespace $1 (default if empty)
 		Print_Data_Usage()
 		{
 			local netns=$1
+			local display_ns=$(G_TRUNCATE_MID "${netns:-default}" 24)
 
-			# Use an array prefix so we can run commands either in a netns
-			# (ip netns exec <ns> ...) or the default namespace, and with sudo if needed
+			# Use an array prefix to run commands either in a netns,
+			# with sudo if needed, or the default namespace
 			local ns_cmd_prefix=()
 			if [[ $netns ]]
 			then
 				# add sudo if not root
-				(( $EUID )) && ns_cmd_prefix+=(sudo -n)
+				(( $EUID )) && ns_cmd_prefix=(sudo -n)
 				# add netns prefix
 				ns_cmd_prefix+=(ip netns exec "$netns")
 			fi
 
-			# Query interface list once inside the (optional) namespace and match names
-			mapfile -t observed_ifaces < <("${ns_cmd_prefix[@]}" ip -br link 2> /dev/null | mawk '{print $1}')
+			# Obtain public IP and GeoIP info
+			local ip=$("${ns_cmd_prefix[@]}" curl -sSfLm 1 'https://dietpi.com/geoip' 2>&1)
 
-			for IFACE in "${observed_ifaces[@]}"
+			# Match all IPv4 addresses, but IPv6 addresses only from globally routable 2000::/3 block
+			if [[ $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|^[23][0-9a-f]{0,3}:[0-9a-f:]+ ]]
+			then
+				# Valid IP detected, keep as-is and print with namespace
+				echo -e "${aCOLOUR[alt]} $IP [$display_ns]"
+
+			elif [[ ! $ip ]]
+			then
+				# If the IP is empty, it likely means the namespace is disconnected or has no Internet access. Print status message.
+				echo -e "${aCOLOUR[alert]} Disconnected $CLI_SEPARATOR ${aCOLOUR[strong]}$display_ns"
+
+			else
+				# Print curl or sudo errors as is
+				echo -e "${aCOLOUR[highlight]} $IP [$display_ns]"
+			fi
+
+			# Query interface list once inside the (optional) namespace and match names - skip loopback
+			local ifaces iface
+			mapfile -t ifaces < <("${ns_cmd_prefix[@]}" ip -br link 2> /dev/null | mawk '$1!="lo" {print $1}')
+			for iface in "${ifaces[@]}"
 			do
 				# strip kernel-style peer suffix (e.g. eth0@if8) and use base name
-				local ifname=${IFACE%%@*}
-				# skip loopback
-				[[ $ifname == 'lo' ]] && continue
+				iface=${iface%%@*}
 
-				case $ifname in
+				case $iface in
 					# wired / predictable names
 					eth*|en*|lan*) :;;
 					# wireless
@@ -573,8 +575,8 @@ $CLI_LINE"
 				esac
 
 				local RX='N/A' TX='N/A' rx tx ip_addr=' - No IP - ' ip_addr_cidr
-				local rx_path="/sys/class/net/$ifname/statistics/rx_bytes"
-				local tx_path="/sys/class/net/$ifname/statistics/tx_bytes"
+				local rx_path="/sys/class/net/$iface/statistics/rx_bytes"
+				local tx_path="/sys/class/net/$iface/statistics/tx_bytes"
 
 				if [[ $netns ]];
 				then
@@ -591,42 +593,20 @@ $CLI_LINE"
 				[[ $rx =~ ^[0-9]+$ ]] && RX="$(Bytes_To_GiB "$rx") GiB"
 				[[ $tx =~ ^[0-9]+$ ]] && TX="$(Bytes_To_GiB "$tx") GiB"
 
-				# Get first IPv4 address for this interface in this namespace. If none, leave "- No IP -".
-				# Scan all fields for a matching IPv4/CIDR token.
-				ip_addr_cidr=$("${ns_cmd_prefix[@]}" ip -br -4 addr show dev "$ifname" scope global 2> /dev/null | mawk -v re="^$IP4_re/[0-9][0-9]*$" '{for(i=1;i<=NF;i++) if($i ~ re){print $i; exit}}')
+				# Get first IP address (3rd field) for this interface in this namespace. If none, leave "- No IP -".
+				ip_addr_cidr=$("${ns_cmd_prefix[@]}" ip -br addr show dev "$iface" scope global 2> /dev/null | mawk '$3!="" {print $3}}')
 				[[ $ip_addr_cidr ]] && ip_addr=${ip_addr_cidr%%/*}
 
 				[[ $RX == 'N/A' && $TX == 'N/A' ]] && continue
-				printf '%b %-23s %b TX=%11s RX=%11s\n' "$CLI_BULLET" "$ip_addr ($ifname)" "$CLI_SEPARATOR" "$TX" "$RX"
+				printf '%b %-23s %b TX=%11s RX=%11s\n' "$CLI_BULLET" "$ip_addr ($iface)" "$CLI_SEPARATOR" "$TX" "$RX"
 			done
 		}
 
+		local namespace=() ns
 		mapfile -t namespaces < <(ip netns ls | mawk 'NF>1 {print $1}')
 		# Prepend an empty entry so the default (root) namespace can be handled in the loop
-		namespaces=('' "${namespaces[@]}")
-
-		for ns in "${namespaces[@]}"
+		for ns in '' "${namespaces[@]}"
 		do
-			raw_ns=${ns:-default}
-			display_ns=$(G_TRUNCATE_MID "$raw_ns" 24)
-
-			IP=$(Get_WAN_IP "$ns" 2>&1)
-
-			if [[ $IP =~ ^$IP4_re ]]
-			then
-				# Valid IP detected, keep as-is and print with namespace
-				echo -e "${aCOLOUR[alt]} $IP [$display_ns]"
-
-			elif [[ ! $IP ]]
-			then
-				# If the IP is empty, it likely means the namespace is disconnected or has no Internet access. Print status message.
-				echo -e "${aCOLOUR[alert]} Disconnected $CLI_SEPARATOR ${aCOLOUR[strong]}$display_ns"
-
-			else
-				# Print curl errors as is
-				echo -e "${aCOLOUR[highlight]} $IP [$display_ns]"
-			fi
-
 			Print_Data_Usage "$ns"
 		done
 	}
