@@ -35,7 +35,7 @@ BEGIN {
 
 {
     ## ASCII ART: Skip or Hide
-    if (match($0, /^[^a-zA-Z0-9─]+$/)) {
+    if (match($0, /^[^a-zA-UW-Z0-9─]+$/)) {
         if (MAXCOL > (RSTART + RLENGTH)) {print $0}
         next
     }
