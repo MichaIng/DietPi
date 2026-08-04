@@ -23,6 +23,7 @@
 	# - PREIMAGE_INFO='Some GNU/Linux'
 	# - HW_MODEL=0				(must match one of the supported IDs below)
 	# - WIFI_REQUIRED=0			[01]
+	# - GUEST_NETWORK_REQUIRED=0		[01] (containers only: install ifupdown + DHCP client and configure Ethernet, for containers with their own network stack, e.g. Proxmox LXC)
 	# - DISTRO_TARGET=8			[789] (Bookworm: 7, Trixie: 8, Forky: 9)
 	# - TEST_KERNEL=1			Install test kernel from https://dietpi.com/downloads/binaries/testing/
 	# - TEST_UBOOT=1			Install test U-Boot from https://dietpi.com/downloads/binaries/testing/
@@ -565,6 +566,10 @@ _EOF_
 		# shellcheck disable=SC2015
 		(( $WIFI_REQUIRED )) && G_DIETPI-NOTIFY 2 'Marking WiFi as required' || G_DIETPI-NOTIFY 2 'Marking WiFi as NOT required'
 
+		# Guest network flag, effective on containers only: https://github.com/MichaIng/DietPi/issues/5204
+		[[ $G_HW_MODEL == 75 && $GUEST_NETWORK_REQUIRED == 1 ]] || GUEST_NETWORK_REQUIRED=0
+		(( $GUEST_NETWORK_REQUIRED )) && G_DIETPI-NOTIFY 2 'Marking guest network as required'
+
 		# Distro selection
 		DISTRO_LIST_ARRAY=(
 
@@ -1042,6 +1047,12 @@ _EOF_'
 		if (( $G_HW_MODEL == 75 ))
 		then
 			aPACKAGES_REQUIRED_INSTALL+=('iproute2')
+			if (( $GUEST_NETWORK_REQUIRED ))
+			then
+				aPACKAGES_REQUIRED_INSTALL+=('ifupdown')	# Network interface configuration
+				# DHCP client: Forky removes isc-dhcp-client
+				(( $DISTRO_TARGET < 9 )) && aPACKAGES_REQUIRED_INSTALL+=('isc-dhcp-client') || aPACKAGES_REQUIRED_INSTALL+=('dhcpcd-base')
+			fi
 			(( $G_RASPBIAN == 1 )) && aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-archive-keyring')
 
 			# Move Raspbian key to active place (until Trixie) and remove obsolete combined keyring
@@ -1971,6 +1982,29 @@ wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
 _EOF_'
 			# Wait for network at boot by default
 			/boot/dietpi/func/dietpi-set_software boot_wait_for_network 1
+
+		elif (( $GUEST_NETWORK_REQUIRED ))
+		then
+			# Containers do not receive udev events, hence "auto" instead of "allow-hotplug"
+			G_EXEC_DESC='Configuring network interfaces'
+			G_EXEC eval 'cat << _EOF_ > /etc/network/interfaces
+# Location: /etc/network/interfaces
+# Please modify network settings via: dietpi-config
+# Or create your own drop-ins in: /etc/network/interfaces.d/
+
+# Drop-in configs
+source interfaces.d/*
+
+# Ethernet
+auto eth0
+iface eth0 inet dhcp
+address 192.168.0.100
+netmask 255.255.255.0
+gateway 192.168.0.1
+#dns-nameservers 9.9.9.9 149.112.112.112
+_EOF_'
+			# Wait for network at boot by default
+			/boot/dietpi/func/dietpi-set_software boot_wait_for_network 1
 		fi
 
 		#-----------------------------------------------------------------------------------
@@ -2360,7 +2394,13 @@ _EOF_
 		then
 			# Dropbear is not pre-installed on container images
 			G_CONFIG_INJECT 'aSOFTWARE_INSTALL_STATE\[104\]' 'aSOFTWARE_INSTALL_STATE[104]=0' /boot/dietpi/.installed
-			G_CONFIG_INJECT 'AUTO_SETUP_SSH_SERVER_INDEX=' 'AUTO_SETUP_SSH_SERVER_INDEX=0' /boot/dietpi.txt
+			# Guest network containers get it installed on first run, like regular images
+			if (( $GUEST_NETWORK_REQUIRED ))
+			then
+				G_CONFIG_INJECT 'AUTO_SETUP_SSH_SERVER_INDEX=' 'AUTO_SETUP_SSH_SERVER_INDEX=-1' /boot/dietpi.txt
+			else
+				G_CONFIG_INJECT 'AUTO_SETUP_SSH_SERVER_INDEX=' 'AUTO_SETUP_SSH_SERVER_INDEX=0' /boot/dietpi.txt
+			fi
 		else
 			G_CONFIG_INJECT 'aSOFTWARE_INSTALL_STATE\[104\]' 'aSOFTWARE_INSTALL_STATE[104]=2' /boot/dietpi/.installed
 			G_CONFIG_INJECT 'AUTO_SETUP_SSH_SERVER_INDEX=' 'AUTO_SETUP_SSH_SERVER_INDEX=-1' /boot/dietpi.txt

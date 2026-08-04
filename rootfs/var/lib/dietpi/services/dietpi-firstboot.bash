@@ -214,37 +214,44 @@ _EOF_
 			/boot/dietpi/func/dietpi-set_software locale "$autoinstall_language"
 		fi
 
-		# Skip keyboard, SSH, serial console and network setup on container systems
-		(( $G_HW_MODEL == 75 )) && return 0
+		# Containers: Skip keyboard, SSH, serial console and Ethernet link speed setup, and skip network setup as well, unless the container has its own network stack, indicated by installed ifupdown: https://github.com/MichaIng/DietPi/issues/5204
+		if (( $G_HW_MODEL == 75 ))
+		then
+			dpkg-query -W -f='${db:Status-Abbrev}' ifupdown 2> /dev/null | grep -q '^ii' || return 0
+		else
+			# Apply keyboard layout
+			/boot/dietpi/func/dietpi-set_hardware keyboard autosetup
 
-		# Apply keyboard layout
-		/boot/dietpi/func/dietpi-set_hardware keyboard autosetup
+			# Disable serial console if set in dietpi.txt
+			grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware serialconsole disable
 
-		# Disable serial console if set in dietpi.txt
-		grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware serialconsole disable
+			# Regenerate unique Dropbear host keys
+			local i type
+			for i in /etc/dropbear/dropbear_*_host_key
+			do
+				type=${i#/etc/dropbear/dropbear_}
+				type=${type%_host_key}
+				rm -v "$i"
+				dropbearkey -t "$type" -f "$i"
+			done
 
-		# Regenerate unique Dropbear host keys
-		local i type
-		for i in /etc/dropbear/dropbear_*_host_key
-		do
-			type=${i#/etc/dropbear/dropbear_}
-			type=${type%_host_key}
-			rm -v "$i"
-			dropbearkey -t "$type" -f "$i"
-		done
+			# Apply SSH pubkey(s) from dietpi.txt
+			/boot/dietpi/func/dietpi-set_software add_ssh_pubkeys
 
-		# Apply SSH pubkey(s) from dietpi.txt
-		/boot/dietpi/func/dietpi-set_software add_ssh_pubkeys
+			# Apply SSH password login setting
+			/boot/dietpi/func/dietpi-set_software disable_ssh_password_logins
 
-		# Apply SSH password login setting
-		/boot/dietpi/func/dietpi-set_software disable_ssh_password_logins
-
-		# Apply forced Ethernet link speed if set in dietpi.txt
-		/boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
+			# Apply forced Ethernet link speed if set in dietpi.txt
+			/boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
+		fi
 
 		# Network setup
 		# - Grab available network interfaces
 		local iface_eth=$(G_GET_NET -q -t eth iface)
+		# Containers may use different interface names, e.g. "host0" with systemd-nspawn
+		[[ $iface_eth ]] || (( $G_HW_MODEL != 75 )) || iface_eth=$(ip -o link show | mawk -F': ' '$2!="lo" {print $2; exit}')
+		# Strip the "@host_side" suffix which "ip" prints for veth interfaces, G_GET_NET passes it through as well
+		iface_eth=${iface_eth%%@*}
 		[[ $iface_eth ]] || iface_eth='eth0'
 		local iface_wlan=$(G_GET_NET -q -t wlan iface)
 		[[ $iface_wlan ]] || iface_wlan='wlan0'
@@ -261,6 +268,10 @@ _EOF_
 		local static_mask=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_MASK=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		local static_gateway=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_GATEWAY=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		local static_dns=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_DNS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+
+		# - Containers: No WiFi, and no udev events, hence "auto" instead of "allow-hotplug"
+		local eth_mode='allow-hotplug'
+		(( $G_HW_MODEL == 75 )) && eth_mode='auto' wifi_enabled=0
 
 		# - WiFi
 		if (( $wifi_enabled ))
@@ -284,7 +295,7 @@ _EOF_
 		then
 			# Enable Ethernet, disable WiFi
 			wifi_enabled=0
-			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\allow-hotplug $iface_eth" /etc/network/interfaces
+			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\\$eth_mode $iface_eth" /etc/network/interfaces
 			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\#allow-hotplug $iface_wlan" /etc/network/interfaces
 		fi
 
@@ -312,8 +323,8 @@ _EOF_
 			fi
 		fi
 
-		# - IPv6
-		/boot/dietpi/func/dietpi-set_hardware enableipv6 "$(( ! $(grep -cm1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=0' /boot/dietpi.txt) ))"
+		# - IPv6: Skipped on containers, since the host kernel controls the related sysctl settings
+		(( $G_HW_MODEL == 75 )) || /boot/dietpi/func/dietpi-set_hardware enableipv6 "$(( ! $(grep -cm1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=0' /boot/dietpi.txt) ))"
 
 		# - Configure enabled interfaces now, /etc/network/interfaces will be effective from next boot on
 		#	Failsafe: Bring up Ethernet, whenever WiFi is disabled or fails to be configured, e.g. due to wrong credentials
@@ -322,6 +333,9 @@ _EOF_
 
 		# - Boot wait for network
 		/boot/dietpi/func/dietpi-set_software boot_wait_for_network "$(( ! $(grep -cm1 '^[[:blank:]]*AUTO_SETUP_BOOT_WAIT_FOR_NETWORK=0' /boot/dietpi.txt) ))"
+
+		# Containers are done at this point: time sync and bootloader are handled by the host
+		(( $G_HW_MODEL == 75 )) && return 0
 
 		# Apply network time sync mirror and force sync now to speed up first run setup
 		/boot/dietpi/func/dietpi-set_software timesync-mirror
