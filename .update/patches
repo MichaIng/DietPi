@@ -2046,9 +2046,9 @@ Patch_9_19()
 {
 	# Raspberry Pi with new kernel stack
 	if (( $G_HW_MODEL < 10 )) && dpkg-query -s 'raspi-firmware' 2> /dev/null | grep -q '^Status: install ok installed$' &&
-		! grep '^[[:blank:]]*SKIP_INITRAMFS_GEN=yes' /etc/default/raspi-firmware &&
-		! grep -q '^[[:blank:]]*auto_initramfs=' /boot/config.txt &&
-		! grep -q '^[[:blank:]]*initramfs[[:blank:]]' /boot/config.txt
+		! grep -q '^[[:blank:]]*SKIP_INITRAMFS_GEN=yes' /etc/default/raspi-firmware &&
+		! grep -q '^[[:blank:]]*auto_initramfs=' /boot/firmware/config.txt &&
+		! grep -q '^[[:blank:]]*initramfs[[:blank:]]' /boot/firmware/config.txt
 	then
 		G_DIETPI-NOTIFY 2 'Disabling initramfs generation, since it is not explicitly enabled in config.txt'
 		G_CONFIG_INJECT 'SKIP_INITRAMFS_GEN=' 'SKIP_INITRAMFS_GEN=yes' /etc/default/raspi-firmware
@@ -2490,6 +2490,72 @@ Patch_10_5(){ :; }
 
 Patch_10_6()
 {
+	# Assure "mount" is not autoremoved on Forky, just install/mark as manual on all versions, as it is required even for systemd mount units, but degraded to recommendation on Forky
+	G_AGI mount
+
+	# Raspberry Pi with initramfs disabled and not initramfs-tools installed
+	if (( $G_HW_MODEL < 10 )) && grep -q '^[[:blank:]]*SKIP_INITRAMFS_GEN=yes' /etc/default/raspi-firmware && ! dpkg-query -s 'initramfs-tools' 2> /dev/null | grep -q '^Status: install ok installed$'
+	then
+		G_DIETPI-NOTIFY 2 'Switching to initramfs-tools to satisfy RPi kernel dependency, since other implementations keep generating initramfs images on "update-initramfs" trigger, even if none exist and the kernel declares not to require it.'
+		G_AGI initramfs-tools
+		G_EXEC rm -f /boot/initrd.img-* /boot/firmware/initramfs*
+		G_EXEC apt-mark auto initramfs-tools
+	fi
+
+	# Remove old FTP client dir, which is not used anymore since years
+	if [[ -d '/mnt/ftp_client' ]]
+	then
+		[[ -f '/mnt/ftp_client/readme.txt' ]] && G_EXEC rm /mnt/ftp_client/readme.txt
+		find /mnt/ftp_client -maxdepth 0 -empty -exec rmdir -v /mnt/ftp_client +
+	fi
+
+	# dietpi-banner migrations
+	if [[ -f '/boot/dietpi/.dietpi-banner' ]]
+	then
+		local i mapping userdata name command
+
+		G_DIETPI-NOTIFY 2 'Migrating /boot/dietpi/.dietpi-banner to new named arrays and options'
+
+		# Migrate legacy numeric-indexed aENABLED to named form, skipping disk usage (7 and 8)
+		mapping=(
+			device_model uptime cpu_temp hostname nis_domainname lan_ip wan_ip '' ''
+			weather custom_commands dietpi_commands motd vpn_status large_hostname
+			credits letsencrypt ram_usage load_average word_wrap kernel
+		)
+		for i in {0..6} {9..20}
+		do
+			G_EXEC sed --follow-symlinks -i "s/^[[:blank:]]*aENABLED\[$i\]=/aENABLED[${mapping[i]}]=/" /boot/dietpi/.dietpi-banner
+		done
+
+		# Migrate legacy disk usage options
+		G_EXEC sed --follow-symlinks -i '\|^[[:blank:]]*aENABLED\[7\]=1|c\aDISK_SPACE_MOUNTS+=(/)' /boot/dietpi/.dietpi-banner
+		userdata=$(findmnt -Ufvnro TARGET -T /mnt/dietpi_userdata)
+		[[ $userdata == '/' ]] || G_EXEC sed --follow-symlinks -i "\|^[[:blank:]]*aENABLED\[8\]=1|c\aDISK_SPACE_MOUNTS+=('${userdata//\'/\'\\\'\'}')" /boot/dietpi/.dietpi-banner
+		grep -q '^aDISK_SPACE_MOUNTS+=' /boot/dietpi/.dietpi-banner && G_CONFIG_INJECT 'aENABLED\[disk_usage\]=' 'aENABLED[disk_usage]=1' /boot/dietpi/.dietpi-banner
+
+		# Migrate legacy custom command file to aCUSTOM_COMMANDS array if present
+		if [[ -f '/boot/dietpi/.dietpi-banner_custom' ]]
+		then
+			if grep -q '^aENABLED\[custom_commands\]=1' /boot/dietpi/.dietpi-banner
+			then
+				name=$(sed -n '/^[[:blank:]]*aDESCRIPTION\[10\]=/{s/^[^=]*=//p;q}' /boot/dietpi/.dietpi-banner)
+				read -r command < /boot/dietpi/.dietpi-banner_custom
+				GCI_PRESERVE=1 G_CONFIG_INJECT "aCUSTOM_COMMANDS\[${name:-migrated}\]=" "aCUSTOM_COMMANDS[${name:-migrated}]='${command//\'/\'\\\'\'}'" /boot/dietpi/.dietpi-banner
+			fi
+			G_EXEC rm /boot/dietpi/.dietpi-banner_custom
+		fi
+
+		# Migrate legacy numeric-indexed aCOLOUR to named form
+		mapping=(accent strong weak alert)
+		for i in {0..3}
+		do
+			G_EXEC sed --follow-symlinks -i "s/^[[:blank:]]*aCOLOUR\[$i\]=/aCOLOUR[${mapping[i]}]=/" /boot/dietpi/.dietpi-banner
+		done
+
+		# Remove left invalid entries
+		G_EXEC sed --follow-symlinks -Ei -e '/^[[:blank:]]*a(ENABLED|COLOUR|DESCRIPTION)\[[0-9]+\]=/d' /boot/dietpi/.dietpi-banner
+	fi
+
 	# Software updates, migrations and patches
 	if [[ -f '/boot/dietpi/.installed' ]]
 	then
