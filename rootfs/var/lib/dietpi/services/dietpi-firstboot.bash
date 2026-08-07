@@ -247,14 +247,13 @@ _EOF_
 		then
 			# - Grab available network interfaces
 			local iface_eth=$(G_GET_NET -q -t eth iface)
-			# Containers may use different interface names, e.g. "host0" with systemd-nspawn; strip the "@host_side" suffix which "ip" prints for veth interfaces
-			[[ $iface_eth ]] || (( $G_HW_MODEL != 75 )) || iface_eth=$(ip -o link show | mawk -F': ' '$2!="lo" {print $2; exit}')
-			iface_eth=${iface_eth%%@*}
+			# Containers may use different interface names, e.g. "host0" with systemd-nspawn, hence fall back to the best available interface
+			[[ $iface_eth ]] || (( $G_HW_MODEL != 75 )) || iface_eth=$(G_GET_NET -q iface)
 			[[ $iface_eth ]] || iface_eth='eth0'
 			local iface_wlan=$(G_GET_NET -q -t wlan iface)
 			[[ $iface_wlan ]] || iface_wlan='wlan0'
 
-			# - Replace interface names with the ones obtained above
+			# - Replace interface names with the ones obtained above, hence the rules below match on those
 			sed --follow-symlinks -i "s/eth[0-9]/$iface_eth/g" /etc/network/interfaces
 			sed --follow-symlinks -i "s/wlan[0-9]/$iface_wlan/g" /etc/network/interfaces
 
@@ -285,16 +284,16 @@ _EOF_
 
 				# Enable WiFi, disable Ethernet
 				ethernet_enabled=0
-				sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\allow-hotplug $iface_wlan" /etc/network/interfaces
-				sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\#allow-hotplug $iface_eth" /etc/network/interfaces
+				sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+$iface_wlan/c\allow-hotplug $iface_wlan" /etc/network/interfaces
+				sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+$iface_eth/c\#allow-hotplug $iface_eth" /etc/network/interfaces
 
 			# - Ethernet
 			elif (( $ethernet_enabled ))
 			then
 				# Enable Ethernet, disable WiFi
 				wifi_enabled=0
-				sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\\$eth_mode $iface_eth" /etc/network/interfaces
-				sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\#allow-hotplug $iface_wlan" /etc/network/interfaces
+				sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+$iface_eth/c\\$eth_mode $iface_eth" /etc/network/interfaces
+				sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+$iface_wlan/c\#allow-hotplug $iface_wlan" /etc/network/interfaces
 			fi
 
 			# - Static IP
@@ -302,11 +301,11 @@ _EOF_
 			then
 				if (( $wifi_enabled ))
 				then
-					sed --follow-symlinks -i "/iface wlan/c\iface $iface_wlan inet static" /etc/network/interfaces
+					sed --follow-symlinks -i "/iface $iface_wlan/c\iface $iface_wlan inet static" /etc/network/interfaces
 
 				elif (( $ethernet_enabled ))
 				then
-					sed --follow-symlinks -i "/iface eth/c\iface $iface_eth inet static" /etc/network/interfaces
+					sed --follow-symlinks -i "/iface $iface_eth/c\iface $iface_eth inet static" /etc/network/interfaces
 				fi
 				sed --follow-symlinks -i "/address/c\address $static_ip" /etc/network/interfaces
 				sed --follow-symlinks -i "/netmask/c\netmask $static_mask" /etc/network/interfaces
