@@ -4,7 +4,7 @@
 grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l'
 
 # Dependencies
-adeps_build=('automake' 'pkg-config' 'make' 'g++' 'libpopt-dev' 'libconfig-dev' 'libssl-dev' 'libsoxr-dev' 'libavahi-client-dev' 'libasound2-dev' 'libglib2.0-dev' 'libmosquitto-dev' 'avahi-daemon' 'git' 'libplist-dev' 'libsodium-dev' 'libgcrypt20-dev' 'libavformat-dev' 'xxd')
+adeps_build=('automake' 'pkg-config' 'make' 'g++' 'libpopt-dev' 'libconfig-dev' 'libssl-dev' 'libsoxr-dev' 'libavahi-client-dev' 'libasound2-dev' 'libglib2.0-dev' 'libmosquitto-dev' 'avahi-daemon' 'git' 'libplist-dev' 'libsodium-dev' 'libgcrypt20-dev' 'libavformat-dev' 'xxd' 'libplist-utils')
 adeps=('libc6' 'libavahi-client3' 'libsoxr0' 'libpopt0' 'libmosquitto1' 'avahi-daemon')
 adeps2=('libgcrypt20')
 case $G_DISTRO in
@@ -45,7 +45,7 @@ G_EXEC rm "$version.tar.gz"
 G_DIETPI-NOTIFY 2 "Compiling $PRETTY"
 G_EXEC cd "$NAME-$version"
 G_EXEC_OUTPUT=1 G_EXEC autoreconf -fiW all
-CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --with-alsa --with-avahi --with-ssl=openssl --with-soxr --with-metadata --with-systemd-startup --with-dbus-interface --with-mpris-interface --with-mqtt-client --with-pipe --with-stdout --with-ffmpeg
+CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --with-alsa --with-avahi --with-ssl=openssl --with-soxr --with-metadata{,-pipe,-multicast} --with-systemd-startup --with-dbus-interface --with-mpris-interface --with-mqtt-client --with-pipe --with-stdout --with-ffmpeg
 G_EXEC_OUTPUT=1 G_EXEC make
 G_EXEC strip --remove-section=.comment --remove-section=.note "$NAME"
 
@@ -87,9 +87,14 @@ general =
 //				%v for the version number, e.g. 3.0 and
 //				%V for the full version string, e.g. 3.3-OpenSSL-Avahi-ALSA-soxr-metadata-sysconfdir:/etc
 //		Overall length can not exceed 50 characters. Example: "Shairport Sync %v on %H".
-//	password = "secret"; // (AirPlay 1 only) leave this commented out if you don't want to require a password
+//
+//	password = "secret"; // leave this commented out if you don't want to require a password
+//	About the "service_type" setting below: On an AirPlay-2-capable Shairport Sync, if you wish to offer only the older "classic" AirPlay (sometimes called AirPlay 1), set service_type to "classic".
+//	A potential use of this would be for Apple Music on Windows, which is not compatible with the AirPlay 2 service offered by Shairport Sync, but which is compatible with the classic service.
+//	The default is "auto", which means that the AirPlay 2 service will be provided if NQPTP is present and "classic" AirPlay will be provided otherwise, with "(Classic)" appended to the service name (see above).
+//	service_type = "auto"; // This can be "auto", "airplay2" or "classic".
 //	The interpolation setting below controls how Shairport Sync adds or removes frames of audio to keep in sync.
-//			"auto" (default) measures the processor's floating point speed and chooses "soxr" if available and it is fast enough. Otherwise, "vernier" is selected.
+//			"auto" (default) measures the processor's floating point speed and chooses "soxr" if available and if the processor is fast enough. Otherwise, "vernier" is selected.
 //			"soxr" uses the SoX library to recode a packet of frames to a new packet containing more or fewer frames. This needs a processor with fast floating point capability.
 //			"vernier" recodes a packet of frames to a new packet containing more or fewer frames. This is recommended for low powered devices.
 //			"basic" causes the simple removal or insertion of frames in a packet of frames. Not recommended.
@@ -169,13 +174,17 @@ sessioncontrol =
 //	run_this_before_play_begins = "/full/path/to/application and args"; // make sure the application has executable permission. If it's a script, include the shebang (#!/bin/...) on the first line
 //	run_this_after_play_ends = "/full/path/to/application and args"; // make sure the application has executable permission. If it's a script, include the shebang (#!/bin/...) on the first line
 
-//	run_this_if_an_unfixable_error_is_detected = "/full/path/to/application and args"; // if a problem occurs that can't be cleared by Shairport Sync itself, hook a program on here to deal with it.
+//	run_this_if_an_unfixable_error_is_detected = "/full/path/to/application and args"; // if a problem occurs that can't be cleared by Shairport Sync itself, hook a handler program on here to deal with it.
 //	  An error code-string is passed as the last argument.
+//	  Shairport Sync will always wait for this handler to complete.
+//	  Shairport Sync will not exit automatically after executing this handler. To exit, the handler must do it itself, perhaps via a script with "/usr/bin/kill $PPID" as its last line.
 //	  Many of these "unfixable" problems are caused by malfunctioning output devices, and sometimes it is necessary to restart the whole device to clear the problem.
 //	  You could hook on a program to do this automatically, but beware -- the device may then power off and restart without warning!
-//	wait_for_completion = "no"; // set to "yes" to get Shairport Sync to wait until the "run_this..." applications have terminated before continuing
+//	wait_for_completion = "no"; // set to "yes" to get Shairport Sync to wait until the "run_this..." applications have terminated before continuing,
+//	  except the "run_this_if_an_unfixable_error_is_detected" handler, which will always wait for completion, irrespective of this setting.
 
-//	allow_session_interruption = "no"; // set to "yes" to allow another device to interrupt Shairport Sync while it's playing from an existing audio source
+//	allow_session_interruption = "no"; // (Classic AirPlay only) Set to "yes" to allow another device to interrupt Shairport Sync while it's playing from an existing audio source
+
 //	session_timeout = 60; // wait for this number of seconds after a source disappears before terminating the session and becoming available again.
 };
 
@@ -311,7 +320,6 @@ mqtt =
 diagnostics =
 {
 //	disable_resend_requests = "no"; // set this to yes to stop Shairport Sync from requesting the retransmission of missing packets. Default is "no".
-//	log_output_to = "syslog"; // set this to "syslog" (default), "stderr" or "stdout" or a file or pipe path to specify were all logs, statistics and diagnostic messages are written to. If there's anything wrong with the file spec, output will be to "stderr".
 //	statistics = "no"; // set to "yes" to print statistics in the log
 //	log_verbosity = 0; // "0" means no debug verbosity, "3" is most verbose.
 //	log_show_file_and_line = "yes"; // set this to yes if you want the file and line number of the message source in the log file
@@ -319,6 +327,7 @@ diagnostics =
 //	log_show_time_since_last_message = "yes"; // set this to yes if you want the time since the last debug message in the debug message -- seconds down to nanoseconds
 //	drop_this_fraction_of_audio_packets = 0.0; // use this to simulate a noisy network where this fraction of UDP packets are lost in transmission. E.g. a value of 0.001 would mean an average of 0.1% of packets are lost, which is actually quite a high figure.
 //	retain_cover_art = "no"; // artwork is deleted when its corresponding track has been played. Set this to "yes" to retain all artwork permanently. Warning -- your directory might fill up.
+//	get_plist_metadata = "no"; // set this temporary setting to "yes" to get the new richer metadata stream.
 };
 _EOF_
 
@@ -405,14 +414,15 @@ G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_N
 old_version=$(dpkg-deb -f package.deb Version)
 G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
-[[ $old_version == "$version-"* ]] && version+="-dietpi$((suffix+1))" || version+='-dietpi1'
+# - Leave $version variable untouched, used by AirPlay 2 build below
+[[ $old_version == "$version-dietpi"* ]] && suffix="dietpi$((suffix+1))" || suffix='dietpi1'
 G_DIETPI-NOTIFY 2 "Old package version is:       \e[33m${old_version:-N/A}"
-G_DIETPI-NOTIFY 2 "Building new package version: \e[33m$version"
+G_DIETPI-NOTIFY 2 "Building new package version: \e[33m$version-$suffix"
 
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: $NAME
-Version: $version
+Version: $version-$suffix
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
@@ -453,7 +463,7 @@ G_EXEC strip --remove-section=.comment --remove-section=.note nqptp
 G_EXEC cd "../$NAME-$version"
 G_EXEC_OUTPUT=1 G_EXEC make clean
 G_EXEC_OUTPUT=1 G_EXEC autoreconf -fiW all
-CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --with-alsa --with-avahi --with-ssl=openssl --with-soxr --with-metadata --with-systemd-startup --with-dbus-interface --with-mpris-interface --with-mqtt-client --with-pipe --with-stdout --with-airplay-2
+CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --with-alsa --with-avahi --with-ssl=openssl --with-soxr --with-metadata{,-pipe,-multicast} --with-systemd-startup --with-dbus-interface --with-mpris-interface --with-mqtt-client --with-pipe --with-stdout --with-airplay-2
 G_EXEC_OUTPUT=1 G_EXEC make
 G_EXEC strip --remove-section=.comment --remove-section=.note "$NAME"
 
@@ -464,6 +474,9 @@ DIR=${DIR/sync_/sync-airplay2_}
 
 # Binary
 G_EXEC cp -a "$NAME-$version/$NAME" "$DIR/usr/local/bin/"
+
+# systemd service
+G_EXEC cp "$NAME-$version/scripts/$NAME.service" "$DIR/lib/systemd/system/"
 
 # NQPTP
 G_EXEC cp -a nqptp/nqptp "$DIR/usr/local/bin/"
@@ -585,7 +598,7 @@ done
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: $NAME-airplay2
-Version: $version
+Version: $version-$suffix
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -uR)

@@ -7,16 +7,16 @@ G_AGUP
 G_AGDUG make gcc libc6-dev libasound2-dev libflac-dev libmad0-dev libvorbis-dev libmpg123-dev libavformat-dev libsoxr-dev liblirc-dev libfaad-dev libssl-dev libopus-dev
 
 # Runtime deps
-adeps=('libc6' 'libasound2' 'libmad0' 'libvorbisfile3' 'libmpg123-0' 'libsoxr0' 'liblirc-client0' 'libfaad2' 'libssl3' 'libopus0')
+adeps=('libc6' 'libmad0' 'libvorbisfile3' 'libsoxr0' 'libfaad2' 'libopus0')
 case $G_DISTRO in
-	7) adeps+=('libflac12' 'libavformat59');;
-	8|9) adeps+=('libflac14' 'libavformat61');;
+	7) adeps+=('libasound2' 'libflac12' 'libmpg123-0' 'libavformat59' 'liblirc-client0' 'libssl3');;
+	8) adeps+=('libasound2t64' 'libflac14' 'libmpg123-0t64' 'libavformat61' 'liblirc-client0t64' 'libssl3t64');;
+	9) adeps+=('libasound2t64' 'libflac14' 'libmpg123-0t64' 'libavformat62' 'liblirc-client0t64' 'libssl3t64');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 for i in "${adeps[@]}"
 do
-	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Trixie: https://bugs.debian.org/1065394
-	dpkg-query -s "$i" &> /dev/null || dpkg-query -s "${i}t64" &> /dev/null && continue
+	dpkg-query -s "$i" &> /dev/null && continue
 	G_DIETPI-NOTIFY 1 "Expected dependency package was not installed: $i"
 	exit 1
 done
@@ -52,13 +52,13 @@ G_EXEC eval 'gzip -c squeezelite-master/doc/squeezelite.1 > $DIR/usr/share/man/m
 G_EXEC cp squeezelite-master/LICENSE.txt "$DIR/usr/share/doc/squeezelite/copyright"
 
 # - Environment file
-cat << '_EOF_' > "$DIR/etc/default/squeezelite"
+cat << '_EOF_' > "$DIR/etc/default/squeezelite" || exit 1
 # Squeezelite command-line arguments: https://ralph-irving.github.io/squeezelite.html
 ARGS='-W -C 5 -n DietPi-Squeezelite'
 _EOF_
 
 # - systemd service
-cat << '_EOF_' > "$DIR/lib/systemd/system/squeezelite.service"
+cat << '_EOF_' > "$DIR/lib/systemd/system/squeezelite.service" || exit 1
 [Unit]
 Description=Squeezelite (DietPi)
 Documentation=man:squeezelite(1) https://ralph-irving.github.io/squeezelite.html
@@ -75,13 +75,14 @@ WantedBy=multi-user.target
 _EOF_
 
 # - postinst
-cat << '_EOF_' > "$DIR/DEBIAN/postinst"
-#!/bin/sh
+cat << '_EOF_' > "$DIR/DEBIAN/postinst" || exit 1
+#!/bin/dash -e
 if [ -d '/run/systemd/system' ]
 then
 	if getent passwd squeezelite > /dev/null
 	then
 		echo 'Configuring Squeezelite service user ...'
+		[ ~squeezelite = '/nonexistent' ] || systemctl stop squeezelite
 		usermod -aG audio -d /nonexistent -s /usr/sbin/nologin squeezelite
 	else
 		echo 'Creating Squeezelite service user ...'
@@ -96,8 +97,8 @@ fi
 _EOF_
 
 # - prerm
-cat << '_EOF_' > "$DIR/DEBIAN/prerm"
-#!/bin/sh
+cat << '_EOF_' > "$DIR/DEBIAN/prerm" || exit 1
+#!/bin/dash -e
 if [ "$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/squeezelite.service' ]
 then
 	echo 'Deconfiguring Squeezelite systemd service ...'
@@ -107,8 +108,8 @@ fi
 _EOF_
 
 # - postrm
-cat << '_EOF_' > "$DIR/DEBIAN/postrm"
-#!/bin/sh
+cat << '_EOF_' > "$DIR/DEBIAN/postrm" || exit 1
+#!/bin/dash -e
 if [ "$1" = 'purge' ]
 then
 	if [ -d '/etc/systemd/system/squeezelite.service.d' ]
@@ -142,8 +143,6 @@ find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "
 DEPS_APT_VERSIONED=
 for i in "${adeps[@]}"
 do
-	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Trixie: https://bugs.debian.org/1065394
-	dpkg-query -s "$i" &> /dev/null || i+='t64'
 	DEPS_APT_VERSIONED+=" $i (>= $(dpkg-query -Wf '${VERSION}' "$i")),"
 done
 DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
@@ -156,13 +155,14 @@ G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_N
 old_version=$(dpkg-deb -f package.deb Version)
 G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
-[[ $old_version == "$version-"* ]] && suffix="dietpi$((suffix+1))" || suffix="dietpi1"
-G_DIETPI-NOTIFY 2 "Building package version $version-$suffix ..."
+[[ $old_version == "$version-"* ]] && version+="-dietpi$((suffix+1))" || version+='-dietpi1'
+G_DIETPI-NOTIFY 2 "Old package version is:       \e[33m${old_version:-N/A}"
+G_DIETPI-NOTIFY 2 "Building new package version: \e[33m$version"
 
 # - control
-cat << _EOF_ > "$DIR/DEBIAN/control"
+cat << _EOF_ > "$DIR/DEBIAN/control" || exit 1
 Package: squeezelite
-Version: $version-$suffix
+Version: $version
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -uR)
@@ -189,9 +189,6 @@ G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{pri
 
 # Build DEB package
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
-
-# Cleanup
-G_EXEC rm -R "$DIR" squeezelite-master
 
 exit 0
 }

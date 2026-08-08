@@ -2046,9 +2046,9 @@ Patch_9_19()
 {
 	# Raspberry Pi with new kernel stack
 	if (( $G_HW_MODEL < 10 )) && dpkg-query -s 'raspi-firmware' 2> /dev/null | grep -q '^Status: install ok installed$' &&
-		! grep '^[[:blank:]]*SKIP_INITRAMFS_GEN=yes' /etc/default/raspi-firmware &&
-		! grep -q '^[[:blank:]]*auto_initramfs=' /boot/config.txt &&
-		! grep -q '^[[:blank:]]*initramfs[[:blank:]]' /boot/config.txt
+		! grep -q '^[[:blank:]]*SKIP_INITRAMFS_GEN=yes' /etc/default/raspi-firmware &&
+		! grep -q '^[[:blank:]]*auto_initramfs=' /boot/firmware/config.txt &&
+		! grep -q '^[[:blank:]]*initramfs[[:blank:]]' /boot/firmware/config.txt
 	then
 		G_DIETPI-NOTIFY 2 'Disabling initramfs generation, since it is not explicitly enabled in config.txt'
 		G_CONFIG_INJECT 'SKIP_INITRAMFS_GEN=' 'SKIP_INITRAMFS_GEN=yes' /etc/default/raspi-firmware
@@ -2486,11 +2486,101 @@ _EOF_
 	fi
 }
 
-Patch_10_5()
+Patch_10_5(){ :; }
+
+Patch_10_6()
 {
+	# Assure "mount" is not autoremoved on Forky, just install/mark as manual on all versions, as it is required even for systemd mount units, but degraded to recommendation on Forky
+	G_AGI mount
+
+	# Raspberry Pi with initramfs disabled and not initramfs-tools installed
+	if (( $G_HW_MODEL < 10 )) && grep -q '^[[:blank:]]*SKIP_INITRAMFS_GEN=yes' /etc/default/raspi-firmware && ! dpkg-query -s 'initramfs-tools' 2> /dev/null | grep -q '^Status: install ok installed$'
+	then
+		G_DIETPI-NOTIFY 2 'Switching to initramfs-tools to satisfy RPi kernel dependency, since other implementations keep generating initramfs images on "update-initramfs" trigger, even if none exist and the kernel declares not to require it.'
+		G_AGI initramfs-tools
+		G_EXEC rm -f /boot/initrd.img-* /boot/firmware/initramfs*
+		G_EXEC apt-mark auto initramfs-tools
+	fi
+
+	# Remove old FTP client dir, which is not used anymore since years
+	if [[ -d '/mnt/ftp_client' ]]
+	then
+		[[ -f '/mnt/ftp_client/readme.txt' ]] && G_EXEC rm /mnt/ftp_client/readme.txt
+		find /mnt/ftp_client -maxdepth 0 -empty -exec rmdir -v {} +
+	fi
+
+	# dietpi-banner migrations
+	if [[ -f '/boot/dietpi/.dietpi-banner' ]]
+	then
+		local i mapping userdata name command
+
+		G_DIETPI-NOTIFY 2 'Migrating /boot/dietpi/.dietpi-banner to new named arrays and options'
+
+		# Migrate legacy numeric-indexed aENABLED to named form, skipping userdata disk usage (8)
+		mapping=(
+			device_model uptime cpu_temp hostname nis_domainname lan_ip wan_ip disk_usage ''
+			weather custom_commands dietpi_commands motd vpn_status large_hostname
+			credits letsencrypt ram_usage load_average word_wrap kernel
+		)
+		for i in {0..7} {9..20}
+		do
+			G_EXEC sed --follow-symlinks -i "s/^[[:blank:]]*aENABLED\[$i\]=/aENABLED[${mapping[i]}]=/" /boot/dietpi/.dietpi-banner
+		done
+
+		# Migrate userdata disk usage option to new array
+		if grep -q '^[[:blank:]]*aENABLED\[8\]=1' /boot/dietpi/.dietpi-banner
+		then
+			userdata=$(findmnt -Ufvnro TARGET -T /mnt/dietpi_userdata)
+			# Enable only if userdata are located below an own mount point
+			if [[ $userdata && $userdata != '/' ]]
+			then
+				# Escape single quotes to be used within single quotation
+				userdata=${userdata//\'/\'\\\'\'}
+				if grep -q '^[[:blank:]]*aENABLED\[disk_usage\]=0' /boot/dietpi/.dietpi-banner
+				then
+					# If rootfs disk usage was disabled, add userdata as index 0, to replace the default rootfs entry, and enable the general disk usage option
+					G_CONFIG_INJECT 'aDISK_SPACE_MOUNTS\[0\]=' "aDISK_SPACE_MOUNTS[0]='$userdata'" /boot/dietpi/.dietpi-banner
+					G_CONFIG_INJECT 'aENABLED\[disk_usage\]=' 'aENABLED[disk_usage]=1' /boot/dietpi/.dietpi-banner
+				else
+					# If rootfs disk usage was enabled, add userdata as index 1, to be shown below the default rootfs entry
+					G_CONFIG_INJECT 'aDISK_SPACE_MOUNTS\[1\]=' "aDISK_SPACE_MOUNTS[1]='$userdata'" /boot/dietpi/.dietpi-banner
+				fi
+			fi
+		fi
+
+		# Migrate legacy custom command file to aCUSTOM_COMMANDS array if present
+		if [[ -f '/boot/dietpi/.dietpi-banner_custom' ]]
+		then
+			if grep -q '^aENABLED\[custom_commands\]=1' /boot/dietpi/.dietpi-banner
+			then
+				name=$(sed -n '/^[[:blank:]]*aDESCRIPTION\[10\]=/{s/^[^=]*=//p;q}' /boot/dietpi/.dietpi-banner)
+				read -r command < /boot/dietpi/.dietpi-banner_custom
+				GCI_PRESERVE=1 G_CONFIG_INJECT "aCUSTOM_COMMANDS\[${name:-migrated}\]=" "aCUSTOM_COMMANDS[${name:-migrated}]='${command//\'/\'\\\'\'}'" /boot/dietpi/.dietpi-banner
+			fi
+			G_EXEC rm /boot/dietpi/.dietpi-banner_custom
+		fi
+
+		# Migrate legacy numeric-indexed aCOLOUR to named form
+		mapping=(accent strong weak alert)
+		for i in {0..3}
+		do
+			G_EXEC sed --follow-symlinks -i "s/^[[:blank:]]*aCOLOUR\[$i\]=/aCOLOUR[${mapping[i]}]=/" /boot/dietpi/.dietpi-banner
+		done
+
+		# Remove left invalid entries
+		G_EXEC sed --follow-symlinks -Ei -e '/^[[:blank:]]*a(ENABLED|COLOUR|DESCRIPTION)\[[0-9]+\]=/d' /boot/dietpi/.dietpi-banner
+	fi
+
 	# Software updates, migrations and patches
 	if [[ -f '/boot/dietpi/.installed' ]]
 	then
+		# vaultwarden
+		if [[ -f '/mnt/dietpi_userdata/vaultwarden/vaultwarden.env' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Applying stricter mode to vaultwarden.env, as it can be used to provide secret hashes like ADMIN_TOKEN. Use the "vaultwarden" group if any other user requires read access.'
+			G_EXEC chmod 'o-r' /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
+		fi
+
 		# Pi-hole v6 migration
 		# - /etc/pihole/pihole.toml indicates that Pi-hole has been upgraded to v6 already.
 		# - The /var/www/pihole symlink indicates that an instance installed via dietpi-software has not been migrated yet.

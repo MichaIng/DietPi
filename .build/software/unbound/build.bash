@@ -46,10 +46,10 @@ G_EXEC_OUTPUT=1 G_EXEC make DESTDIR="$DIR" install
 G_DIETPI-NOTIFY 2 "Building $PRETTY DEB package"
 # shellcheck disable=SC2046
 G_EXEC rm -R $(find "$DIR" -name '*unbound-anchor*' -o -name '*unbound-host*') "$DIR/usr/"{share/man/man[13],include,lib}
-G_EXEC mkdir -p "$DIR/"{DEBIAN,etc/{apparmor.d,unbound/unbound.conf.d},share/doc/unbound/examples,lib/systemd/system}
+G_EXEC mkdir -p "$DIR/"{DEBIAN,etc/{apparmor.d,unbound/unbound.conf.d},usr/share/doc/unbound/examples,lib/systemd/system}
 
 # - configs
-G_EXEC mv "$DIR/"{etc/unbound/unbound.conf,share/doc/unbound/examples/}
+G_EXEC mv "$DIR/"{etc/unbound/unbound.conf,usr/share/doc/unbound/examples/}
 cat << '_EOF_' > "$DIR/etc/unbound/unbound.conf" || exit 1
 # Unbound configuration file for Debian.
 #
