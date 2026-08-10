@@ -124,6 +124,7 @@ _EOF_
 # - Permissions
 G_EXEC find "$DIR" -type f -exec chmod 0644 {} +
 G_EXEC find "$DIR" -type d -exec chmod 0755 {} +
+G_EXEC chmod 0640 "$DIR/mnt/dietpi_userdata/vaultwarden/vaultwarden.env"
 G_EXEC chmod +x "$DIR/opt/vaultwarden/vaultwarden"
 
 # Control files
