@@ -63,7 +63,7 @@ aREPLACE[$software_id]='version='\''$release'\''\;'
 
 # Ampache
 software_id=40
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/ampache/ampache/releases/latest'\'' | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/ampache-[0-9\.]*_all_php8.2\.zip(?=\")"'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/ampache/ampache/releases'\'' | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/ampache-[0-9\.]*_all_php8.2\.zip(?=\")" | head -1'
 aREGEX[$software_id]='https://github.com/ampache/ampache/releases/download/.*/ampache-.*_all_php\$PHP_VERSION.zip'
 aREPLACE[$software_id]='${release/8.2/\$PHP_VERSION}'
 
