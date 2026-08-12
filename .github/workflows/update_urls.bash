@@ -424,6 +424,7 @@ aREGEX[$software_id]='https://github\.com/prometheus/prometheus/releases/downloa
 for i in "${!aCHECK[@]}"
 do
 	echo '------------------------------------------'
+	echo "Checking software ID $i ..."
 	# Fetch response once for entries with aARCH, to avoid redundant curl calls per architecture
 	# set -e ensures the script exits on any curl failure
 	response=
@@ -440,7 +441,6 @@ do
 	# Add GitHub token if set: only relevant for entries without aURL, since those still use curl in aCHECK
 	[[ $GH_TOKEN ]] && aCHECK[i]=${aCHECK[i]//curl -sSf \'https:\/\/api.github.com/curl -H \'Authorization: token $GH_TOKEN\' -sSf \'https://api.github.com}
 
-	echo "Checking software ID $i ..."
 	# Loop through architectures
 	for arch in ${aARCH[i]:-dummy}
 	do
