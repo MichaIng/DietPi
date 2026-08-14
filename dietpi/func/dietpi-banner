@@ -304,16 +304,15 @@ $CLI_LINE"
 		}
 
 		local stat code
-		if [[ $EUID == 0 ]]
+		if (( $EUID ))
 		then
-			# Running as root
-			stat=$(Get_Cert_Status_Raw 2>&1)
-			code=$?
-		else
 			# Running as non-root: Fail silently without NOPASSWD to avoid password prompt
 			stat=$(sudo -n dash -c "$(declare -f Get_Cert_Status_Raw); Get_Cert_Status_Raw 2>&1" 2> /dev/null)
-			code=$?
+		else
+			# Running as root
+			stat=$(Get_Cert_Status_Raw 2>&1)
 		fi
+		code=$?
 
 		case $code in
 			0)
@@ -336,12 +335,26 @@ $CLI_LINE"
 	Get_Systemd_Status()
 	{
 		# Print systemd overall status based on "systemctl --failed"
-		FAILED_CNT=$(systemctl --failed --no-legend --no-pager | wc -l 2> /dev/null)
-		if [[ ! $FAILED_CNT || $FAILED_CNT == 0 ]]
+		# - non-root users can call systemctl if dbus is active
+		local failed_cnt
+		if [[ $EUID == 0 || -S '/run/dbus/system_bus_socket' ]]
 		then
-			echo 'No services failed'
+			failed_cnt=$(systemctl --failed --legend=no --no-pager)
 		else
-			echo "${aCOLOUR[alert]}$FAILED_CNT service(s) failed"
+			if ! failed_cnt=$(sudo -n systemctl --failed --legend=no --no-pager 2> /dev/null)
+			then
+				echo "${aCOLOUR[highlight]}NOPASSWD sudo required to obtain systemd status"
+				return 1
+			fi
+		fi
+
+		mapfile -t failed_cnt <<< $failed_cnt
+
+		if (( ${#failed_cnt[@]} ))
+		then
+			echo "${aCOLOUR[alert]}${#failed_cnt[@]} service(s) failed"
+		else
+			echo 'No services failed'
 		fi
 	}
 
@@ -353,11 +366,12 @@ $CLI_LINE"
 			then
 				# IP address detection (very sloppy for IPv6) - avoid {m,n} to support mawk on Debian Bookworm
 				local IP_re='^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|[0-9a-f:]*:[0-9a-f:]*)(/[0-9]+)?$'
-				if [[ $EUID == 0 ]]
+				if (( $EUID ))
 				then
-					fail2ban-client banned 2> /dev/null | mawk -F\' -v ip="$IP_re" '{for(i=2;i<NF;i+=2){if($i ~ ip) a[$i]=1}} END{print length(a)}'
+					sudo -n fail2ban-client banned 2> /dev/null | mawk -F\' -v ip="$IP_re" '{for(i=2;i<NF;i+=2){if($i ~ ip) a[$i]=1}} END{print length(a)}'
+					(( ${PIPESTATUS[0]} )) && return 2
 				else
-					sudo -n fail2ban-client banned 2> /dev/null | mawk -F\' -v ip="$IP_re" '{for(i=2;i<NF;i+=2){if($i ~ ip) a[$i]=1}} END{print length(a)}' || return 2
+					fail2ban-client banned 2> /dev/null | mawk -F\' -v ip="$IP_re" '{for(i=2;i<NF;i+=2){if($i ~ ip) a[$i]=1}} END{print length(a)}'
 				fi
 				return 0
 			else
