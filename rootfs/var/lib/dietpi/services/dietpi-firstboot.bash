@@ -214,24 +214,24 @@ _EOF_
 			/boot/dietpi/func/dietpi-set_software locale "$autoinstall_language"
 		fi
 
-		# Skip keyboard, SSH, serial console and network setup on container systems
-		(( $G_HW_MODEL == 75 )) && return 0
-
-		# Apply keyboard layout
-		/boot/dietpi/func/dietpi-set_hardware keyboard autosetup
+		# Skip keyboard setup on container systems
+		(( $G_HW_MODEL == 75 )) || /boot/dietpi/func/dietpi-set_hardware keyboard autosetup
 
 		# Disable serial console if set in dietpi.txt
 		grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware serialconsole disable
 
-		# Regenerate unique Dropbear host keys
+		# Regenerate unique Dropbear host keys, if Dropbear is installed
 		local i type
-		for i in /etc/dropbear/dropbear_*_host_key
-		do
-			type=${i#/etc/dropbear/dropbear_}
-			type=${type%_host_key}
-			rm -v "$i"
-			dropbearkey -t "$type" -f "$i"
-		done
+		if dpkg-query -Wf '${db:Status-Abbrev}' dropbear 2> /dev/null | grep -q '^ii'
+		then
+			for i in /etc/dropbear/dropbear_*_host_key
+			do
+				type=${i#/etc/dropbear/dropbear_}
+				type=${type%_host_key}
+				rm -v "$i"
+				dropbearkey -t "$type" -f "$i"
+			done
+		fi
 
 		# Apply SSH pubkey(s) from dietpi.txt
 		/boot/dietpi/func/dietpi-set_software add_ssh_pubkeys
@@ -239,89 +239,101 @@ _EOF_
 		# Apply SSH password login setting
 		/boot/dietpi/func/dietpi-set_software disable_ssh_password_logins
 
-		# Apply forced Ethernet link speed if set in dietpi.txt
-		/boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
+		# Apply forced Ethernet link speed if set in dietpi.txt, skipped on container systems where ethtool is missing
+		(( $G_HW_MODEL == 75 )) || /boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 
-		# Network setup
-		# - Grab available network interfaces
-		local iface_eth=$(G_GET_NET -q -t eth iface)
-		[[ $iface_eth ]] || iface_eth='eth0'
-		local iface_wlan=$(G_GET_NET -q -t wlan iface)
-		[[ $iface_wlan ]] || iface_wlan='wlan0'
-
-		# - Replace interface names with the ones obtained above
-		sed --follow-symlinks -i "s/eth[0-9]/$iface_eth/g" /etc/network/interfaces
-		sed --follow-symlinks -i "s/wlan[0-9]/$iface_wlan/g" /etc/network/interfaces
-
-		# - Grab user requested settings from dietpi.txt
-		local ethernet_enabled=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_ETHERNET_ENABLED=1' /boot/dietpi.txt)
-		local wifi_enabled=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_WIFI_ENABLED=1' /boot/dietpi.txt)
-		local use_static=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_USESTATIC=1' /boot/dietpi.txt)
-		local static_ip=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_IP=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		local static_mask=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_MASK=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		local static_gateway=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_GATEWAY=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		local static_dns=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_DNS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-
-		# - WiFi
-		if (( $wifi_enabled ))
+		# Network setup, if ifupdown is installed, e.g. not on container systems using the host network: https://github.com/MichaIng/DietPi/issues/5204
+		if dpkg-query -Wf '${db:Status-Abbrev}' ifupdown 2> /dev/null | grep -q '^ii'
 		then
-			# Enable WiFi kernel modules
-			/boot/dietpi/func/dietpi-set_hardware wifimodules enable
+			# - Grab available network interfaces
+			local iface_eth=$(G_GET_NET -q -t eth iface)
+			# Containers may use different interface names, e.g. "host0" with systemd-nspawn, hence fall back to the best available interface
+			[[ $iface_eth ]] || (( $G_HW_MODEL != 75 )) || iface_eth=$(G_GET_NET -q iface)
+			[[ $iface_eth ]] || iface_eth='eth0'
+			local iface_wlan=$(G_GET_NET -q -t wlan iface)
+			[[ $iface_wlan ]] || iface_wlan='wlan0'
 
-			# Apply SSIDs/keys from /boot/dietpi-wifi.txt to /etc/wpa_supplicant/wpa_supplicant.conf
-			/boot/dietpi/func/dietpi-wifidb 1
+			# - Replace interface names with the ones obtained above, hence the rules below match on those
+			sed --follow-symlinks -i "s/eth[0-9]/$iface_eth/g" /etc/network/interfaces
+			sed --follow-symlinks -i "s/wlan[0-9]/$iface_wlan/g" /etc/network/interfaces
 
-			# Apply WiFi country code from /boot/dietpi.txt
-			/boot/dietpi/func/dietpi-set_hardware wificountrycode
+			# - Grab user requested settings from dietpi.txt
+			local ethernet_enabled=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_ETHERNET_ENABLED=1' /boot/dietpi.txt)
+			local wifi_enabled=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_WIFI_ENABLED=1' /boot/dietpi.txt)
+			local use_static=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_USESTATIC=1' /boot/dietpi.txt)
+			local static_ip=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_IP=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			local static_mask=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_MASK=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			local static_gateway=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_GATEWAY=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			local static_dns=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_DNS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 
-			# Enable WiFi, disable Ethernet
-			ethernet_enabled=0
-			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\allow-hotplug $iface_wlan" /etc/network/interfaces
-			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\#allow-hotplug $iface_eth" /etc/network/interfaces
+			# - Containers: No WiFi, and no udev events, hence "auto" instead of "allow-hotplug"
+			local eth_mode='allow-hotplug'
+			(( $G_HW_MODEL == 75 )) && eth_mode='auto' wifi_enabled=0
 
-		# - Ethernet
-		elif (( $ethernet_enabled ))
-		then
-			# Enable Ethernet, disable WiFi
-			wifi_enabled=0
-			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\allow-hotplug $iface_eth" /etc/network/interfaces
-			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\#allow-hotplug $iface_wlan" /etc/network/interfaces
-		fi
-
-		# - Static IP
-		if (( $use_static ))
-		then
+			# - WiFi
 			if (( $wifi_enabled ))
 			then
-				sed --follow-symlinks -i "/iface wlan/c\iface $iface_wlan inet static" /etc/network/interfaces
+				# Enable WiFi kernel modules
+				/boot/dietpi/func/dietpi-set_hardware wifimodules enable
 
+				# Apply SSIDs/keys from /boot/dietpi-wifi.txt to /etc/wpa_supplicant/wpa_supplicant.conf
+				/boot/dietpi/func/dietpi-wifidb 1
+
+				# Apply WiFi country code from /boot/dietpi.txt
+				/boot/dietpi/func/dietpi-set_hardware wificountrycode
+
+				# Enable WiFi, disable Ethernet
+				ethernet_enabled=0
+				sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+$iface_wlan/c\allow-hotplug $iface_wlan" /etc/network/interfaces
+				sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+$iface_eth/c\#allow-hotplug $iface_eth" /etc/network/interfaces
+
+			# - Ethernet
 			elif (( $ethernet_enabled ))
 			then
-				sed --follow-symlinks -i "/iface eth/c\iface $iface_eth inet static" /etc/network/interfaces
+				# Enable Ethernet, disable WiFi
+				wifi_enabled=0
+				sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+$iface_eth/c\\$eth_mode $iface_eth" /etc/network/interfaces
+				sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+$iface_wlan/c\#allow-hotplug $iface_wlan" /etc/network/interfaces
 			fi
-			sed --follow-symlinks -i "/address/c\address $static_ip" /etc/network/interfaces
-			sed --follow-symlinks -i "/netmask/c\netmask $static_mask" /etc/network/interfaces
-			sed --follow-symlinks -i "/gateway/c\gateway $static_gateway" /etc/network/interfaces
-			if command -v resolvconf > /dev/null
+
+			# - Static IP
+			if (( $use_static ))
 			then
-				sed --follow-symlinks -i "/dns-nameservers/c\dns-nameservers $static_dns" /etc/network/interfaces
-			else
-				> /etc/resolv.conf
-				for i in $static_dns; do echo "nameserver $i" >> /etc/resolv.conf; done
-				sed --follow-symlinks -i "/dns-nameservers/c\#dns-nameservers $static_dns" /etc/network/interfaces
+				if (( $wifi_enabled ))
+				then
+					sed --follow-symlinks -i "/iface $iface_wlan/c\iface $iface_wlan inet static" /etc/network/interfaces
+
+				elif (( $ethernet_enabled ))
+				then
+					sed --follow-symlinks -i "/iface $iface_eth/c\iface $iface_eth inet static" /etc/network/interfaces
+				fi
+				sed --follow-symlinks -i "/address/c\address $static_ip" /etc/network/interfaces
+				sed --follow-symlinks -i "/netmask/c\netmask $static_mask" /etc/network/interfaces
+				sed --follow-symlinks -i "/gateway/c\gateway $static_gateway" /etc/network/interfaces
+				if command -v resolvconf > /dev/null
+				then
+					sed --follow-symlinks -i "/dns-nameservers/c\dns-nameservers $static_dns" /etc/network/interfaces
+				else
+					> /etc/resolv.conf
+					for i in $static_dns; do echo "nameserver $i" >> /etc/resolv.conf; done
+					sed --follow-symlinks -i "/dns-nameservers/c\#dns-nameservers $static_dns" /etc/network/interfaces
+				fi
 			fi
+
+			# - IPv6: Skipped on containers, since the host kernel controls the related sysctl settings
+			(( $G_HW_MODEL == 75 )) || /boot/dietpi/func/dietpi-set_hardware enableipv6 "$(( ! $(grep -cm1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=0' /boot/dietpi.txt) ))"
+
+			# - Configure enabled interfaces now, /etc/network/interfaces will be effective from next boot on
+			#	Failsafe: Bring up Ethernet, whenever WiFi is disabled or fails to be configured, e.g. due to wrong credentials
+			# shellcheck disable=SC2015
+			(( $wifi_enabled )) && ifup "$iface_wlan" || ifup "$iface_eth"
+
+			# - Boot wait for network
+			/boot/dietpi/func/dietpi-set_software boot_wait_for_network "$(( ! $(grep -cm1 '^[[:blank:]]*AUTO_SETUP_BOOT_WAIT_FOR_NETWORK=0' /boot/dietpi.txt) ))"
 		fi
 
-		# - IPv6
-		/boot/dietpi/func/dietpi-set_hardware enableipv6 "$(( ! $(grep -cm1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=0' /boot/dietpi.txt) ))"
-
-		# - Configure enabled interfaces now, /etc/network/interfaces will be effective from next boot on
-		#	Failsafe: Bring up Ethernet, whenever WiFi is disabled or fails to be configured, e.g. due to wrong credentials
-		# shellcheck disable=SC2015
-		(( $wifi_enabled )) && ifup "$iface_wlan" || ifup "$iface_eth"
-
-		# - Boot wait for network
-		/boot/dietpi/func/dietpi-set_software boot_wait_for_network "$(( ! $(grep -cm1 '^[[:blank:]]*AUTO_SETUP_BOOT_WAIT_FOR_NETWORK=0' /boot/dietpi.txt) ))"
+		# Containers are done at this point: time sync and bootloader are handled by the host
+		(( $G_HW_MODEL == 75 )) && return 0
 
 		# Apply network time sync mirror and force sync now to speed up first run setup
 		/boot/dietpi/func/dietpi-set_software timesync-mirror
