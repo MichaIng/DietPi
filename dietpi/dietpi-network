@@ -33,8 +33,8 @@ Available commands:
 Available options for "apply":
   --enable / --disable                Enable or disable the interface
   --dhcp / --static                   Select DHCP or static IPv4 mode
-  --ip <address>                      Static IPv4 address
-  --mask <netmask>                    Static IPv4 netmask
+  --ip <address[/cidr]>               Static IPv4 address, optionally in CIDR notation, e.g. 192.168.0.100/24
+                                      If no CIDR suffix is given, /24 is assumed.
   --gateway <address>                 Static IPv4 gateway
   --dns <"ip [ip]">                  Static DNS server list
   --copy-current                      Copy current live IPv4/DNS values into static settings before applying
@@ -47,6 +47,7 @@ Available options for "apply":
   --wifi5 <0|1>                       Toggle WiFi 5 / 802.11ac support for hotspot mode
   --wifi6 <0|1>                       Toggle WiFi 6 / 802.11ax support for hotspot mode
   --no-restart                        Write config only, do not reconnect the interface
+  --force                             Proceed even if a network conflict (same subnet/duplicate default route) with another enabled interface is detected
 '
 
 . /boot/dietpi/func/dietpi-globals
@@ -61,12 +62,12 @@ ACTION_VALUE=
 ACTION_EXTRA=
 APPLY_IFACE=
 APPLY_RESTART=1
+APPLY_FORCE=0
 APPLY_ENABLE=
 APPLY_MODE=
 APPLY_COPY_CURRENT=0
 APPLY_ROLE=
 APPLY_IP=
-APPLY_MASK=
 APPLY_GATEWAY=
 APPLY_DNS=
 APPLY_SSID=
@@ -86,11 +87,9 @@ CURRENT_IFACE_CONNECTED=0
 CURRENT_IFACE_MODE='dhcp'
 CURRENT_IFACE_MODE_TARGET='dhcp'
 CURRENT_IFACE_IP_STATIC=
-CURRENT_IFACE_MASK_STATIC=
 CURRENT_IFACE_GATEWAY_STATIC=
 CURRENT_IFACE_DNS_STATIC=
 CURRENT_IFACE_IP='0.0.0.0'
-CURRENT_IFACE_MASK='0.0.0.0'
 CURRENT_IFACE_GATEWAY='0.0.0.0'
 CURRENT_IFACE_SOURCE=
 CURRENT_IFACE_HOTSPOT=0
@@ -125,23 +124,18 @@ declare -a WIFI_INTERFACES=()
 
 Error(){ G_DIETPI-NOTIFY 1 "$1"; exit 1; }
 
-Mask_From_CIDR()
+CIDR_From_Mask()
 {
-	local i mask='' full_octets=$(( $1 / 8 )) partial_octet=$(( $1 % 8 ))
-	for i in {0..3}
+	local octet bits=0
+	IFS=. read -ra octet <<< "$1"
+	for octet in "${octet[@]}"
 	do
-		if (( $i < $full_octets ))
-		then
-			mask+='255'
-		elif (( $i == $full_octets && $partial_octet ))
-		then
-			mask+=$(( 256 - 2 ** ( 8 - $partial_octet ) ))
-		else
-			mask+='0'
-		fi
-		(( $i < 3 )) && mask+=.
+		while (( $octet ))
+		do
+			(( bits += $octet & 1, octet >>= 1 ))
+		done
 	done
-	echo "$mask"
+	echo "$bits"
 }
 
 Get_Default_DNS()
@@ -164,8 +158,7 @@ Get_Interfaces()
 		if [[ -d $path/wireless ]]
 		then
 			WIFI_INTERFACES+=("$iface")
-		# Physical VPN/tunnel/bridge/veth devices are excluded naturally since they lack a backing /sys/class/net/<iface>/device path.
-		elif [[ -e $path/device ]]
+		elif ! Interface_Is_Virtual "$iface"
 		then
 			ETH_INTERFACES+=("$iface")
 		fi
@@ -173,7 +166,16 @@ Get_Interfaces()
 }
 
 Interface_Is_Wifi(){ [[ -d /sys/class/net/$1/wireless ]]; }
-Interface_Has_Hardware(){ [[ -e /sys/class/net/$1/device || -d /sys/class/net/$1/wireless ]]; }
+# Excludes bridges/bonds/tunnels and other non-Ethernet devices, but keeps veth-based container interfaces (e.g. LXC "host0"), which lack a backing /sys/class/net/<iface>/device path but are still real, configurable network interfaces.
+Interface_Is_Virtual()
+{
+	[[ -d "/sys/class/net/$1/bridge" || -d "/sys/class/net/$1/bonding" || -e "/sys/class/net/$1/tun_flags" ]] && return 0
+	local type=0
+	read -r type < "/sys/class/net/$1/type" 2> /dev/null
+	[[ $type == 1 ]] && return 1
+	return 0
+}
+Interface_Has_Hardware(){ [[ -d /sys/class/net/$1/wireless ]] || ! Interface_Is_Virtual "$1"; }
 Wifi_Modules_Enabled(){ [[ ! -f '/etc/modprobe.d/dietpi-disable_wifi.conf' ]]; }
 Onboard_Wifi_Enabled(){ [[ ! -f '/boot/firmware/config.txt' ]] || ! grep -q '^[[:blank:]]*dtoverlay=disable-wifi' /boot/firmware/config.txt; }
 Onboard_Wifi_Text(){ Onboard_Wifi_Enabled && echo 'On' || echo 'Off'; }
@@ -275,8 +277,7 @@ Get_Interface_Stored_Settings()
 	CURRENT_IFACE_ENABLED=1
 	CURRENT_IFACE_MODE='dhcp'
 	CURRENT_IFACE_MODE_TARGET='dhcp'
-	CURRENT_IFACE_IP_STATIC='192.168.0.100'
-	CURRENT_IFACE_MASK_STATIC='255.255.255.0'
+	CURRENT_IFACE_IP_STATIC='192.168.0.100/24'
 	CURRENT_IFACE_GATEWAY_STATIC='192.168.0.1'
 	CURRENT_IFACE_DNS_STATIC=$(Get_Default_DNS)
 
@@ -293,8 +294,11 @@ Get_Interface_Stored_Settings()
 	CURRENT_IFACE_ENABLED=${PARSE_ENABLED:-0}
 	[[ $PARSE_MODE == 'static' ]] && CURRENT_IFACE_MODE='static' || CURRENT_IFACE_MODE='dhcp'
 	CURRENT_IFACE_MODE_TARGET=$CURRENT_IFACE_MODE
-	[[ $PARSE_ADDRESS ]] && CURRENT_IFACE_IP_STATIC=$PARSE_ADDRESS
-	[[ $PARSE_NETMASK ]] && CURRENT_IFACE_MASK_STATIC=$PARSE_NETMASK
+	if [[ $PARSE_ADDRESS ]]
+	then
+		CURRENT_IFACE_IP_STATIC=$PARSE_ADDRESS
+		[[ $CURRENT_IFACE_IP_STATIC == */* ]] || CURRENT_IFACE_IP_STATIC+="/$(CIDR_From_Mask "${PARSE_NETMASK:-255.255.255.0}")"
+	fi
 	[[ $PARSE_GATEWAY ]] && CURRENT_IFACE_GATEWAY_STATIC=$PARSE_GATEWAY
 	[[ $PARSE_DNS ]] && CURRENT_IFACE_DNS_STATIC=$PARSE_DNS
 	(( ${PARSE_HOTSPOT:-0} )) && CURRENT_IFACE_HOTSPOT=1
@@ -335,7 +339,6 @@ Load_Interface_State()
 	Interface_Has_Hardware "$iface" && CURRENT_IFACE_HARDWARE=1 || CURRENT_IFACE_HARDWARE=0
 	CURRENT_IFACE_CONNECTED=0
 	CURRENT_IFACE_IP='0.0.0.0'
-	CURRENT_IFACE_MASK='0.0.0.0'
 	CURRENT_IFACE_GATEWAY='0.0.0.0'
 	CURRENT_IFACE_WIFI_SSID='Disconnected / No SSID'
 	CURRENT_IFACE_WIFI_BITRATE=0
@@ -351,10 +354,8 @@ Load_Interface_State()
 		CURRENT_IFACE_CONNECTED=$(ip -o r l dev "$iface" 2> /dev/null | grep -vcm1 '[[:blank:]]linkdown')
 		if (( $CURRENT_IFACE_CONNECTED ))
 		then
-			CURRENT_IFACE_IP=$(ip -br -f inet a s "$iface" 2> /dev/null | mawk '{print $3}' | sed 's|/.*$||')
+			CURRENT_IFACE_IP=$(ip -br -f inet a s "$iface" 2> /dev/null | mawk '{print $3}')
 			CURRENT_IFACE_GATEWAY=$(ip r l dev "$iface" 0/0 2> /dev/null | mawk '{print $3;exit}')
-			local cidr=$(ip -br -f inet a s "$iface" 2> /dev/null | mawk '{print $3}' | sed 's|^.*/||')
-			[[ $cidr ]] && CURRENT_IFACE_MASK=$(Mask_From_CIDR "$cidr")
 		fi
 	fi
 
@@ -429,7 +430,8 @@ Write_Interface_Config()
 	local iface=$CURRENT_IFACE
 	local fp="/etc/network/interfaces.d/$iface.conf"
 	local dns_line='#dns-nameservers 9.9.9.9 149.112.112.112'
-	local gateway_line="#gateway ${CURRENT_IFACE_IP_STATIC%.*}.1"
+	local ip_only=${CURRENT_IFACE_IP_STATIC%/*}
+	local gateway_line="#gateway ${ip_only%.*}.1"
 	G_EXEC mkdir -p /etc/network/interfaces.d
 	[[ $CURRENT_IFACE_GATEWAY_STATIC ]] && gateway_line="gateway $CURRENT_IFACE_GATEWAY_STATIC"
 	if command -v resolvconf > /dev/null && [[ $CURRENT_IFACE_DNS_STATIC ]]
@@ -447,7 +449,6 @@ _EOF_
 		cat << _EOF_ >> "$fp"
 iface $iface inet static
 address $CURRENT_IFACE_IP_STATIC
-netmask $CURRENT_IFACE_MASK_STATIC
 #gateway 192.168.0.1
 #dns-nameservers 9.9.9.9 149.112.112.112
 pre-up iw dev $iface set power_save off
@@ -467,7 +468,6 @@ _EOF_
 		then
 			cat << _EOF_ >> "$fp"
 address $CURRENT_IFACE_IP_STATIC
-netmask $CURRENT_IFACE_MASK_STATIC
 $gateway_line
 $dns_line
 _EOF_
@@ -527,13 +527,17 @@ Copy_Current_To_Static()
 	(( $CURRENT_IFACE_CONNECTED )) || return 0
 	CURRENT_IFACE_IP_STATIC=$CURRENT_IFACE_IP
 	CURRENT_IFACE_GATEWAY_STATIC=$CURRENT_IFACE_GATEWAY
-	CURRENT_IFACE_MASK_STATIC=$CURRENT_IFACE_MASK
 	CURRENT_IFACE_DNS_STATIC=$DNS_CURRENT
 }
 
-Change_StaticIp(){ G_WHIP_DEFAULT_ITEM=$CURRENT_IFACE_IP_STATIC; G_WHIP_INPUTBOX "Please enter a new static $(Current_Interface_Type_Text) IP address:" && CURRENT_IFACE_IP_STATIC=$G_WHIP_RETURNED_VALUE; }
+Change_StaticIp()
+{
+	G_WHIP_DEFAULT_ITEM=$CURRENT_IFACE_IP_STATIC
+	G_WHIP_INPUTBOX "Please enter a new static $(Current_Interface_Type_Text) IP address, optionally in CIDR notation to define a subnet mask other than the default /24 (255.255.255.0), e.g.: 192.168.0.100/24" || return 0
+	CURRENT_IFACE_IP_STATIC=$G_WHIP_RETURNED_VALUE
+	[[ $CURRENT_IFACE_IP_STATIC == */* ]] || CURRENT_IFACE_IP_STATIC+='/24'
+}
 Change_StaticGateway(){ G_WHIP_DEFAULT_ITEM=$CURRENT_IFACE_GATEWAY_STATIC; G_WHIP_INPUTBOX "Please enter a new static $(Current_Interface_Type_Text) gateway address:" && CURRENT_IFACE_GATEWAY_STATIC=$G_WHIP_RETURNED_VALUE; }
-Change_StaticMask(){ G_WHIP_DEFAULT_ITEM=$CURRENT_IFACE_MASK_STATIC; G_WHIP_INPUTBOX "Please enter a new static $(Current_Interface_Type_Text) network mask:" && CURRENT_IFACE_MASK_STATIC=$G_WHIP_RETURNED_VALUE; }
 
 Change_StaticDns()
 {
@@ -630,6 +634,110 @@ Apply_Hotspot_Settings()
 	fi
 }
 
+IP_To_Int()
+{
+	local a b c d
+	IFS=. read -r a b c d <<< "$1"
+	echo $(( (a<<24) + (b<<16) + (c<<8) + d ))
+}
+
+Subnets_Overlap()
+{
+	local ip1=${1%/*} p1=${1#*/} ip2=${2%/*} p2=${2#*/}
+	[[ $1 == */* ]] || p1=32
+	[[ $2 == */* ]] || p2=32
+	local i1=$(IP_To_Int "$ip1") i2=$(IP_To_Int "$ip2") p=$(( p1 < p2 ? p1 : p2 ))
+	local mask=$(( p == 0 ? 0 : ( 0xFFFFFFFF << ( 32 - p ) ) & 0xFFFFFFFF ))
+	(( ( $i1 & $mask ) == ( $i2 & $mask ) ))
+}
+
+# Determine the enabled state, mode, static/live subnet and gateway of another interface, without touching the CURRENT_IFACE_* state of the interface currently being configured.
+Get_Iface_Effective_Net()
+{
+	local iface=$1 enabled=0 mode='dhcp' cidr='' gateway=''
+	if Parse_Interface_Config "/etc/network/interfaces.d/$iface.conf" "$iface" && [[ $PARSE_FOUND == 1 ]]
+	then
+		:
+	elif Parse_Interface_Config '/etc/network/interfaces' "$iface" && [[ $PARSE_FOUND == 1 ]]
+	then
+		:
+	else
+		PARSE_ENABLED=0 PARSE_MODE='dhcp' PARSE_ADDRESS='' PARSE_NETMASK='' PARSE_GATEWAY=''
+	fi
+	enabled=${PARSE_ENABLED:-0}
+	[[ $PARSE_MODE == 'static' ]] && mode='static'
+	if [[ $mode == 'static' && $PARSE_ADDRESS ]]
+	then
+		cidr=$PARSE_ADDRESS
+		[[ $cidr == */* ]] || cidr+="/$(CIDR_From_Mask "${PARSE_NETMASK:-255.255.255.0}")"
+	fi
+	gateway=$PARSE_GATEWAY
+	if (( $enabled ))
+	then
+		local live=$(ip -br -f inet a s "$iface" 2> /dev/null | mawk '{print $3}')
+		[[ $live && ! $cidr ]] && cidr=$live
+		local live_gateway=$(ip r l dev "$iface" 0/0 2> /dev/null | mawk '{print $3;exit}')
+		[[ $live_gateway && ! $gateway ]] && gateway=$live_gateway
+	fi
+	echo "$enabled|$mode|$cidr|$gateway"
+}
+
+Disable_Conflicting_Interface()
+{
+	local iface=$1 fp
+	for fp in "/etc/network/interfaces.d/$iface.conf" '/etc/network/interfaces'
+	do
+		[[ -f $fp ]] || continue
+		G_EXEC_NOEXIT=1 G_EXEC sed --follow-symlinks -i "/^[[:blank:]]*\(allow-hotplug\|auto\)[[:blank:]]\+$iface\([[:blank:]]\|\$\)/s/^/#/" "$fp"
+	done
+	ifdown --force "$iface" 2> /dev/null
+	G_DIETPI-NOTIFY 2 "Disabled interface \"$iface\" to resolve network conflict"
+}
+
+# Avoid two enabled interfaces on the same subnet (asymmetric routing risk) or two default routes (DHCP usually assigns one, in addition to any configured static gateway)
+Check_Network_Conflicts()
+{
+	(( $CURRENT_IFACE_ENABLED )) || return 0
+	[[ $CURRENT_IFACE_MODE_TARGET == 'static' || $CURRENT_IFACE_MODE_TARGET == 'dhcp' ]] || return 0
+	local path iface
+	for path in /sys/class/net/*
+	do
+		[[ -e $path ]] || continue
+		iface=${path##*/}
+		[[ $iface == "$CURRENT_IFACE" || $iface == 'lo' ]] && continue
+		if ! Interface_Is_Wifi "$iface" && Interface_Is_Virtual "$iface"
+		then
+			continue
+		fi
+		local info; info=$(Get_Iface_Effective_Net "$iface")
+		local o_enabled o_cidr o_gateway
+		IFS='|' read -r o_enabled _ o_cidr o_gateway <<< "$info"
+		(( $o_enabled )) || continue
+		local reason=
+		if [[ $CURRENT_IFACE_MODE_TARGET == 'static' && $CURRENT_IFACE_IP_STATIC && $o_cidr ]] && Subnets_Overlap "$CURRENT_IFACE_IP_STATIC" "$o_cidr"
+		then
+			reason="already uses the same subnet ($o_cidr) as the static IP address about to be assigned to \"$CURRENT_IFACE\" ($CURRENT_IFACE_IP_STATIC)"
+		elif [[ $CURRENT_IFACE_MODE_TARGET == 'dhcp' && $o_gateway ]]
+		then
+			reason="already has a default gateway ($o_gateway) assigned, while \"$CURRENT_IFACE\" is about to be enabled with DHCP, which usually also assigns a default route"
+		else
+			continue
+		fi
+		if [[ $COMMAND == 'menu' ]]
+		then
+			G_WHIP_MENU_ARRAY=(
+				'Ignore' ': Proceed and keep both interfaces enabled (NOT recommended)'
+				"$iface" ": Disable \"$iface\" and proceed"
+			)
+			G_WHIP_MENU "[WARNING] Network conflict detected:\n\nInterface \"$iface\" $reason.\n\nHaving two enabled interfaces on the same subnet, or two default routes, can cause asymmetric traffic and break connectivity (e.g. to a connected SSH client).\n\nPlease select how to proceed:" || return 1
+			[[ $G_WHIP_RETURNED_VALUE == "$iface" ]] && Disable_Conflicting_Interface "$iface"
+		else
+			(( $APPLY_FORCE )) || { G_DIETPI-NOTIFY 1 "Network conflict detected: Interface \"$iface\" $reason. Use --force to proceed regardless, or disable it first: dietpi-network apply $iface --disable"; return 1; }
+		fi
+	done
+	return 0
+}
+
 Apply_Current_Interface()
 {
 	[[ $CURRENT_IFACE ]] || return 1
@@ -643,11 +751,8 @@ Apply_Current_Interface()
 			G_EXEC_NOEXIT=1 G_EXEC systemctl disable --now dietpi-wifi-monitor
 		fi
 	fi
+	Check_Network_Conflicts || return 1
 	Write_Interface_Config
-	if [[ $CURRENT_IFACE_TYPE == 'wifi' && $CURRENT_IFACE_ENABLED == 1 && $CURRENT_IFACE_HOTSPOT == 0 ]]
-	then
-		/boot/dietpi/func/dietpi-wifidb 1
-	fi
 	(( $1 )) && Restart_Interface "$CURRENT_IFACE"
 }
 
@@ -851,7 +956,6 @@ Menu_Interface()
 		[[ $CURRENT_IFACE_MODE_TARGET == 'static' ]] && G_WHIP_MENU_ARRAY+=(
 			'Copy' ': Copy current address to static'
 			'Static IP' ": [$CURRENT_IFACE_IP_STATIC]"
-			'Static Mask' ": [$CURRENT_IFACE_MASK_STATIC]"
 			'Static Gateway' ": [$CURRENT_IFACE_GATEWAY_STATIC]"
 			'Static DNS' ": [$CURRENT_IFACE_DNS_STATIC]"
 		)
@@ -859,16 +963,16 @@ Menu_Interface()
 			'' '●─ Additional Options '
 			'Link Speed' ": [$speed]"
 			'Disable' ': Disable Ethernet adapter'
+			'Remove' ': Remove this Ethernet adapter'"'"'s configuration entirely'
 			'' '●─ Apply '
 			'Apply' ': Save all changes and restart this interface'
 		)
 		NEXT_MENU="iface:$iface"
-		G_WHIP_MENU "${title}\nUsage   : Sent = $NET_TX_MB | Received = $NET_RX_MB\nAddress : IP = $CURRENT_IFACE_IP | Mask = $CURRENT_IFACE_MASK | Gateway = $CURRENT_IFACE_GATEWAY | DNS = $DNS_CURRENT" || { Return_From_Submenu "iface:$iface"; return 0; }
+		G_WHIP_MENU "${title}\nUsage   : Sent = $NET_TX_MB | Received = $NET_RX_MB\nAddress : $CURRENT_IFACE_IP | Gateway = $CURRENT_IFACE_GATEWAY | DNS = $DNS_CURRENT" || { Return_From_Submenu "iface:$iface"; return 0; }
 		case $G_WHIP_RETURNED_VALUE in
 			'Change Mode') [[ $CURRENT_IFACE_MODE_TARGET == 'dhcp' ]] && CURRENT_IFACE_MODE_TARGET='static' || CURRENT_IFACE_MODE_TARGET='dhcp';;
 			'Copy') Copy_Current_To_Static;;
 			'Static IP') Change_StaticIp;;
-			'Static Mask') Change_StaticMask;;
 			'Static Gateway') Change_StaticGateway;;
 			'Static DNS') Change_StaticDns;;
 			'Link Speed')
@@ -882,6 +986,7 @@ Menu_Interface()
 				G_WHIP_MENU 'Please select a supported Ethernet link speed to force or auto-negotiation.' && /boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$G_WHIP_RETURNED_VALUE" "$iface"
 			;;
 			'Disable') G_WHIP_YESNO 'Would you like to disable this Ethernet adapter?' && CURRENT_IFACE_ENABLED=0 && Apply_Current_Interface 1 && Return_From_Submenu "iface:$iface";;
+			'Remove') G_WHIP_YESNO 'Would you like to remove this Ethernet adapter'"'"'s configuration entirely?\n\nUnlike "Disable", this removes the DietPi drop-in config file, so the interface can be freshly reconfigured later.' && Remove_Interface_Config "$iface" && Return_From_Submenu "iface:$iface";;
 			'Apply') G_WHIP_YESNO 'Apply settings and reconnect this Ethernet interface now?' && Apply_Current_Interface 1;;
 			*) :;;
 		esac
@@ -915,7 +1020,7 @@ Menu_Interface()
 			local mode_text='DHCP' reconnect_text='Off'
 			(( $CURRENT_IFACE_WIFI_AUTO_RECONNECT )) && reconnect_text='On'
 			[[ $CURRENT_IFACE_MODE_TARGET == 'static' ]] && mode_text='STATIC'
-			description+="SSID    : $CURRENT_IFACE_WIFI_SSID | $CURRENT_IFACE_WIFI_BITRATE Mbit | Strength: $CURRENT_IFACE_WIFI_SIGNAL\nAddress : IP = $CURRENT_IFACE_IP | Mask = $CURRENT_IFACE_MASK | Gateway = $CURRENT_IFACE_GATEWAY | DNS = $DNS_CURRENT"
+			description+="SSID    : $CURRENT_IFACE_WIFI_SSID | $CURRENT_IFACE_WIFI_BITRATE Mbit | Strength: $CURRENT_IFACE_WIFI_SIGNAL\nAddress : $CURRENT_IFACE_IP | Gateway = $CURRENT_IFACE_GATEWAY | DNS = $DNS_CURRENT"
 			G_WHIP_MENU_ARRAY+=(
 				'Scan' ': Scan and configure SSID'
 				'Auto Reconnect' ": [$reconnect_text]"
@@ -925,7 +1030,6 @@ Menu_Interface()
 			[[ $CURRENT_IFACE_MODE_TARGET == 'static' ]] && G_WHIP_MENU_ARRAY+=(
 				'Copy' ': Copy current address to static'
 				'Static IP' ": [$CURRENT_IFACE_IP_STATIC]"
-				'Static Mask' ": [$CURRENT_IFACE_MASK_STATIC]"
 				'Static Gateway' ": [$CURRENT_IFACE_GATEWAY_STATIC]"
 				'Static DNS' ": [$CURRENT_IFACE_DNS_STATIC]"
 			)
@@ -944,6 +1048,7 @@ Menu_Interface()
 			G_WHIP_MENU_ARRAY+=(
 				'' '●─ Toggle State '
 				'Disable' ': Disable WiFi adapter'
+				'Remove' ': Remove this WiFi adapter'"'"'s configuration entirely'
 			)
 		fi
 		G_WHIP_MENU_ARRAY+=(
@@ -953,7 +1058,7 @@ Menu_Interface()
 		NEXT_MENU="iface:$iface"
 		G_WHIP_MENU "$description" || { Return_From_Submenu "iface:$iface"; return 0; }
 		case $G_WHIP_RETURNED_VALUE in
-			'Scan') /boot/dietpi/func/dietpi-wifidb;;
+			'Scan') /boot/dietpi/func/dietpi-wifidb -i "$iface";;
 			'Auto Reconnect')
 				if (( $CURRENT_IFACE_WIFI_AUTO_RECONNECT ))
 				then
@@ -965,11 +1070,11 @@ Menu_Interface()
 			'Change Mode') [[ $CURRENT_IFACE_MODE_TARGET == 'dhcp' ]] && CURRENT_IFACE_MODE_TARGET='static' || CURRENT_IFACE_MODE_TARGET='dhcp'; [[ $CURRENT_IFACE_MODE_TARGET == 'static' ]] && G_WHIP_MSG 'When using STATIC IP, please ensure only one SSID entry exists in the scan menu.';;
 			'Copy') Copy_Current_To_Static;;
 			'Static IP') Change_StaticIp;;
-			'Static Mask') Change_StaticMask;;
 			'Static Gateway') Change_StaticGateway;;
 			'Static DNS') Change_StaticDns;;
 			'Country') Change_WifiCountryCode;;
 			'Disable') G_WHIP_YESNO 'Would you like to disable this WiFi adapter?' && CURRENT_IFACE_ENABLED=0 && G_EXEC systemctl disable --now dietpi-wifi-monitor && Apply_Current_Interface 1 && Return_From_Submenu "iface:$iface";;
+			'Remove') G_WHIP_YESNO 'Would you like to remove this WiFi adapter'"'"'s configuration entirely?\n\nUnlike "Disable", this removes the DietPi drop-in config file, so the interface can be freshly reconfigured later.' && G_EXEC_NOEXIT=1 G_EXEC systemctl disable --now dietpi-wifi-monitor && Remove_Interface_Config "$iface" && Return_From_Submenu "iface:$iface";;
 			'Apply')
 				if (( $CURRENT_IFACE_HOTSPOT ))
 				then
@@ -1099,7 +1204,6 @@ Input()
 			'--client') APPLY_ROLE='client';;
 			'--hotspot') APPLY_ROLE='hotspot';;
 			'--ip') shift; APPLY_IP=$1;;
-			'--mask') shift; APPLY_MASK=$1;;
 			'--gateway') shift; APPLY_GATEWAY=$1;;
 			'--dns') shift; APPLY_DNS=$1;;
 			'--ssid') shift; APPLY_SSID=$1;;
@@ -1110,6 +1214,7 @@ Input()
 			'--wifi5') shift; APPLY_WIFI5=$1;;
 			'--wifi6') shift; APPLY_WIFI6=$1;;
 			'--no-restart') APPLY_RESTART=0;;
+			'--force') APPLY_FORCE=1;;
 			'-h'|'--help'|'help') echo "$USAGE"; exit 0;;
 			*)
 				if [[ $COMMAND == 'menu' && $MENU_TARGET == 'main' ]]
@@ -1132,8 +1237,11 @@ Apply_From_CLI()
 	[[ $APPLY_ENABLE == '' ]] || CURRENT_IFACE_ENABLED=$APPLY_ENABLE
 	[[ $APPLY_MODE ]] && CURRENT_IFACE_MODE_TARGET=$APPLY_MODE
 	(( $APPLY_COPY_CURRENT )) && Copy_Current_To_Static
-	[[ $APPLY_IP ]] && CURRENT_IFACE_IP_STATIC=$APPLY_IP
-	[[ $APPLY_MASK ]] && CURRENT_IFACE_MASK_STATIC=$APPLY_MASK
+	if [[ $APPLY_IP ]]
+	then
+		CURRENT_IFACE_IP_STATIC=$APPLY_IP
+		[[ $CURRENT_IFACE_IP_STATIC == */* ]] || CURRENT_IFACE_IP_STATIC+='/24'
+	fi
 	[[ $APPLY_GATEWAY ]] && CURRENT_IFACE_GATEWAY_STATIC=$APPLY_GATEWAY
 	[[ $APPLY_DNS ]] && CURRENT_IFACE_DNS_STATIC=$APPLY_DNS
 	if [[ $CURRENT_IFACE_TYPE == 'wifi' && $APPLY_ROLE ]]
@@ -1142,8 +1250,7 @@ Apply_From_CLI()
 		then
 			CURRENT_IFACE_HOTSPOT=1
 			CURRENT_IFACE_MODE_TARGET='static'
-			[[ $APPLY_IP ]] || CURRENT_IFACE_IP_STATIC='192.168.42.1'
-			[[ $APPLY_MASK ]] || CURRENT_IFACE_MASK_STATIC='255.255.255.0'
+			[[ $APPLY_IP ]] || CURRENT_IFACE_IP_STATIC='192.168.42.1/24'
 			Load_Hotspot_Settings
 		else
 			CURRENT_IFACE_HOTSPOT=0
@@ -1173,12 +1280,16 @@ Apply_From_CLI()
 	Apply_Current_Interface "$APPLY_RESTART" || exit 1
 }
 
-Remove_From_CLI()
+Remove_Interface_Config()
 {
-	[[ -f /etc/network/interfaces.d/$ACTION_VALUE.conf ]] && G_EXEC rm "/etc/network/interfaces.d/$ACTION_VALUE.conf"
-	Remove_Interface_From_Main_File "$ACTION_VALUE"
-	ifdown --force "$ACTION_VALUE" 2> /dev/null
+	local iface=$1
+	[[ -f /etc/network/interfaces.d/$iface.conf ]] && G_EXEC rm "/etc/network/interfaces.d/$iface.conf"
+	Remove_Interface_From_Main_File "$iface"
+	ifdown --force "$iface" 2> /dev/null
+	return 0
 }
+
+Remove_From_CLI(){ Remove_Interface_Config "$ACTION_VALUE"; }
 
 Proxy_From_CLI()
 {
