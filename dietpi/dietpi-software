@@ -7859,7 +7859,13 @@ _EOF_
 			/boot/dietpi/func/dietpi-set_hardware wifimodules enable
 
 			local eth_iface=$(G_GET_NET -t eth iface)
-			local wifi_iface=$(G_GET_NET -t wlan iface)
+			local wifi_iface
+			for i in /sys/class/net/*
+			do
+				[[ -d $i/wireless ]] || continue
+				wifi_iface=${i##*/}
+				break
+			done
 
 			# DHCP server config
 			G_BACKUP_FP /etc/dhcp/dhcpd.conf
@@ -7878,30 +7884,6 @@ subnet 192.168.42.0 netmask 255.255.255.0 {
 _EOF_
 			# Assign detected WLAN interface
 			G_EXEC eval "echo 'INTERFACESv4=\"$wifi_iface\"' > /etc/default/isc-dhcp-server"
-
-			# Remove all entries below wlan, so we can recreate them
-			G_EXEC sed --follow-symlinks -Ei '/(allow-hotplug|auto)[[:blank:]]+wlan/q0' /etc/network/interfaces
-
-			# Enable up wlan
-			G_CONFIG_INJECT 'allow-hotplug wlan' "allow-hotplug $wifi_iface" /etc/network/interfaces
-
-			# Add WiFi settings to network interfaces config
-			cat << _EOF_ >> /etc/network/interfaces
-iface $wifi_iface inet static
-address 192.168.42.1
-netmask 255.255.255.0
-#gateway 192.168.0.1
-#dns-nameservers 9.9.9.9 149.112.112.112
-pre-up iw dev $wifi_iface set power_save off
-post-down iw dev $wifi_iface set power_save on
-
-# iptables NAT rules
-up iptables-restore < /etc/iptables.ipv4.nat
-up ip6tables-restore < /etc/iptables.ipv6.nat
-_EOF_
-			# Remove wireless-power setting if not supported by adapter/firmware
-			# shellcheck disable=SC2015
-			iw dev "$wifi_iface" set power_save on 2> /dev/null && iw dev "$wifi_iface" set power_save off 2> /dev/null || G_EXEC sed --follow-symlinks -i '/ iw dev .* set power_save /d' /etc/network/interfaces
 
 			# Access point config
 			# - Parse dietpi.txt
@@ -7974,9 +7956,11 @@ _EOF_
 			ip6tables -A FORWARD -i "$eth_iface" -o "$wifi_iface" -m state --state RELATED,ESTABLISHED -j ACCEPT
 			ip6tables -A FORWARD -i "$wifi_iface" -o "$eth_iface" -j ACCEPT
 
-			# Save iptables rules, applied via /etc/network/interfaces
+			# Save iptables rules, applied via /etc/network/interfaces.d/<iface>.conf
 			iptables-save > /etc/iptables.ipv4.nat
 			ip6tables-save > /etc/iptables.ipv6.nat
+
+			/boot/dietpi/dietpi-network apply "$wifi_iface" --enable --static --hotspot --ip 192.168.42.1 --mask 255.255.255.0 --no-restart
 
 			# Bring up interface now
 			G_EXEC_NOHALT=1 G_EXEC ifup "$wifi_iface"
@@ -8006,7 +7990,13 @@ _EOF_
 			ip6tables -t nat -F
 
 			# Generate Tor prerouting tables
-			local wifi_iface=$(G_GET_NET -t wlan iface)
+			local wifi_iface
+			for i in /sys/class/net/*
+			do
+				[[ -d $i/wireless ]] || continue
+				wifi_iface=${i##*/}
+				break
+			done
 			iptables -t nat -A PREROUTING -i "$wifi_iface" -p tcp --dport 22 -j REDIRECT --to-ports 22
 			iptables -t nat -A PREROUTING -i "$wifi_iface" -p udp --dport 53 -j REDIRECT --to-ports 53
 			iptables -t nat -A PREROUTING -i "$wifi_iface" -p tcp --syn -j REDIRECT --to-ports 9040
@@ -13983,25 +13973,15 @@ _EOF_
 			[[ -f '/etc/iptables.ipv6.nat' ]] && G_EXEC rm /etc/iptables.ipv6.nat
 			[[ -f '/etc/sysctl.d/dietpi-wifihotspot.conf' ]] && G_EXEC rm /etc/sysctl.d/dietpi-wifihotspot.conf
 
-			# Set WiFi interface back to inactive and ready for use with dietpi-config.
-			local wifi_iface=$(G_GET_NET -t wlan iface)
-			# - Remove WLAN block, so we can recreate it
-			G_EXEC sed --follow-symlinks -Ei '/(allow-hotplug|auto)[[:blank:]]+wlan/q0' /etc/network/interfaces
-			# - Disable
-			G_EXEC sed --follow-symlinks -i "/allow-hotplug wlan/c\#allow-hotplug $wifi_iface" /etc/network/interfaces
-			# - Add default WiFi settings to network interfaces config
-			cat << _EOF_ >> /etc/network/interfaces
-iface $wifi_iface inet dhcp
-address 192.168.0.101
-netmask 255.255.255.0
-#gateway 192.168.0.1
-#dns-nameservers 9.9.9.9 149.112.112.112
-pre-up iw dev $wifi_iface set power_save off
-post-down iw dev $wifi_iface set power_save on
-wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
-_EOF_
-			# shellcheck disable=SC2015
-			iw dev "$wifi_iface" set power_save on 2> /dev/null && iw dev "$wifi_iface" set power_save off 2> /dev/null || G_EXEC sed --follow-symlinks -i '/ iw dev .* set power_save /d' /etc/network/interfaces
+			# Set WiFi interface back to inactive and ready for use with dietpi-network.
+			local wifi_iface
+			for i in /sys/class/net/*
+			do
+				[[ -d $i/wireless ]] || continue
+				wifi_iface=${i##*/}
+				break
+			done
+			[[ ! $wifi_iface ]] || /boot/dietpi/dietpi-network apply "$wifi_iface" --disable --dhcp --client --no-restart
 			# - Flush iptables
 			iptables -F
 			iptables -t nat -F

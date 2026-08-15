@@ -49,6 +49,7 @@
 	alias dietpi-cloudshell='/boot/dietpi/dietpi-cloudshell'
 	alias dietpi-vpn='/boot/dietpi/dietpi-vpn'
 	alias dietpi-ddns='/boot/dietpi/dietpi-ddns'
+	alias dietpi-network='/boot/dietpi/dietpi-network'
 	alias dietpi-display='/boot/dietpi/dietpi-display'
 	alias dietpi-benchmark='/boot/dietpi/dietpi-benchmark'
 	alias cpu='/boot/dietpi/dietpi-cpuinfo'
