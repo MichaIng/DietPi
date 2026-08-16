@@ -118,7 +118,7 @@
 	declare -A aCUSTOM_COMMANDS=()
 
 	# Default disk mounts (explicit paths) and patterns (globs/regex)
-	aDISK_SPACE_MOUNTS=()
+	aDISK_SPACE_MOUNTS=('/')
 	aDISK_SPACE_PATTERNS=()
 
 	# Load settings here, to have chosen custom CLI colours applied
@@ -347,16 +347,15 @@ $CLI_LINE"
 		}
 
 		local stat code
-		if [[ $EUID == 0 ]]
+		if (( $EUID ))
 		then
-			# Running as root
-			stat=$(Get_Cert_Status_Raw 2>&1)
-			code=$?
-		else
 			# Running as non-root: Fail silently without NOPASSWD to avoid password prompt
 			stat=$(sudo -n dash -c "$(declare -f Get_Cert_Status_Raw); Get_Cert_Status_Raw 2>&1" 2> /dev/null)
-			code=$?
+		else
+			# Running as root
+			stat=$(Get_Cert_Status_Raw 2>&1)
 		fi
+		code=$?
 
 		case $code in
 			0)
@@ -379,12 +378,26 @@ $CLI_LINE"
 	Get_Systemd_Status()
 	{
 		# Print systemd overall status based on "systemctl --failed"
-		FAILED_CNT=$(systemctl --failed --no-legend --no-pager | wc -l 2> /dev/null)
-		if [[ ! $FAILED_CNT || $FAILED_CNT == 0 ]]
+		# - non-root users can call systemctl if dbus is active
+		local failed_cnt
+		if [[ $EUID == 0 || -S '/run/dbus/system_bus_socket' ]]
 		then
-			echo 'No services failed'
+			failed_cnt=$(systemctl --failed --legend=no --no-pager)
 		else
-			echo "${aCOLOUR[alert]}$FAILED_CNT service(s) failed"
+			if ! failed_cnt=$(sudo -n systemctl --failed --legend=no --no-pager 2> /dev/null)
+			then
+				echo "${aCOLOUR[highlight]}NOPASSWD sudo required to obtain systemd status"
+				return 1
+			fi
+		fi
+
+		mapfile -t failed_cnt <<< "$failed_cnt"
+
+		if (( ${#failed_cnt[@]} ))
+		then
+			echo "${aCOLOUR[alert]}${#failed_cnt[@]} service(s) failed"
+		else
+			echo 'No services failed'
 		fi
 	}
 
@@ -395,12 +408,13 @@ $CLI_LINE"
 			if command -v fail2ban-client > /dev/null
 			then
 				# IP address detection (very sloppy for IPv6) - avoid {m,n} to support mawk on Debian Bookworm
-				local IP_re='^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|[0-9a-f:]*:[0-9a-f:]*)$'
-				if [[ $EUID == 0 ]]
+				local IP_re='^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|[0-9a-f:]*:[0-9a-f:]*)(/[0-9]+)?$'
+				if (( $EUID ))
 				then
-					fail2ban-client banned 2> /dev/null | mawk -F\' -v ip="$IP_re" '{for(i=2;i<NF;i+=2){if($i ~ ip) a[$i]=1}} END{print length(a)}'
+					sudo -n fail2ban-client banned 2> /dev/null | mawk -F\' -v ip="$IP_re" '{for(i=2;i<NF;i+=2){if($i ~ ip) a[$i]=1}} END{print length(a)}'
+					(( ${PIPESTATUS[0]} )) && return 2
 				else
-					sudo -n fail2ban-client banned 2> /dev/null | mawk -F\' -v ip="$IP_re" '{for(i=2;i<NF;i+=2){if($i ~ ip) a[$i]=1}} END{print length(a)}' || return 2
+					fail2ban-client banned 2> /dev/null | mawk -F\' -v ip="$IP_re" '{for(i=2;i<NF;i+=2){if($i ~ ip) a[$i]=1}} END{print length(a)}'
 				fi
 				return 0
 			else
@@ -418,15 +432,15 @@ $CLI_LINE"
 				if (( $count_banned_ips == 0 ))
 				then
 					# zero bans can be suspicious - something may not be working correctly
-					state="${aCOLOUR[highlight]}No IPs banned, check Fail2Ban state"
+					state="${aCOLOUR[highlight]}No bans, check Fail2Ban state"
 
 				elif (( $count_banned_ips > 20 ))
 				then
 					# high number of bans
-					state="${aCOLOUR[alert]}$count_banned_ips IP(s) banned"
+					state="${aCOLOUR[alert]}$count_banned_ips ban(s)"
 				else
 					# low number of bans
-					state="$count_banned_ips IP(s) banned"
+					state="$count_banned_ips ban(s)"
 				fi
 			;;
 			1) state="${aCOLOUR[alert]}fail2ban-client not available";;
@@ -551,7 +565,7 @@ For example: "/mnt/*" or "re:^/mnt/.*/*$"'
 
 		# Build mount list from findmnt (preserve findmnt order)
 		local -a available_mounts
-		mapfile -t available_mounts < <(findmnt -nro TARGET --real 2>/dev/null)
+		mapfile -t available_mounts < <(findmnt -nro TARGET --fstab --real 2>/dev/null)
 		# Build quick lookup maps used to determine which mounts are present
 		# and which are configured by the user:
 		# - `avail_map`: mounts currently detected on the system
@@ -696,7 +710,7 @@ For example: "/mnt/*" or "re:^/mnt/.*/*$"'
 		# Pull all mounts once (-D -n -r) in bytes (-b). Rebuild TARGET safely
 		# (handles spaces) and compute USE% with one decimal using mawk from USED/SIZE.
 		# Use ASCII Unit Separator (0x1F) as a safe field delimiter to avoid collisions with mount names
-		mapfile -t mount_lines < <(findmnt -b -Dnro TARGET,USED,SIZE --real | mawk -v SEP="$(printf '\037')" '{used=$(NF-1); size=$NF; target=$1; for(i=2;i<=NF-2;i++) target=target" "$i; perc=(size>0? used/size*100 : 0); printf "%s%s%s%s%s%s%s\n", target, SEP, used, SEP, size, SEP, sprintf("%.1f%%", perc)}')
+		mapfile -t mount_lines < <(findmnt -bnro TARGET,USED,SIZE --real | mawk -v SEP="$(printf '\037')" '{used=$(NF-1); size=$NF; target=$1; for(i=2;i<=NF-2;i++) target=target" "$i; perc=(size>0? used/size*100 : 0); printf "%s%s%s%s%s%s%s\n", target, SEP, used, SEP, size, SEP, sprintf("%.1f%%", perc)}')
 
 		# Keep mount_order[] to preserve findmnt's (consistent) order and aDISK_SPACE_PATTERNS' order.
 		for line in "${mount_lines[@]}"
@@ -1076,8 +1090,8 @@ For example: "/mnt/*" or "re:^/mnt/.*/*$"'
 		echo -e "$CLI_LINE\n"
 
 		(( ${aENABLED[credits]} )) && Print_Credits
-		Print_Updates
 		(( ${aENABLED[dietpi_commands]} )) && Print_Useful_Commands
+		Print_Updates
 	}
 
 	Print_Banner()

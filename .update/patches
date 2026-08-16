@@ -1562,17 +1562,6 @@ _EOF_
 		G_EXEC eval 'echo -e '\''blacklist bcm2835_codec\nblacklist rpi_hevc_dec'\'' > /etc/modprobe.d/dietpi-disable_rpi_codec.conf'
 		G_EXEC sed --follow-symlinks -i '/^blacklist bcm2835_codec$/d' /etc/modprobe.d/dietpi-disable_rpi_camera.conf
 	fi
-
-	# Software updates, migrations and patches
-	if [[ -f '/boot/dietpi/.installed' ]]
-	then
-		# Chromium: https://dietpi.com/forum/t/22518
-		if [[ -f '/etc/chromium.d/dietpi' ]] && grep -q ' --use-gl=egl"' /etc/chromium.d/dietpi
-		then
-			G_DIETPI-NOTIFY 2 'Fixing Chromium hardware acceleration'
-			G_EXEC sed --follow-symlinks -i 's/ --use-gl=egl"/"/' /etc/chromium.d/dietpi
-		fi
-	fi
 }
 
 Patch_9_15()
@@ -2506,7 +2495,7 @@ Patch_10_6()
 	if [[ -d '/mnt/ftp_client' ]]
 	then
 		[[ -f '/mnt/ftp_client/readme.txt' ]] && G_EXEC rm /mnt/ftp_client/readme.txt
-		find /mnt/ftp_client -maxdepth 0 -empty -exec rmdir -v /mnt/ftp_client +
+		find /mnt/ftp_client -maxdepth 0 -empty -exec rmdir -v {} +
 	fi
 
 	# dietpi-banner migrations
@@ -2516,22 +2505,37 @@ Patch_10_6()
 
 		G_DIETPI-NOTIFY 2 'Migrating /boot/dietpi/.dietpi-banner to new named arrays and options'
 
-		# Migrate legacy numeric-indexed aENABLED to named form, skipping disk usage (7 and 8)
+		# Migrate legacy numeric-indexed aENABLED to named form, skipping userdata disk usage (8)
 		mapping=(
-			device_model uptime cpu_temp hostname nis_domainname lan_ip wan_ip '' ''
+			device_model uptime cpu_temp hostname nis_domainname lan_ip wan_ip disk_usage ''
 			weather custom_commands dietpi_commands motd vpn_status large_hostname
 			credits letsencrypt ram_usage load_average word_wrap kernel
 		)
-		for i in {0..6} {9..20}
+		for i in {0..7} {9..20}
 		do
 			G_EXEC sed --follow-symlinks -i "s/^[[:blank:]]*aENABLED\[$i\]=/aENABLED[${mapping[i]}]=/" /boot/dietpi/.dietpi-banner
 		done
 
-		# Migrate legacy disk usage options
-		G_EXEC sed --follow-symlinks -i '\|^[[:blank:]]*aENABLED\[7\]=1|c\aDISK_SPACE_MOUNTS+=(/)' /boot/dietpi/.dietpi-banner
-		userdata=$(findmnt -Ufvnro TARGET -T /mnt/dietpi_userdata)
-		[[ $userdata == '/' ]] || G_EXEC sed --follow-symlinks -i "\|^[[:blank:]]*aENABLED\[8\]=1|c\aDISK_SPACE_MOUNTS+=('${userdata//\'/\'\\\'\'}')" /boot/dietpi/.dietpi-banner
-		grep -q '^aDISK_SPACE_MOUNTS+=' /boot/dietpi/.dietpi-banner && G_CONFIG_INJECT 'aENABLED\[disk_usage\]=' 'aENABLED[disk_usage]=1' /boot/dietpi/.dietpi-banner
+		# Migrate userdata disk usage option to new array
+		if grep -q '^[[:blank:]]*aENABLED\[8\]=1' /boot/dietpi/.dietpi-banner
+		then
+			userdata=$(findmnt -Ufvnro TARGET -T /mnt/dietpi_userdata)
+			# Enable only if userdata are located below an own mount point
+			if [[ $userdata && $userdata != '/' ]]
+			then
+				# Escape single quotes to be used within single quotation
+				userdata=${userdata//\'/\'\\\'\'}
+				if grep -q '^[[:blank:]]*aENABLED\[disk_usage\]=0' /boot/dietpi/.dietpi-banner
+				then
+					# If rootfs disk usage was disabled, add userdata as index 0, to replace the default rootfs entry, and enable the general disk usage option
+					G_CONFIG_INJECT 'aDISK_SPACE_MOUNTS\[0\]=' "aDISK_SPACE_MOUNTS[0]='$userdata'" /boot/dietpi/.dietpi-banner
+					G_CONFIG_INJECT 'aENABLED\[disk_usage\]=' 'aENABLED[disk_usage]=1' /boot/dietpi/.dietpi-banner
+				else
+					# If rootfs disk usage was enabled, add userdata as index 1, to be shown below the default rootfs entry
+					G_CONFIG_INJECT 'aDISK_SPACE_MOUNTS\[1\]=' "aDISK_SPACE_MOUNTS[1]='$userdata'" /boot/dietpi/.dietpi-banner
+				fi
+			fi
+		fi
 
 		# Migrate legacy custom command file to aCUSTOM_COMMANDS array if present
 		if [[ -f '/boot/dietpi/.dietpi-banner_custom' ]]
@@ -2554,6 +2558,37 @@ Patch_10_6()
 
 		# Remove left invalid entries
 		G_EXEC sed --follow-symlinks -Ei -e '/^[[:blank:]]*a(ENABLED|COLOUR|DESCRIPTION)\[[0-9]+\]=/d' /boot/dietpi/.dietpi-banner
+	fi
+
+	# Software updates, migrations and patches
+	if [[ -f '/boot/dietpi/.installed' ]]
+	then
+		# vaultwarden
+		if [[ -f '/mnt/dietpi_userdata/vaultwarden/vaultwarden.env' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Applying stricter mode to vaultwarden.env, as it can be used to provide secret hashes like ADMIN_TOKEN. Use the "vaultwarden" group if any other user requires read access.'
+			G_EXEC chmod 'o-r' /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
+		fi
+	fi
+}
+
+Patch_10_7()
+{
+	if [[ -f '/etc/chromium.d/dietpi' ]]
+	then
+		G_DIETPI-NOTIFY 2 'Removing obsolete Chromium flags, and apply "--no-sandbox" for calls as root user only'
+		# --no-sandbox allows root to run Chromium, and --test-type mutes a warning that --no-sandbox was used.
+		# shellcheck disable=SC2016
+		G_EXEC eval 'echo '\''[ "$(id -u)" -eq 0 ] && export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --test-type"'\'' > /etc/chromium.d/dietpi'
+	fi
+
+	if [[ -f '/boot/firmware/config.txt' ]]
+	then
+		G_DIETPI-NOTIFY 2 'Moving all dtoverlay= lines to the end of config.txt, to assure dtparam= lines are effective.'
+		G_DIETPI-NOTIFY 2 'For reference: https://forums.raspberrypi.com/viewtopic.php?p=2385679#p2385532'
+		# shellcheck disable=SC2016
+		G_EXEC eval 'mawk '\''/^[[:blank:]#]*dtoverlay=/ { a = a $0 ORS; next } { print } END { printf "%s", a }'\'' /boot/firmware/config.txt > config.txt.new'
+		G_EXEC mv config.txt.new /boot/firmware/config.txt
 	fi
 
 	# Software updates, migrations and patches
