@@ -243,26 +243,26 @@ _EOF_
 		/boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 
 		# Network setup
-		# - Grab available network interfaces
-		local iface_eth=$(G_GET_NET -q -t eth iface)
-		[[ $iface_eth ]] || iface_eth='eth0'
-		local iface_wlan=$(G_GET_NET -q -t wlan iface)
-		[[ $iface_wlan ]] || iface_wlan='wlan0'
-
-		# - Replace interface names with the ones obtained above
-		sed --follow-symlinks -i "s/eth[0-9]/$iface_eth/g" /etc/network/interfaces
-		sed --follow-symlinks -i "s/wlan[0-9]/$iface_wlan/g" /etc/network/interfaces
-
-		# - Grab user requested settings from dietpi.txt
-		local ethernet_enabled=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_ETHERNET_ENABLED=1' /boot/dietpi.txt)
+		# - Force dietpi-network CLI arguments from user requested settings from dietpi.txt
+		local net_flags=('--enable' '--force' '--no-reload')
+		local eth_enabled=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_ETHERNET_ENABLED=1' /boot/dietpi.txt)
 		local wifi_enabled=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_WIFI_ENABLED=1' /boot/dietpi.txt)
 		local use_static=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_USESTATIC=1' /boot/dietpi.txt)
-		local static_ip=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_IP=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		local static_mask=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_MASK=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		local static_gateway=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_GATEWAY=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		local static_dns=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_DNS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		if (( $use_static ))
+		then
+			local static_ip=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_IP=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			local static_gateway=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_GATEWAY=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			local static_dns=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_DNS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 
-		# - WiFi
+			net_flags+=('--static')
+			[[ $static_ip ]] && net_flags+=('--ip' "$static_ip")
+			[[ $static_gateway ]] && net_flags+=('--gateway' "$static_gateway")
+			[[ $static_dns ]] && net_flags+=('--dns' "$static_dns")
+		else
+			net_flags+='--dhcp'
+		fi
+
+		# - Enable WiFi if requested
 		if (( $wifi_enabled ))
 		then
 			# Enable WiFi kernel modules
@@ -274,51 +274,29 @@ _EOF_
 			# Apply WiFi country code from /boot/dietpi.txt
 			/boot/dietpi/func/dietpi-set_hardware wificountrycode
 
-			# Enable WiFi, disable Ethernet
-			ethernet_enabled=0
-			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\allow-hotplug $iface_wlan" /etc/network/interfaces
-			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\#allow-hotplug $iface_eth" /etc/network/interfaces
-
-		# - Ethernet
-		elif (( $ethernet_enabled ))
-		then
-			# Enable Ethernet, disable WiFi
-			wifi_enabled=0
-			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\allow-hotplug $iface_eth" /etc/network/interfaces
-			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\#allow-hotplug $iface_wlan" /etc/network/interfaces
-		fi
-
-		# - Static IP
-		if (( $use_static ))
-		then
-			if (( $wifi_enabled ))
-			then
-				sed --follow-symlinks -i "/iface wlan/c\iface $iface_wlan inet static" /etc/network/interfaces
-
-			elif (( $ethernet_enabled ))
-			then
-				sed --follow-symlinks -i "/iface eth/c\iface $iface_eth inet static" /etc/network/interfaces
-			fi
-			sed --follow-symlinks -i "/address/c\address $static_ip" /etc/network/interfaces
-			sed --follow-symlinks -i "/netmask/c\netmask $static_mask" /etc/network/interfaces
-			sed --follow-symlinks -i "/gateway/c\gateway $static_gateway" /etc/network/interfaces
-			if command -v resolvconf > /dev/null
-			then
-				sed --follow-symlinks -i "/dns-nameservers/c\dns-nameservers $static_dns" /etc/network/interfaces
-			else
-				> /etc/resolv.conf
-				for i in $static_dns; do echo "nameserver $i" >> /etc/resolv.conf; done
-				sed --follow-symlinks -i "/dns-nameservers/c\#dns-nameservers $static_dns" /etc/network/interfaces
-			fi
+			# Grab available WiFi interface
+			local iface_wifi=$(G_GET_NET -q -t wlan iface)
 		fi
 
 		# - IPv6
 		/boot/dietpi/func/dietpi-set_hardware enableipv6 "$(( ! $(grep -cm1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=0' /boot/dietpi.txt) ))"
 
-		# - Configure enabled interfaces now, /etc/network/interfaces will be effective from next boot on
-		#	Failsafe: Bring up Ethernet, whenever WiFi is disabled or fails to be configured, e.g. due to wrong credentials
-		# shellcheck disable=SC2015
-		(( $wifi_enabled )) && ifup "$iface_wlan" || ifup "$iface_eth"
+		# - Configure and bring up interfaces now, using Ethernet also as fallback if WiFi fails.
+		# - If no interface has been detected yet, configure with wlan0/eth0 names, but do not bring up now.
+		# - This way, ifupdown's udev rules can trigger ifup@.service once the interface is detected.
+		# - Use ifup here, instead of ifup@.service, for easier logging, and to support non-hotplug/auto interfaces.
+		if
+			(( $wifi_enabled )) &&
+			/boot/dietpi/dietpi-network apply "${iface_wifi:-wlan0}" "${net_flags[@]}" &&
+			[[ $iface_wifi ]] && ifup "$iface_wifi"
+		then
+			:
+		else
+			# Grab available Ethernet interface
+			local iface_eth=$(G_GET_NET -q -t eth iface)
+			/boot/dietpi/dietpi-network apply "${iface_eth:-eth0}" "${net_flags[@]}" &&
+			[[ $iface_eth ]] && ifup "$iface_eth"
+		fi
 
 		# - Boot wait for network
 		/boot/dietpi/func/dietpi-set_software boot_wait_for_network "$(( ! $(grep -cm1 '^[[:blank:]]*AUTO_SETUP_BOOT_WAIT_FOR_NETWORK=0' /boot/dietpi.txt) ))"
