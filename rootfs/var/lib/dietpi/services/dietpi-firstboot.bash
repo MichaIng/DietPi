@@ -290,6 +290,7 @@ _EOF_
 			# - If no interface has been detected yet, configure with wlan0/eth0 names, but do not bring up now.
 			# - This way, ifupdown's udev rules can trigger ifup@.service once the interface is detected.
 			# - Use ifup here, instead of ifup@.service, for easier logging, and to support non-hotplug/auto interfaces.
+			# shellcheck disable=SC2015
 			(( $wifi_enabled )) &&
 			/boot/dietpi/dietpi-network apply "${iface_wifi:-wlan0}" "${net_flags[@]}" &&
 			[[ $iface_wifi ]] && ifup "$iface_wifi" || {
