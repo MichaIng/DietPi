@@ -2,7 +2,7 @@
 {
 # --------------------------------------------
 # dietpi-network
-# Manage DietPi network interface and global network settings
+# Manage network interfaces and global network settings
 # --------------------------------------------
 # Created by Daniel Knight / daniel.knight@dietpi.com / dietpi.com
 # Updated by MichaIng / micha@dietpi.com / dietpi.com
@@ -12,40 +12,39 @@
 readonly USAGE='
 Usage: dietpi-network [<command>]
 Available commands:
-  <empty>                             Interactive menu to control network settings
-  main                                Open the interactive top-level menu
+  <empty>, main                       Open the interactive top-level menu to control network settings
   <ifname>                            Open the interactive submenu for network interface <ifname>
+  country                             Open the interactive WiFi country code submenu
   proxy                               Open the interactive proxy submenu
-  country                             Open the interactive WiFi country submenu
-  test                                Open the interactive internet connection test submenu
   apply <ifname> [<options>...]       Apply interface config for <ifname> and reconnect only that interface
   remove <ifname>                     Remove the DietPi drop-in config for <ifname> and ifdown the interface
-  wifi <enable|disable>               Enable or disable WiFi modules globally
-  wifi <onboard-enable|onboard-disable>
-                                      Toggle onboard WiFi globally on supported SBCs
-  proxy <enable|disable>              Enable or disable the configured proxy globally
-  proxy <address|port|username|password> <value>
-                                      Update one proxy setting value
+  wifi enable|disable                 Enable or disable WiFi modules globally
+  wifi onboard-enable|onboard-disable
+                                      Enable or disable onboard WiFi globally on supported SBCs
   country <code>                      Apply WiFi country code <code>
-  ipv6 <enable|disable>               Toggle IPv6
-  test [<url>]                        Run internet connection test against <url>
-Available options for "apply":
-  --enable / --disable                Enable or disable the interface
-  --dhcp / --static                   Select DHCP or static IPv4 mode
-  --ip <address[/cidr]>               Static IPv4 address, optionally in CIDR notation, e.g. 192.168.0.100/24
-                                      If no CIDR suffix is given, /24 is assumed.
+  ipv6 enable|disable                 Enable or disable IPv6
+  proxy enable|disable                Enable or disable the configured proxy globally
+  proxy address|port|username|password <value>
+                                      Apply <value> to the specified proxy setting
+Available options for "apply" command:
+  --enable|--disable                  Enable or disable the interface
+  --dhcp|--static                     Select DHCP or static IPv4 mode
+  --ip <address>[/<cidr>]             Static IPv4 address with optional CIDR netmask, else /24
   --gateway <address>                 Static IPv4 gateway
-  --dns <"ip [ip]">                   Static DNS server list
+  --dns "<ip> [<ip>...]"              Static DNS server list
   --copy-current                      Copy current live IPv4/DNS values into static settings before applying
-  --client / --hotspot                WiFi client mode or WiFi hotspot mode
+  --hotplug|--auto                    Bring up interface once detected/plugged (hotplug) or during early boot (auto)
+                                      The hotplug mode is the recommended default on all systems but container guests.
+                                      The auto mode can fail if the adapter is not initializing fast enough.
+  --client|--hotspot                  WiFi client or hotspot mode, which defaults to client for new interfaces
   --ssid <name>                       WiFi hotspot SSID
   --key <passphrase>                  WiFi hotspot WPA passphrase
-  --freq <2.4|5>                      WiFi hotspot frequency band
+  --freq 2.4|5                        WiFi hotspot frequency band
   --channel <channel>                 WiFi hotspot channel for the selected frequency band
-  --wifi4 <0|1>                       Toggle WiFi 4 / 802.11n support for hotspot mode
-  --wifi5 <0|1>                       Toggle WiFi 5 / 802.11ac support for hotspot mode
-  --wifi6 <0|1>                       Toggle WiFi 6 / 802.11ax support for hotspot mode
-  --no-restart                        Write config only, do not reconnect the interface
+  --wifi4 0|1                         Enable or disable WiFi 4 / 802.11n support for hotspot mode
+  --wifi5 0|1                         Enable or disable WiFi 5 / 802.11ac support for hotspot mode
+  --wifi6 0|1                         Enable or disable WiFi 6 / 802.11ax support for hotspot mode
+  --no-restart                        Write config only, do not reconnect the interface now
   --force                             Proceed even if a network conflict (same subnet/duplicate default route) with
                                       another enabled interface is detected, or if the interface does not exist at all.
 '
@@ -66,6 +65,7 @@ APPLY_FORCE=0
 APPLY_ENABLE=
 APPLY_MODE=
 APPLY_COPY_CURRENT=0
+APPLY_BOOT_MODE=
 APPLY_ROLE=
 APPLY_IP=
 APPLY_GATEWAY=
@@ -85,10 +85,10 @@ CURRENT_IFACE_ENABLED=1
 CURRENT_IFACE_REAL=0
 CURRENT_IFACE_CONNECTED=0
 CURRENT_IFACE_MODE='dhcp'
-CURRENT_IFACE_MODE_TARGET='dhcp'
 CURRENT_IFACE_IP_STATIC=
 CURRENT_IFACE_GATEWAY_STATIC=
 CURRENT_IFACE_DNS_STATIC=
+(( $G_HW_MODEL == 75 )) && CURRENT_IFACE_BOOT_MODE='auto' || CURRENT_IFACE_BOOT_MODE='allow-hotplug'
 CURRENT_IFACE_IP='0.0.0.0'
 CURRENT_IFACE_GATEWAY='0.0.0.0'
 CURRENT_IFACE_SOURCE=
@@ -119,8 +119,8 @@ PROXY_ADDRESS=
 PROXY_PORT=
 PROXY_USERNAME=
 PROXY_PASSWORD=
-declare -a ETH_INTERFACES=()
-declare -a WIFI_INTERFACES=()
+ETH_INTERFACES=()
+WIFI_INTERFACES=()
 
 Error(){ G_DIETPI-NOTIFY 1 "$1"; exit 1; }
 
@@ -252,21 +252,21 @@ Parse_Interface_Config()
 	[[ -f $file ]] || return 1
 	data=$(mawk -v iface="$iface" '
 		BEGIN{OFS="\034"}
-		function top(line){return line ~ /^[[:blank:]]*(iface|auto|allow-hotplug|mapping|source)([[:blank:]]|$)/}
+		function top(line){return line ~ /^[[:blank:]]*(iface|(allow-)?auto|allow-hotplug|mapping|source)([[:blank:]]|$)/}
 		{
 			if (inblock && top($0)) inblock=0
-			if ($0 ~ "^[[:blank:]]*(allow-hotplug|auto)[[:blank:]]+" iface "([[:blank:]]|$)") {enabled=1; found=1}
+			if ($0 ~ "^[[:blank:]]*(allow-hotplug|(allow-)?auto)[[:blank:]]+" iface "([[:blank:]]|$)") {enabled=1; found=1; bootmode=$1}
 			if ($1=="iface" && $2==iface) {inblock=1; found=1; mode=$4; next}
 			if (!inblock) next
 			if ($1=="address") address=$2
 			else if ($1=="netmask") netmask=$2
 			else if ($1=="gateway") gateway=$2
 			else if ($1=="dns-nameservers") {dns=""; for(i=2;i<=NF;i++) dns=dns (dns?" ":"") $i}
-			else if (($1=="up" || $1=="pre-up" || $1=="post-down") && index($0,"iptables-restore")) hotspot=1
+			else if (($1=="up") && index($0,"iptables-restore")) hotspot=1
 		}
-		END{print found,enabled,mode,address,netmask,gateway,dns,hotspot}
+		END{print found,enabled,mode,address,netmask,gateway,dns,bootmode,hotspot}
 	' "$file") || return 1
-	IFS=$'\034' read -r PARSE_FOUND PARSE_ENABLED PARSE_MODE PARSE_ADDRESS PARSE_NETMASK PARSE_GATEWAY PARSE_DNS PARSE_HOTSPOT <<< "$data"
+	IFS=$'\034' read -r PARSE_FOUND PARSE_ENABLED PARSE_MODE PARSE_ADDRESS PARSE_NETMASK PARSE_GATEWAY PARSE_DNS PARSE_BOOT_MODE PARSE_HOTSPOT <<< "$data"
 	return 0
 }
 
@@ -276,10 +276,10 @@ Get_Interface_Stored_Settings()
 	CURRENT_IFACE_SOURCE=
 	CURRENT_IFACE_ENABLED=1
 	CURRENT_IFACE_MODE='dhcp'
-	CURRENT_IFACE_MODE_TARGET='dhcp'
 	CURRENT_IFACE_IP_STATIC='192.168.0.100/24'
 	CURRENT_IFACE_GATEWAY_STATIC='192.168.0.1'
 	CURRENT_IFACE_DNS_STATIC=$(Get_Default_DNS)
+	(( $G_HW_MODEL == 75 )) && CURRENT_IFACE_BOOT_MODE='auto' || CURRENT_IFACE_BOOT_MODE='allow-hotplug'
 
 	if Parse_Interface_Config "/etc/network/interfaces.d/$iface.conf" "$iface" && [[ $PARSE_FOUND == 1 ]]
 	then
@@ -294,7 +294,6 @@ Get_Interface_Stored_Settings()
 
 	CURRENT_IFACE_ENABLED=${PARSE_ENABLED:-0}
 	[[ $PARSE_MODE == 'static' ]] && CURRENT_IFACE_MODE='static' || CURRENT_IFACE_MODE='dhcp'
-	CURRENT_IFACE_MODE_TARGET=$CURRENT_IFACE_MODE
 	if [[ $PARSE_ADDRESS ]]
 	then
 		CURRENT_IFACE_IP_STATIC=$PARSE_ADDRESS
@@ -302,6 +301,7 @@ Get_Interface_Stored_Settings()
 	fi
 	[[ $PARSE_GATEWAY ]] && CURRENT_IFACE_GATEWAY_STATIC=$PARSE_GATEWAY
 	[[ $PARSE_DNS ]] && CURRENT_IFACE_DNS_STATIC=$PARSE_DNS
+	[[ $PARSE_BOOT_MODE ]] && CURRENT_IFACE_BOOT_MODE=$PARSE_BOOT_MODE
 	(( ${PARSE_HOTSPOT:-0} )) && CURRENT_IFACE_HOTSPOT=1
 }
 
@@ -422,7 +422,7 @@ Update_ResolvConf_Fallback()
 {
 	command -v resolvconf > /dev/null && return 0
 	(( $CURRENT_IFACE_ENABLED )) || return 0
-	[[ $CURRENT_IFACE_MODE_TARGET == 'static' ]] || return 0
+	[[ $CURRENT_IFACE_MODE == 'static' ]] || return 0
 	[[ $CURRENT_IFACE_DNS_STATIC ]] || return 0
 	> /etc/resolv.conf
 	local server
@@ -441,7 +441,7 @@ Write_Interface_Config()
 	# WiFi Hotspot requires a static IP, but must not have a gateway or DNS
 	if [[ $CURRENT_IFACE_HOTSPOT == 1 ]]
 	then
-		CURRENT_IFACE_MODE_TARGET='static'
+		CURRENT_IFACE_MODE='static'
 	else
 		[[ $CURRENT_IFACE_GATEWAY_STATIC ]] && gateway_line="gateway $CURRENT_IFACE_GATEWAY_STATIC"
 		command -v resolvconf > /dev/null && [[ $CURRENT_IFACE_DNS_STATIC ]] && dns_line="dns-nameservers $CURRENT_IFACE_DNS_STATIC"
@@ -449,11 +449,11 @@ Write_Interface_Config()
 
 	# Header
 	local content="# Location: $fp"$'\n''# Generated with: dietpi-network'
-	(( $CURRENT_IFACE_ENABLED )) && content+=$'\n'"allow-hotplug $iface"
-	content+=$'\n'"iface $iface inet $CURRENT_IFACE_MODE_TARGET"
+	(( $CURRENT_IFACE_ENABLED )) && content+=$'\n'"$CURRENT_IFACE_BOOT_MODE $iface"
+	content+=$'\n'"iface $iface inet $CURRENT_IFACE_MODE"
 
 	# Static IP
-	if [[ $CURRENT_IFACE_MODE_TARGET == 'static' ]]
+	if [[ $CURRENT_IFACE_MODE == 'static' ]]
 	then
 		content+=$'\n'"address $CURRENT_IFACE_IP_STATIC"
 		[[ $gateway_line ]] && content+=$'\n'"$gateway_line"
@@ -603,6 +603,19 @@ Change_WifiCountryCode()
 	/boot/dietpi/func/dietpi-set_hardware wificountrycode "$CURRENT_WIFI_COUNTRYCODE"
 }
 
+Change_BootMode()
+{
+	G_WHIP_MENU_ARRAY=(
+		'Hotplug' ': Bring up interface once adapter is detected/plugged'
+		'Auto' ': Bring up interface during early boot'
+	)
+	G_WHIP_DEFAULT_ITEM=${CURRENT_IFACE_BOOT_MODE#allow-}
+	G_WHIP_MENU 'Please select how the interface should be brought up at boot.
+\nNB: The auto mode can fail if the adapter is not initializing fast enough. And it won'\''t bring the interface back up automatically, when the adapter is physically detected and re-attached. We hence recommend the hotplug mode.
+Only exception are container guest systems, where the hotplug mode cannot usually work, as it is triggered by udev events about added (detected) network adapters.' || return 0
+	[[ $G_WHIP_RETURNED_VALUE == 'Auto' ]] && CURRENT_IFACE_BOOT_MODE='auto' || CURRENT_IFACE_BOOT_MODE='allow-hotplug'
+}
+
 Apply_Hotspot_Settings()
 {
 	G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_SSID=' "SOFTWARE_WIFI_HOTSPOT_SSID=$HOTSPOT_SSID" /boot/dietpi.txt
@@ -701,7 +714,7 @@ Check_Network_Conflicts()
 {
 	(( $APPLY_FORCE )) && return 0 # skip check if settings are to be applied anyway
 	(( $CURRENT_IFACE_ENABLED )) || return 0
-	[[ $CURRENT_IFACE_MODE_TARGET == 'static' || $CURRENT_IFACE_MODE_TARGET == 'dhcp' ]] || return 0
+	[[ $CURRENT_IFACE_MODE == 'static' || $CURRENT_IFACE_MODE == 'dhcp' ]] || return 0
 	local iface o_enabled o_cidr o_gateway reason
 	for iface in /sys/class/net/*
 	do
@@ -713,11 +726,11 @@ Check_Network_Conflicts()
 
 		IFS='|' read -r o_enabled _ o_cidr o_gateway < <(Get_Iface_Effective_Net "$iface")
 		(( $o_enabled )) || continue
-		if [[ $CURRENT_IFACE_MODE_TARGET == 'static' && $CURRENT_IFACE_IP_STATIC && $o_cidr ]] && Subnets_Overlap "$CURRENT_IFACE_IP_STATIC" "$o_cidr"
+		if [[ $CURRENT_IFACE_MODE == 'static' && $CURRENT_IFACE_IP_STATIC && $o_cidr ]] && Subnets_Overlap "$CURRENT_IFACE_IP_STATIC" "$o_cidr"
 		then
 			reason="already uses the same subnet ($o_cidr) as the static IP address about to be assigned to \"$CURRENT_IFACE\" ($CURRENT_IFACE_IP_STATIC)"
 
-		elif [[ $CURRENT_IFACE_MODE_TARGET == 'dhcp' && $o_gateway ]]
+		elif [[ $CURRENT_IFACE_MODE == 'dhcp' && $o_gateway ]]
 		then
 			reason="already has a default gateway ($o_gateway) assigned, while \"$CURRENT_IFACE\" is about to be enabled with DHCP, which usually also assigns a default route"
 		else
@@ -774,16 +787,15 @@ Return_From_Submenu(){ [[ $ENTRY_TARGET == "$1" ]] && NEXT_MENU='exit' || NEXT_M
 
 Interface_Status_Text()
 {
-	local iface=$1 type=$2 enabled=1 mode='dhcp' connected='Disconnected' config=''
+	local iface=$1 type=$2 enabled='Off' mode='DHCP' connected='Disconnected'
 	CURRENT_IFACE=
 	Get_Interface_Stored_Settings "$iface"
-	enabled=$CURRENT_IFACE_ENABLED
-	mode=$CURRENT_IFACE_MODE_TARGET
+	(( $CURRENT_IFACE_ENABLED )) && enabled='On'
+	[[ $CURRENT_IFACE_MODE == 'static' ]] && mode='Static'
 	CURRENT_IFACE_CONNECTED=$(ip -o r l dev "$iface" 2> /dev/null | grep -vcm1 '[[:blank:]]linkdown')
 	(( $CURRENT_IFACE_CONNECTED )) && connected='Connected'
 	[[ $type == 'wifi' && -f '/etc/hostapd/hostapd.conf' ]] && grep -q "^[[:blank:]]*interface=$iface$" /etc/hostapd/hostapd.conf && connected='Hotspot'
-	[[ $mode == 'static' ]] && config='Static' || config='DHCP'
-	echo "[$([[ $enabled == 1 ]] && echo On || echo Off)] | $config | $connected"
+	echo "[$enabled] (${CURRENT_IFACE_BOOT_MODE#allow-}) | $mode | $connected"
 }
 
 Menu_Main()
@@ -904,14 +916,13 @@ Menu_Interface()
 	local title=$(Interface_Menu_Title)
 	if [[ $CURRENT_IFACE_TYPE == 'eth' ]]
 	then
-		local mode_text='DHCP' speed='auto (default)'
-		[[ $CURRENT_IFACE_MODE_TARGET == 'static' ]] && mode_text='STATIC'
-		[[ -f '/etc/systemd/system/ethtool_force_speed.service' ]] && grep -q "WantedBy=ifup@$iface.service" /etc/systemd/system/ethtool_force_speed.service && speed=$(mawk '/^ExecStart=/{print $5;exit}' /etc/systemd/system/ethtool_force_speed.service)
+		local speed='auto (default)'
+		[[ -f '/etc/systemd/system/ethtool_force_speed.service' ]] && grep -q "^WantedBy=ifup@$iface.service" /etc/systemd/system/ethtool_force_speed.service && speed=$(mawk '/^ExecStart=/{print $5;exit}' /etc/systemd/system/ethtool_force_speed.service)
 		G_WHIP_MENU_ARRAY=(
 			'' '●─ DHCP/STATIC IP '
-			'Change Mode' ": [$mode_text]"
+			'Change Mode' ": [${CURRENT_IFACE_MODE^^}]"
 		)
-		[[ $CURRENT_IFACE_MODE_TARGET == 'static' ]] && G_WHIP_MENU_ARRAY+=(
+		[[ $CURRENT_IFACE_MODE == 'static' ]] && G_WHIP_MENU_ARRAY+=(
 			'Copy' ': Copy current address to static'
 			'Static IP' ": [$CURRENT_IFACE_IP_STATIC]"
 			'Static Gateway' ": [$CURRENT_IFACE_GATEWAY_STATIC]"
@@ -920,14 +931,16 @@ Menu_Interface()
 		G_WHIP_MENU_ARRAY+=(
 			'' '●─ Additional Options '
 			'Link Speed' ": [$speed]"
+			'Boot Mode' ": [${CURRENT_IFACE_BOOT_MODE#allow-}]"
+			'' '●─ Toggle State '
 			'Disable' ': Disable Ethernet adapter'
-			'Remove' ': Remove this Ethernet adapter'"'"'s configuration entirely'
+			'Remove' ': Remove this Ethernet adapter'\''s configuration entirely'
 			'' '●─ Apply '
 			'Apply' ': Save all changes and restart this interface'
 		)
-		G_WHIP_MENU "${title}\nUsage   : Sent = $NET_TX_MB | Received = $NET_RX_MB\nAddress : $CURRENT_IFACE_IP | Gateway = $CURRENT_IFACE_GATEWAY | DNS = $DNS_CURRENT" || { Return_From_Submenu "iface:$iface"; return 0; }
+		G_WHIP_MENU "${title}\nUsage   : Sent = $NET_TX_MB | Received = $NET_RX_MB\nAddress : $CURRENT_IFACE_IP | Gateway: $CURRENT_IFACE_GATEWAY | DNS: $DNS_CURRENT" || { Return_From_Submenu "iface:$iface"; return 0; }
 		case $G_WHIP_RETURNED_VALUE in
-			'Change Mode') [[ $CURRENT_IFACE_MODE_TARGET == 'dhcp' ]] && CURRENT_IFACE_MODE_TARGET='static' || CURRENT_IFACE_MODE_TARGET='dhcp';;
+			'Change Mode') [[ $CURRENT_IFACE_MODE == 'dhcp' ]] && CURRENT_IFACE_MODE='static' || CURRENT_IFACE_MODE='dhcp';;
 			'Copy') Copy_Current_To_Static;;
 			'Static IP') Change_StaticIp;;
 			'Static Gateway') Change_StaticGateway;;
@@ -942,8 +955,9 @@ Menu_Interface()
 				done < <(ethtool "$iface" | sed -n '/Supported link modes:/,/^[[:blank:]]*[[:alpha:]]/p' | head -n -1 | mawk '{print $NF}')
 				G_WHIP_MENU 'Please select a supported Ethernet link speed to force or auto-negotiation.' && /boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$G_WHIP_RETURNED_VALUE" "$iface"
 			;;
+			'Boot Mode') Change_BootMode;;
 			'Disable') G_WHIP_YESNO 'Would you like to disable this Ethernet adapter?' && CURRENT_IFACE_ENABLED=0 && Apply_Current_Interface 1 && Return_From_Submenu "iface:$iface";;
-			'Remove') G_WHIP_YESNO 'Would you like to remove this Ethernet adapter'"'"'s configuration entirely?\n\nUnlike "Disable", this removes the DietPi drop-in config file, so the interface can be freshly reconfigured later.' && Remove_Interface_Config "$iface" && Return_From_Submenu "iface:$iface";;
+			'Remove') G_WHIP_YESNO 'Would you like to remove this Ethernet adapter'\''s configuration entirely?\n\nUnlike "Disable", this removes the DietPi drop-in config file, so the interface can be freshly reconfigured later.' && { Remove_Interface_Config "$iface"; Return_From_Submenu "iface:$iface"; };;
 			'Apply') G_WHIP_YESNO 'Apply settings and reconnect this Ethernet interface now?' && Apply_Current_Interface 1;;
 			*) :;;
 		esac
@@ -974,17 +988,15 @@ Menu_Interface()
 				'802.11ax' ": [$hotspot_ax_text] WiFi 6 support"
 			)
 		else
-			local mode_text='DHCP' reconnect_text='Off'
+			local reconnect_text='Off'
 			(( $CURRENT_IFACE_WIFI_AUTO_RECONNECT )) && reconnect_text='On'
-			[[ $CURRENT_IFACE_MODE_TARGET == 'static' ]] && mode_text='STATIC'
-			description+="SSID    : $CURRENT_IFACE_WIFI_SSID | $CURRENT_IFACE_WIFI_BITRATE Mbit | Strength: $CURRENT_IFACE_WIFI_SIGNAL\nAddress : $CURRENT_IFACE_IP | Gateway = $CURRENT_IFACE_GATEWAY | DNS = $DNS_CURRENT"
+			description+="SSID    : $CURRENT_IFACE_WIFI_SSID | $CURRENT_IFACE_WIFI_BITRATE Mbit | Strength: $CURRENT_IFACE_WIFI_SIGNAL\nAddress : $CURRENT_IFACE_IP | Gateway: $CURRENT_IFACE_GATEWAY | DNS: $DNS_CURRENT"
 			G_WHIP_MENU_ARRAY+=(
-				'Scan' ': Scan and configure SSID'
-				'Auto Reconnect' ": [$reconnect_text]"
+				'Scan' ': Scan and configure SSIDs'
 				'' '●─ DHCP/STATIC IP '
-				'Change Mode' ": [$mode_text]"
+				'Change Mode' ": [${CURRENT_IFACE_MODE^^}]"
 			)
-			[[ $CURRENT_IFACE_MODE_TARGET == 'static' ]] && G_WHIP_MENU_ARRAY+=(
+			[[ $CURRENT_IFACE_MODE == 'static' ]] && G_WHIP_MENU_ARRAY+=(
 				'Copy' ': Copy current address to static'
 				'Static IP' ": [$CURRENT_IFACE_IP_STATIC]"
 				'Static Gateway' ": [$CURRENT_IFACE_GATEWAY_STATIC]"
@@ -994,18 +1006,20 @@ Menu_Interface()
 		G_WHIP_MENU_ARRAY+=(
 			'' '●─ Additional Options '
 			'Country' ": [$CURRENT_WIFI_COUNTRYCODE]"
+			'Auto Reconnect' ": [$reconnect_text]"
+			'Boot Mode' ": [${CURRENT_IFACE_BOOT_MODE#allow-}]"
+			'' '●─ Toggle State '
 		)
 		if (( $CURRENT_IFACE_HOTSPOT ))
 		then
 			G_WHIP_MENU_ARRAY+=(
-				'' '●─ Toggle State '
 				'State' ": $hotspot_state_text"
+				'Uninstall' ': Uninstall WiFi Hotspot via dietpi-software'
 			)
 		else
 			G_WHIP_MENU_ARRAY+=(
-				'' '●─ Toggle State '
 				'Disable' ': Disable WiFi adapter'
-				'Remove' ': Remove this WiFi adapter'"'"'s configuration entirely'
+				'Remove' ': Remove this WiFi adapter'\''s configuration entirely'
 			)
 		fi
 		G_WHIP_MENU_ARRAY+=(
@@ -1015,6 +1029,12 @@ Menu_Interface()
 		G_WHIP_MENU "$description" || { Return_From_Submenu "iface:$iface"; return 0; }
 		case $G_WHIP_RETURNED_VALUE in
 			'Scan') /boot/dietpi/func/dietpi-wifidb -i "$iface";;
+			'Change Mode') [[ $CURRENT_IFACE_MODE == 'dhcp' ]] && CURRENT_IFACE_MODE='static' || CURRENT_IFACE_MODE='dhcp'; [[ $CURRENT_IFACE_MODE == 'static' ]] && G_WHIP_MSG 'When using STATIC IP, please ensure only one SSID entry exists in the scan menu.';;
+			'Copy') Copy_Current_To_Static;;
+			'Static IP') Change_StaticIp;;
+			'Static Gateway') Change_StaticGateway;;
+			'Static DNS') Change_StaticDns;;
+			'Country') Change_WifiCountryCode;;
 			'Auto Reconnect')
 				if (( $CURRENT_IFACE_WIFI_AUTO_RECONNECT ))
 				then
@@ -1023,14 +1043,9 @@ Menu_Interface()
 					G_EXEC systemctl enable --now dietpi-wifi-monitor
 				fi
 			;;
-			'Change Mode') [[ $CURRENT_IFACE_MODE_TARGET == 'dhcp' ]] && CURRENT_IFACE_MODE_TARGET='static' || CURRENT_IFACE_MODE_TARGET='dhcp'; [[ $CURRENT_IFACE_MODE_TARGET == 'static' ]] && G_WHIP_MSG 'When using STATIC IP, please ensure only one SSID entry exists in the scan menu.';;
-			'Copy') Copy_Current_To_Static;;
-			'Static IP') Change_StaticIp;;
-			'Static Gateway') Change_StaticGateway;;
-			'Static DNS') Change_StaticDns;;
-			'Country') Change_WifiCountryCode;;
+			'Boot Mode') Change_BootMode;;
 			'Disable') G_WHIP_YESNO 'Would you like to disable this WiFi adapter?' && CURRENT_IFACE_ENABLED=0 && G_EXEC systemctl disable --now dietpi-wifi-monitor && Apply_Current_Interface 1 && Return_From_Submenu "iface:$iface";;
-			'Remove') G_WHIP_YESNO 'Would you like to remove this WiFi adapter'\''s configuration entirely?\n\nUnlike "Disable", this removes the DietPi drop-in config file, so the interface can be freshly reconfigured later.' && G_EXEC_NOEXIT=1 G_EXEC systemctl disable --now dietpi-wifi-monitor && Remove_Interface_Config "$iface" && Return_From_Submenu "iface:$iface";;
+			'Remove') G_WHIP_YESNO 'Would you like to remove this WiFi adapter'\''s configuration entirely?\n\nUnlike "Disable", this removes the DietPi drop-in config file, so the interface can be freshly reconfigured later.' && { G_EXEC_NOEXIT=1 G_EXEC systemctl disable --now dietpi-wifi-monitor; Remove_Interface_Config"$iface"; Return_From_Submenu "iface:$iface"; };;
 			'Apply')
 				if (( $CURRENT_IFACE_HOTSPOT ))
 				then
@@ -1076,6 +1091,7 @@ Menu_Interface()
 					G_EXEC systemctl start hostapd
 				fi
 			;;
+			'Uninstall') G_WHIP_YESNO 'Would you like to uninstall the WiFi Hotspot via dietpi-software?' && { export G_INIT_ALLOW_CONCURRENT=1; /boot/dietpi/dietpi-software uninstall 60 61; unset -v G_INIT_ALLOW_CONCURRENT; Return_From_Submenu "iface:$iface"; };;
 			*) :;;
 		esac
 	fi
@@ -1099,6 +1115,18 @@ Input()
 				[[ $ACTION_VALUE ]] || Error "Missing interface name for 'remove'.$USAGE"
 			;;
 			'wifi') COMMAND='wifi'; shift; ACTION_VALUE=$1;;
+			'country')
+				if (( $# == 1 ))
+				then
+					COMMAND='menu'
+					MENU_TARGET='country'
+				else
+					COMMAND='country'
+					shift
+					ACTION_VALUE=$1
+				fi
+			;;
+			'ipv6') COMMAND='ipv6'; shift; ACTION_VALUE=$1;;
 			'proxy')
 				if (( $# == 1 ))
 				then
@@ -1112,40 +1140,19 @@ Input()
 					ACTION_EXTRA=$1
 				fi
 			;;
-			'country')
-				if (( $# == 1 ))
-				then
-					COMMAND='menu'
-					MENU_TARGET='country'
-				else
-					COMMAND='country'
-					shift
-					ACTION_VALUE=$1
-				fi
-			;;
-			'ipv6') COMMAND='ipv6'; shift; ACTION_VALUE=$1;;
-			'test')
-				if (( $# == 1 ))
-				then
-					COMMAND='menu'
-					MENU_TARGET='test'
-				else
-					COMMAND='test'
-					shift
-					ACTION_VALUE=$1
-				fi
-			;;
 			'main') COMMAND='menu'; MENU_TARGET='main';;
 			'--enable') APPLY_ENABLE=1;;
 			'--disable') APPLY_ENABLE=0;;
 			'--dhcp') APPLY_MODE='dhcp';;
 			'--static') APPLY_MODE='static';;
-			'--copy-current') APPLY_COPY_CURRENT=1;;
-			'--client') APPLY_ROLE='client';;
-			'--hotspot') APPLY_ROLE='hotspot';;
 			'--ip') shift; APPLY_IP=$1;;
 			'--gateway') shift; APPLY_GATEWAY=$1;;
 			'--dns') shift; APPLY_DNS=$1;;
+			'--copy-current') APPLY_COPY_CURRENT=1;;
+			'--hotplug') APPLY_BOOT_MODE='hotplug';;
+			'--auto') APPLY_BOOT_MODE='auto';;
+			'--client') APPLY_ROLE='client';;
+			'--hotspot') APPLY_ROLE='hotspot';;
 			'--ssid') shift; APPLY_SSID=$1;;
 			'--key') shift; APPLY_KEY=$1;;
 			'--freq') shift; APPLY_FREQ=$1;;
@@ -1175,7 +1182,8 @@ Apply_From_CLI()
 	(( $APPLY_FORCE )) || [[ -d /sys/class/net/$APPLY_IFACE ]] || Error "Network interface '$APPLY_IFACE' was not detected."
 	Load_Interface_State "$APPLY_IFACE"
 	[[ $APPLY_ENABLE ]] && CURRENT_IFACE_ENABLED=$APPLY_ENABLE
-	[[ $APPLY_MODE ]] && CURRENT_IFACE_MODE_TARGET=$APPLY_MODE
+	[[ $APPLY_MODE ]] && CURRENT_IFACE_MODE=$APPLY_MODE
+	[[ $APPLY_BOOT_MODE ]] && CURRENT_IFACE_BOOT_MODE=$APPLY_BOOT_MODE
 	(( $APPLY_COPY_CURRENT )) && Copy_Current_To_Static
 	if [[ $APPLY_IP ]]
 	then
@@ -1189,7 +1197,7 @@ Apply_From_CLI()
 		if [[ $APPLY_ROLE == 'hotspot' ]]
 		then
 			CURRENT_IFACE_HOTSPOT=1
-			CURRENT_IFACE_MODE_TARGET='static'
+			CURRENT_IFACE_MODE='static'
 			[[ $APPLY_IP ]] || CURRENT_IFACE_IP_STATIC='192.168.42.1/24'
 			Load_Hotspot_Settings
 		else
@@ -1260,16 +1268,15 @@ Wifi_From_CLI()
 
 Country_From_CLI(){ [[ $ACTION_VALUE ]] || Error "Missing WiFi country code.$USAGE"; /boot/dietpi/func/dietpi-set_hardware wificountrycode "$ACTION_VALUE"; }
 IPv6_From_CLI(){ [[ $ACTION_VALUE ]] || Error "Missing IPv6 action.$USAGE"; /boot/dietpi/func/dietpi-set_hardware enableipv6 "$ACTION_VALUE"; }
-Test_From_CLI(){ G_CHECK_URL "${ACTION_VALUE:-$INTERNET_TEST_URL}"; }
 
 Menu_Loop()
 {
 	case $NEXT_MENU in
 		'main') Menu_Main;;
-		'proxy') Menu_Proxy;;
-		'country') Load_Interface_State "${WIFI_INTERFACES[0]:-wlan0}"; Change_WifiCountryCode; Return_From_Submenu 'country';;
-		'test') Menu_Test;;
 		'iface:'*) Menu_Interface "${NEXT_MENU#iface:}";;
+		'country') Load_Interface_State "${WIFI_INTERFACES[0]:-wlan0}"; Change_WifiCountryCode; Return_From_Submenu 'country';;
+		'proxy') Menu_Proxy;;
+		'test') Menu_Test;;
 		'exit') return 1;;
 		*) NEXT_MENU='main';;
 	esac
@@ -1281,11 +1288,10 @@ Input "$@"
 case $COMMAND in
 	'apply') Apply_From_CLI; exit 0;;
 	'remove') Remove_From_CLI; exit 0;;
-	'proxy') Proxy_From_CLI; exit 0;;
 	'wifi') Wifi_From_CLI; exit 0;;
 	'country') Country_From_CLI; exit 0;;
 	'ipv6') IPv6_From_CLI; exit 0;;
-	'test') Test_From_CLI; exit 0;;
+	'proxy') Proxy_From_CLI; exit 0;;
 	'menu') :;;
 	*) Error "Unknown command ($COMMAND).$USAGE";;
 esac
