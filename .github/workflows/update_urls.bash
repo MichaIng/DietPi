@@ -306,6 +306,13 @@ aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"
 aARCH[$software_id]='armv6 armv7 arm64 amd64 riscv64'
 aREGEX[$software_id]='https://github.com/filebrowser/filebrowser/releases/download/.*/linux-\$arch-filebrowser.tar.gz'
 
+# HomeBox
+software_id=219
+aURL[$software_id]='https://api.github.com/repos/sysadminsmedia/homebox/releases/latest'
+aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/homebox_Linux_$arch\.tar\.gz(?=\")"'
+aARCH[$software_id]='arm64 x86_64'
+aREGEX[$software_id]='https://github.com/sysadminsmedia/homebox/releases/download/.*/homebox_Linux_\$arch.tar.gz'
+
 # Spotifyd: only full variants for now
 software_id=199
 aURL[$software_id]='https://api.github.com/repos/Spotifyd/spotifyd/releases/latest'
