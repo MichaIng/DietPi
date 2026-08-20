@@ -18,11 +18,6 @@ Available commands:
   proxy                               Open the interactive proxy submenu
   apply <ifname> [<options>...]       Apply interface config for <ifname> and reconnect only that interface
   remove <ifname>                     Remove the DietPi drop-in config for <ifname> and ifdown the interface
-  wifi enable|disable                 Enable or disable WiFi modules globally
-  wifi onboard-enable|onboard-disable
-                                      Enable or disable onboard WiFi globally on supported SBCs
-  country <code>                      Apply WiFi country code <code>
-  ipv6 enable|disable                 Enable or disable IPv6
   proxy enable|disable                Enable or disable the configured proxy globally
   proxy address|port|username|password <value>
                                       Apply <value> to the specified proxy setting
@@ -56,7 +51,10 @@ G_CHECK_ROOTFS_RW
 G_INIT
 
 COMMAND='menu'
-MENU_TARGET='main'
+ENTRY_MENU='main'
+NEXT_MENU='main'
+
+PRESERVE_SELECTED_SETTINGS=0
 ACTION_VALUE=
 ACTION_EXTRA=
 APPLY_IFACE=
@@ -77,8 +75,6 @@ APPLY_CHANNEL=
 APPLY_WIFI4=
 APPLY_WIFI5=
 APPLY_WIFI6=
-ENTRY_TARGET='main'
-NEXT_MENU='main'
 CURRENT_IFACE=
 CURRENT_IFACE_TYPE=
 CURRENT_IFACE_ENABLED=1
@@ -266,6 +262,7 @@ Parse_Interface_Config()
 		END{print found,enabled,bootmode,mode,address,netmask,gateway,dns,hotspot}
 	' "$file") || return 1
 	IFS=$'\034' read -r PARSE_FOUND PARSE_ENABLED PARSE_BOOT_MODE PARSE_MODE PARSE_ADDRESS PARSE_NETMASK PARSE_GATEWAY PARSE_DNS PARSE_HOTSPOT <<< "$data"
+	(( $PARSE_FOUND )) || return 1
 	return 0
 }
 
@@ -281,11 +278,11 @@ Get_Interface_Stored_Settings()
 	CURRENT_IFACE_DNS_STATIC=$(Get_Default_DNS)
 	CURRENT_IFACE_HOTSPOT=0
 
-	if Parse_Interface_Config "/etc/network/interfaces.d/$iface.conf" "$iface" && (( $PARSE_FOUND ))
+	if Parse_Interface_Config "/etc/network/interfaces.d/$iface.conf" "$iface"
 	then
 		CURRENT_IFACE_SOURCE="/etc/network/interfaces.d/$iface.conf"
 
-	elif Parse_Interface_Config '/etc/network/interfaces' "$iface" && (( $PARSE_FOUND ))
+	elif Parse_Interface_Config '/etc/network/interfaces' "$iface"
 	then
 		CURRENT_IFACE_SOURCE='/etc/network/interfaces'
 	else
@@ -346,7 +343,7 @@ Load_Interface_State()
 	CURRENT_IFACE_HOTSPOT=0
 	CURRENT_IFACE_HOTSPOT_ACTIVE=0
 	DNS_CURRENT=$(Get_Default_DNS)
-	Get_Interface_Stored_Settings "$iface"
+	(( $PRESERVE_SELECTED_SETTINGS )) || Get_Interface_Stored_Settings "$iface"
 
 	if (( $CURRENT_IFACE_REAL ))
 	then
@@ -549,7 +546,7 @@ Change_StaticGateway()
 Change_StaticDns()
 {
 	G_WHIP_DEFAULT_ITEM=$CURRENT_IFACE_DNS_STATIC
-	G_WHIP_MENU_ARRAY=("$G_WHIP_DEFAULT_ITEM" ': Your current DNS server')
+	G_WHIP_MENU_ARRAY=("$CURRENT_IFACE_DNS_STATIC" ': Your current DNS server')
 	local gateway=$(G_GET_NET -q gateway)
 	[[ $gateway ]] && G_WHIP_MENU_ARRAY+=("$gateway" ': Use local router as DNS server (recommended)')
 	ss -uln 2> /dev/null | grep -q ':53[[:blank:]]' && G_WHIP_MENU_ARRAY+=('127.0.0.1' ': Use local Pi-hole/AdGuard Home/Unbound')
@@ -574,7 +571,7 @@ Change_StaticDns()
 		G_WHIP_DEFAULT_ITEM=$CURRENT_IFACE_DNS_STATIC
 		G_WHIP_INPUTBOX "Please enter one or two space-separated DNS server addresses.
  - E.g.:    9.9.9.9 149.112.112.112
- - Current: $G_WHIP_DEFAULT_ITEM" || return 0
+ - Current: $CURRENT_IFACE_DNS_STATIC" || return 0
 	fi
 	CURRENT_IFACE_DNS_STATIC=$G_WHIP_RETURNED_VALUE
 }
@@ -591,6 +588,7 @@ Change_WifiCountryCode()
 		'Manual' ': Enter a custom country code'
 	)
 	G_WHIP_DEFAULT_ITEM=$CURRENT_WIFI_COUNTRYCODE
+	G_WHIP_BUTTON_CANCEL_TEXT='Cancel'
 	G_WHIP_MENU 'Please select your country to enable WiFi channels and power ratings allowed in your region.
 \nNB: Verify the active code with:\n# iw reg get' || return 0
 	if [[ $G_WHIP_RETURNED_VALUE == 'Manual' ]]
@@ -599,7 +597,6 @@ Change_WifiCountryCode()
 		G_WHIP_INPUTBOX_REGEX_TEXT='a 2 capital letter country code'
 		G_WHIP_DEFAULT_ITEM=$CURRENT_WIFI_COUNTRYCODE
 		G_WHIP_INPUTBOX 'Please enter a 2 capital letter country code: https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2' || return 0
-		G_WHIP_DEFAULT_ITEM=$G_WHIP_RETURNED_VALUE
 	fi
 	CURRENT_WIFI_COUNTRYCODE=$G_WHIP_RETURNED_VALUE
 	/boot/dietpi/func/dietpi-set_hardware wificountrycode "$CURRENT_WIFI_COUNTRYCODE"
@@ -671,16 +668,10 @@ Subnets_Overlap()
 Get_Iface_Effective_Net()
 {
 	local iface=$1 enabled=0 mode='dhcp' cidr='' gateway=''
-	if Parse_Interface_Config "/etc/network/interfaces.d/$iface.conf" "$iface" && (( $PARSE_FOUND ))
-	then
-		:
+	Parse_Interface_Config "/etc/network/interfaces.d/$iface.conf" "$iface" ||
+		Parse_Interface_Config '/etc/network/interfaces' "$iface" ||
+			PARSE_ENABLED=0 PARSE_MODE='dhcp' PARSE_ADDRESS='' PARSE_NETMASK='' PARSE_GATEWAY=''
 
-	elif Parse_Interface_Config '/etc/network/interfaces' "$iface" && (( $PARSE_FOUND ))
-	then
-		:
-	else
-		PARSE_ENABLED=0 PARSE_MODE='dhcp' PARSE_ADDRESS='' PARSE_NETMASK='' PARSE_GATEWAY=''
-	fi
 	enabled=${PARSE_ENABLED:-0}
 	[[ $PARSE_MODE == 'static' ]] && mode='static'
 	if [[ $mode == 'static' && $PARSE_ADDRESS ]]
@@ -764,6 +755,7 @@ Apply_Current_Interface()
 	fi
 	Check_Network_Conflicts || return 1
 	Write_Interface_Config
+	PRESERVE_SELECTED_SETTINGS=0 # load settings in interface menu from config files again, now that we have written them
 	(( $1 )) && Restart_Interface "$CURRENT_IFACE"
 }
 
@@ -785,7 +777,7 @@ Interface_Menu_Title()
 	echo "$title"
 }
 
-Return_From_Submenu(){ [[ $ENTRY_TARGET == "$1" ]] && NEXT_MENU='exit' || NEXT_MENU='main'; }
+Return_From_Submenu(){ [[ $ENTRY_MENU == "$1" ]] && NEXT_MENU='exit' || NEXT_MENU='main'; }
 
 Interface_Status_Text()
 {
@@ -841,7 +833,6 @@ Menu_Main()
 		'Proxy' ": $proxy_state"
 		'Test' ": $internet_text"
 	)
-	G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 	G_WHIP_MENU "Hardware : $G_HW_MODEL_NAME" || { NEXT_MENU='exit'; return 0; }
 	case $G_WHIP_RETURNED_VALUE in
 		'WiFi modules')
@@ -864,7 +855,7 @@ Menu_Main()
 		;;
 		'IPv6') /boot/dietpi/func/dietpi-set_hardware enableipv6 $(( ! $ipv6_enabled ));;
 		'Proxy') NEXT_MENU='proxy';;
-		'Test') NEXT_MENU='test';;
+		'Test') Menu_Test;;
 		*) NEXT_MENU="iface:$G_WHIP_RETURNED_VALUE";;
 	esac
 }
@@ -872,17 +863,14 @@ Menu_Main()
 Menu_Test()
 {
 	G_WHIP_DEFAULT_ITEM=$INTERNET_TEST_URL
-	if G_WHIP_INPUTBOX 'Please enter a URL address to test, e.g.: https://dietpi.com'
+	G_WHIP_INPUTBOX 'Please enter a URL address to test, e.g.: https://dietpi.com' || return 0
+	INTERNET_TEST_URL=$G_WHIP_RETURNED_VALUE
+	if G_EXEC_NOHALT=1 G_CHECK_URL "$INTERNET_TEST_URL"
 	then
-		INTERNET_TEST_URL=$G_WHIP_RETURNED_VALUE
-		if G_EXEC_NOHALT=1 G_CHECK_URL "$INTERNET_TEST_URL"
-		then
-			INTERNET_TEST_STATE=2
-		else
-			INTERNET_TEST_STATE=1
-		fi
+		INTERNET_TEST_STATE=2
+	else
+		INTERNET_TEST_STATE=1
 	fi
-	Return_From_Submenu 'test'
 }
 
 Menu_Proxy()
@@ -897,7 +885,7 @@ Menu_Proxy()
 		'Username' ": [$PROXY_USERNAME]"
 		'Password' ": [$PROXY_PASSWORD]"
 	)
-	G_WHIP_BUTTON_OK_TEXT='Select' G_WHIP_MENU 'Please select an option to adjust. Logout and login for changes to take effect.' || { Return_From_Submenu 'proxy'; return 0; }
+	G_WHIP_MENU 'Please select an option to adjust. Logout and login for changes to take effect.' || { Return_From_Submenu 'proxy'; return 0; }
 	case $G_WHIP_RETURNED_VALUE in
 		'State') (( $PROXY_ENABLED )) && PROXY_ENABLED=0 || PROXY_ENABLED=1;;
 		'Address') G_WHIP_DEFAULT_ITEM=$PROXY_ADDRESS; G_WHIP_INPUTBOX 'Please enter the proxy URL or IP address\n - eg: MyProxy.com' && PROXY_ADDRESS=$G_WHIP_RETURNED_VALUE || return 0;;
@@ -949,13 +937,27 @@ Menu_Interface()
 			'Static DNS') Change_StaticDns;;
 			'Link Speed')
 				G_AG_CHECK_INSTALL_PREREQ ethtool
+				ip l s "$iface" up # enable link, sometimes needed for ethtool to fetch data
 				G_WHIP_MENU_ARRAY=('0' ': Auto-negotiation (default, recommended)')
 				while read -r item
 				do
 					item=${item//[^0-9]}
 					[[ $item ]] && G_WHIP_MENU_ARRAY+=("$item" ": Force $item Mbit link speed")
 				done < <(ethtool "$iface" | sed -n '/Supported link modes:/,/^[[:blank:]]*[[:alpha:]]/p' | head -n -1 | mawk '{print $NF}')
-				G_WHIP_MENU 'Please select a supported Ethernet link speed to force or auto-negotiation.' && /boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$G_WHIP_RETURNED_VALUE" "$iface"
+				if (( ${#G_WHIP_MENU_ARRAY[@]} > 2 ))
+				then
+					G_WHIP_MENU 'Please select a supported Ethernet link speed to force or auto-negotiation:' || return 0
+				else
+					G_WHIP_MENU_ARRAY+=(
+						10 ': Force 10 Mbit link speed'
+						100 ': Force 100 Mbit link speed'
+						1000 ': Force 1000 Mbit link speed'
+						2500 ': Force 2500 Mbit link speed'
+					)
+					G_WHIP_MENU 'WARNING: Supported link speeds for this adapter could not be obtained. Forcing an unsupported link speed might break connctivity.
+\nPlease select an Ethernet link speed to force or auto-negotiation:'
+				fi
+				/boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$G_WHIP_RETURNED_VALUE" "$iface"
 			;;
 			'Boot Mode') Change_BootMode;;
 			'Disable') G_WHIP_YESNO 'Would you like to disable this Ethernet adapter?' && CURRENT_IFACE_ENABLED=0 && Apply_Current_Interface 1 && Return_From_Submenu "iface:$iface";;
@@ -1104,6 +1106,21 @@ Input()
 	while (( $# ))
 	do
 		case $1 in
+			'main') COMMAND='menu'; NEXT_MENU='main';;
+			'country') COMMAND='menu' NEXT_MENU='country';;
+			'proxy')
+				if (( $# == 1 ))
+				then
+					COMMAND='menu'
+					NEXT_MENU='proxy'
+				else
+					COMMAND='proxy'
+					shift
+					ACTION_VALUE=$1
+					shift
+					ACTION_EXTRA=$1
+				fi
+			;;
 			'apply')
 				COMMAND='apply'
 				shift
@@ -1116,33 +1133,6 @@ Input()
 				ACTION_VALUE=$1
 				[[ $ACTION_VALUE ]] || Error "Missing interface name for 'remove'.$USAGE"
 			;;
-			'wifi') COMMAND='wifi'; shift; ACTION_VALUE=$1;;
-			'country')
-				if (( $# == 1 ))
-				then
-					COMMAND='menu'
-					MENU_TARGET='country'
-				else
-					COMMAND='country'
-					shift
-					ACTION_VALUE=$1
-				fi
-			;;
-			'ipv6') COMMAND='ipv6'; shift; ACTION_VALUE=$1;;
-			'proxy')
-				if (( $# == 1 ))
-				then
-					COMMAND='menu'
-					MENU_TARGET='proxy'
-				else
-					COMMAND='proxy'
-					shift
-					ACTION_VALUE=$1
-					shift
-					ACTION_EXTRA=$1
-				fi
-			;;
-			'main') COMMAND='menu'; MENU_TARGET='main';;
 			'--enable') APPLY_ENABLE=1;;
 			'--disable') APPLY_ENABLE=0;;
 			'--dhcp') APPLY_MODE='dhcp';;
@@ -1166,9 +1156,9 @@ Input()
 			'--force') APPLY_FORCE=1;;
 			'-h'|'--help'|'help') echo "$USAGE"; exit 0;;
 			*)
-				if [[ $COMMAND == 'menu' && $MENU_TARGET == 'main' ]]
+				if [[ $COMMAND == 'menu' && $NEXT_MENU == 'main' ]]
 				then
-					MENU_TARGET="iface:$1"
+					NEXT_MENU="iface:$1"
 				else
 					Error "Invalid input ($1). Aborting ...$USAGE"
 				fi
@@ -1257,28 +1247,14 @@ Proxy_From_CLI()
 	Apply_Proxy_Settings
 }
 
-Wifi_From_CLI()
-{
-	case $ACTION_VALUE in
-		'enable'|'disable'|'onboard_enable'|'onboard_disable'|'onboard-enable'|'onboard-disable')
-			ACTION_VALUE=${ACTION_VALUE//-/_}
-			/boot/dietpi/func/dietpi-set_hardware wifimodules "$ACTION_VALUE"
-		;;
-		*) Error "Invalid wifi action ($ACTION_VALUE).$USAGE";;
-	esac
-}
-
-Country_From_CLI(){ [[ $ACTION_VALUE ]] || Error "Missing WiFi country code.$USAGE"; /boot/dietpi/func/dietpi-set_hardware wificountrycode "$ACTION_VALUE"; }
-IPv6_From_CLI(){ [[ $ACTION_VALUE ]] || Error "Missing IPv6 action.$USAGE"; /boot/dietpi/func/dietpi-set_hardware enableipv6 "$ACTION_VALUE"; }
-
 Menu_Loop()
 {
+	[[ $NEXT_MENU == $ENTRY_MENU ]] && G_WHIP_BUTTON_CANCEL_TEXT='Exit' || G_WHIP_BUTTON_CANCEL_TEXT='Back'
 	case $NEXT_MENU in
-		'main') Menu_Main;;
-		'iface:'*) Menu_Interface "${NEXT_MENU#iface:}";;
-		'country') Load_Interface_State "${WIFI_INTERFACES[0]:-wlan0}"; Change_WifiCountryCode; Return_From_Submenu 'country';;
+		'main') PRESERVE_SELECTED_SETTINGS=0; Menu_Main;; # load CURRENT_IFACE_* settings from config files again when entering this menu
+		'iface:'*) Menu_Interface "${NEXT_MENU#iface:}"; PRESERVE_SELECTED_SETTINGS=1;; # do not override changed CURRENT_IFACE_* settings from values in config files while in this menu
+		'country') Load_Interface_State "${WIFI_INTERFACES[0]:-wlan0}"; Change_WifiCountryCode; return 1;; # called via NEXT_MENU from CLI only
 		'proxy') Menu_Proxy;;
-		'test') Menu_Test;;
 		'exit') return 1;;
 		*) NEXT_MENU='main';;
 	esac
@@ -1290,16 +1266,12 @@ Input "$@"
 case $COMMAND in
 	'apply') Apply_From_CLI; exit 0;;
 	'remove') Remove_From_CLI; exit 0;;
-	'wifi') Wifi_From_CLI; exit 0;;
-	'country') Country_From_CLI; exit 0;;
-	'ipv6') IPv6_From_CLI; exit 0;;
 	'proxy') Proxy_From_CLI; exit 0;;
 	'menu') :;;
 	*) Error "Unknown command ($COMMAND).$USAGE";;
 esac
 
-ENTRY_TARGET=$MENU_TARGET
-NEXT_MENU=$MENU_TARGET
+ENTRY_MENU=$NEXT_MENU
 while Menu_Loop; do :; done
 
 exit 0
