@@ -79,7 +79,7 @@ APPLY_WIFI5=
 APPLY_WIFI6=
 CURRENT_IFACE=
 CURRENT_IFACE_TYPE=
-CURRENT_IFACE_ENABLED=1
+CURRENT_IFACE_ENABLED=0
 CURRENT_IFACE_REAL=0
 CURRENT_IFACE_CONNECTED=0
 CURRENT_IFACE_MODE='dhcp'
@@ -272,7 +272,7 @@ Get_Interface_Stored_Settings()
 {
 	local iface=$1
 	CURRENT_IFACE_SOURCE=
-	CURRENT_IFACE_ENABLED=1
+	CURRENT_IFACE_ENABLED=0
 	(( $G_HW_MODEL == 75 )) && CURRENT_IFACE_BOOT_MODE='auto' || CURRENT_IFACE_BOOT_MODE='allow-hotplug'
 	CURRENT_IFACE_MODE='dhcp'
 	CURRENT_IFACE_IP_STATIC='192.168.0.100/24'
@@ -421,7 +421,7 @@ Update_ResolvConf_Fallback()
 {
 	(( $CURRENT_IFACE_ENABLED )) || return 0
 	[[ $CURRENT_IFACE_MODE == 'static' ]] || return 0
-	(( $CURRENT_IFACE_DNS_STATIC )) || return 0
+	[[ $CURRENT_IFACE_DNS_STATIC ]] || return 0
 	command -v resolvconf > /dev/null && return 0
 	> /etc/resolv.conf
 	local server
@@ -504,9 +504,15 @@ Restart_Interface()
 	# Only try to configure if this is Ethernet, a hotspot, or an SSID has been configured
 	if (( $CURRENT_IFACE_ENABLED )) && { [[ $CURRENT_IFACE_TYPE != 'wifi' || $CURRENT_IFACE_HOTSPOT == 1 ]] || grep -q '^network=' /etc/wpa_supplicant/wpa_supplicant.conf 2> /dev/null; }
 	then
-		journalctl -fn 0 -u "ifup@$iface" &
-		G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 G_EXEC systemctl restart "ifup@$iface"
-		kill -15 %%
+		if [[ $CURRENT_IFACE_BOOT_MODE == 'allow-hotplug' ]]
+		then
+			journalctl -fn 0 -u "ifup@$iface" &
+			G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 G_EXEC systemctl restart "ifup@$iface"
+			kill -15 %%
+		else
+			G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 G_EXEC ifdown --force "$iface"
+			G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 G_EXEC ifup "$iface"
+		fi
 	else
 		ifdown --force "$iface" 2> /dev/null
 	fi
@@ -745,6 +751,8 @@ Check_Network_Conflicts()
 Apply_Current_Interface()
 {
 	[[ $CURRENT_IFACE ]] || return 1
+	# Enable interface if it is not disabled via config or CLI option explicitly
+	[[ $CURRENT_IFACE_SOURCE == '/etc/network/interfaces.d/'* || $APPLY_ENABLE ]] || CURRENT_IFACE_ENABLED=1
 	if [[ $CURRENT_IFACE_TYPE == 'wifi' ]]
 	then
 		if (( $CURRENT_IFACE_HOTSPOT ))
@@ -786,12 +794,12 @@ Interface_Status_Text()
 	local iface=$1 type=$2 enabled='Off' mode='DHCP' connected='Disconnected'
 	CURRENT_IFACE=
 	Get_Interface_Stored_Settings "$iface"
-	(( $CURRENT_IFACE_ENABLED )) && enabled='On'
+	(( $CURRENT_IFACE_ENABLED )) && enabled="On (${CURRENT_IFACE_BOOT_MODE#allow-})"
 	[[ $CURRENT_IFACE_MODE == 'static' ]] && mode='Static'
 	CURRENT_IFACE_CONNECTED=$(ip -o r l dev "$iface" 2> /dev/null | grep -vcm1 '[[:blank:]]linkdown')
 	(( $CURRENT_IFACE_CONNECTED )) && connected='Connected'
 	[[ $type == 'wifi' && -f '/etc/hostapd/hostapd.conf' ]] && grep -q "^[[:blank:]]*interface=$iface$" /etc/hostapd/hostapd.conf && connected='Hotspot'
-	echo "[$enabled] (${CURRENT_IFACE_BOOT_MODE#allow-}) | $mode | $connected"
+	echo "[$enabled] | $mode | $connected"
 }
 
 Menu_Main()
@@ -928,9 +936,19 @@ Menu_Interface()
 			'' '●─ Additional Options '
 			'Link Speed' ": [$speed]"
 			'Boot Mode' ": [${CURRENT_IFACE_BOOT_MODE#allow-}]"
-			'' '●─ Toggle State '
-			'Disable' ': Disable Ethernet adapter'
-			'Remove' ': Remove this Ethernet adapter'\''s configuration entirely'
+		)
+		if [[ $CURRENT_IFACE_SOURCE ]]
+		then
+			G_WHIP_MENU_ARRAY+=('' '●─ Toggle State ')
+			if [[ $CURRENT_IFACE_ENABLED ]]
+			then
+				G_WHIP_MENU_ARRAY+=('Disable' ': Disable Ethernet adapter')
+			else
+				G_WHIP_MENU_ARRAY+=('Enable' ': Enable Ethernet adaper')
+			fi
+			G_WHIP_MENU_ARRAY+=('Remove' ': Remove this Ethernet adapter'\''s configuration entirely')
+		fi
+		G_WHIP_MENU_ARRAY+=(
 			'' '●─ Apply '
 			'Apply' ': Save all changes and restart this interface'
 		)
@@ -946,12 +964,13 @@ Menu_Interface()
 			'Link Speed')
 				G_AG_CHECK_INSTALL_PREREQ ethtool
 				ip l s "$iface" up # enable link, sometimes needed for ethtool to fetch data
-				G_WHIP_MENU_ARRAY=('0' ': Auto-negotiation (default, recommended)')
+				G_WHIP_MENU_ARRAY=(0 ': Auto-negotiation (default, recommended)')
 				while read -r item
 				do
 					item=${item//[^0-9]}
 					[[ $item ]] && G_WHIP_MENU_ARRAY+=("$item" ": Force $item Mbit link speed")
 				done < <(ethtool "$iface" | sed -n '/Supported link modes:/,/^[[:blank:]]*[[:alpha:]]/p' | head -n -1 | mawk '{print $NF}')
+				G_WHIP_DEFAULT_ITEM=$speed
 				if (( ${#G_WHIP_MENU_ARRAY[@]} > 2 ))
 				then
 					G_WHIP_MENU 'Please select a supported Ethernet link speed to force or auto-negotiation:' || return 0
@@ -963,11 +982,12 @@ Menu_Interface()
 						2500 ': Force 2500 Mbit link speed'
 					)
 					G_WHIP_MENU 'WARNING: Supported link speeds for this adapter could not be obtained. Forcing an unsupported link speed might break connctivity.
-\nPlease select an Ethernet link speed to force or auto-negotiation:'
+\nPlease select an Ethernet link speed to force or auto-negotiation:' || return 0
 				fi
 				/boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$G_WHIP_RETURNED_VALUE" "$iface"
 			;;
 			'Boot Mode') Change_BootMode;;
+			'Enable') G_WHIP_YESNO 'Would you like to enable this Ethernet adapter?' && CURRENT_IFACE_ENABLED=1 && Apply_Current_Interface 1;;
 			'Disable') G_WHIP_YESNO 'Would you like to disable this Ethernet adapter?' && CURRENT_IFACE_ENABLED=0 && Apply_Current_Interface 1 && Return_From_Submenu "iface:$iface";;
 			'Remove') G_WHIP_YESNO 'Would you like to remove this Ethernet adapter'\''s configuration entirely?\n\nUnlike "Disable", this removes the DietPi drop-in config file, so the interface can be freshly reconfigured later.' && { Remove_Interface_Config "$iface"; Return_From_Submenu "iface:$iface"; };;
 			'Apply') G_WHIP_YESNO 'Apply settings and reconnect this Ethernet interface now?' && Apply_Current_Interface 1;;
@@ -1020,25 +1040,33 @@ Menu_Interface()
 			'Country' ": [$CURRENT_WIFI_COUNTRYCODE]"
 			'Auto Reconnect' ": [$reconnect_text]"
 			'Boot Mode' ": [${CURRENT_IFACE_BOOT_MODE#allow-}]"
-			'' '●─ Toggle State '
 		)
 		if (( $CURRENT_IFACE_HOTSPOT ))
 		then
 			G_WHIP_MENU_ARRAY+=(
+				'' '●─ Toggle State '
 				'State' ": $hotspot_state_text"
 				'Uninstall' ': Uninstall WiFi Hotspot via dietpi-software'
 			)
-		else
-			G_WHIP_MENU_ARRAY+=(
-				'Disable' ': Disable WiFi adapter'
-				'Remove' ': Remove this WiFi adapter'\''s configuration entirely'
-			)
+
+		elif [[ $CURRENT_IFACE_SOURCE ]]
+		then
+			G_WHIP_MENU_ARRAY+=('' '●─ Toggle State ')
+			if (( $CURRENT_IFACE_ENABLED ))
+			then
+				G_WHIP_MENU_ARRAY+=('Disable' ': Disable WiFi adapter')
+			else
+				G_WHIP_MENU_ARRAY+=('Enable' ': Enable WiFi adaper')
+			fi
+			G_WHIP_MENU_ARRAY+=('Remove' ': Remove this WiFi adapter'\''s configuration entirely')
 		fi
 		G_WHIP_MENU_ARRAY+=(
 			'' '●─ Apply '
 			'Apply' ': Save all changes and restart this interface'
 		)
+		G_WHIP_DEFAULT_ITEM=$IFACE_MENU_LASTITEM
 		G_WHIP_MENU "$description" || { Return_From_Submenu "iface:$iface"; return 0; }
+		IFACE_MENU_LASTITEM=$G_WHIP_RETURNED_VALUE
 		case $G_WHIP_RETURNED_VALUE in
 			'Scan') /boot/dietpi/func/dietpi-wifidb -i "$iface";;
 			'Change Mode') [[ $CURRENT_IFACE_MODE == 'dhcp' ]] && CURRENT_IFACE_MODE='static' || CURRENT_IFACE_MODE='dhcp'; [[ $CURRENT_IFACE_MODE == 'static' ]] && G_WHIP_MSG 'When using STATIC IP, please ensure only one SSID entry exists in the scan menu.';;
@@ -1056,6 +1084,7 @@ Menu_Interface()
 				fi
 			;;
 			'Boot Mode') Change_BootMode;;
+			'Enable') G_WHIP_YESNO 'Would you like to enable this WiFi adapter?' && CURRENT_IFACE_ENABLED=1 && Apply_Current_Interface 1;;
 			'Disable') G_WHIP_YESNO 'Would you like to disable this WiFi adapter?' && CURRENT_IFACE_ENABLED=0 && G_EXEC systemctl disable --now dietpi-wifi-monitor && Apply_Current_Interface 1 && Return_From_Submenu "iface:$iface";;
 			'Remove') G_WHIP_YESNO 'Would you like to remove this WiFi adapter'\''s configuration entirely?\n\nUnlike "Disable", this removes the DietPi drop-in config file, so the interface can be freshly reconfigured later.' && { G_EXEC_NOEXIT=1 G_EXEC systemctl disable --now dietpi-wifi-monitor; Remove_Interface_Config"$iface"; Return_From_Submenu "iface:$iface"; };;
 			'Apply')
@@ -1257,7 +1286,7 @@ Proxy_From_CLI()
 
 Menu_Loop()
 {
-	[[ $NEXT_MENU == $ENTRY_MENU ]] && G_WHIP_BUTTON_CANCEL_TEXT='Exit' || G_WHIP_BUTTON_CANCEL_TEXT='Back'
+	[[ $NEXT_MENU == "$ENTRY_MENU" ]] && G_WHIP_BUTTON_CANCEL_TEXT='Exit' || G_WHIP_BUTTON_CANCEL_TEXT='Back'
 	case $NEXT_MENU in
 		'main') PRESERVE_SELECTED_SETTINGS=0; Menu_Main;; # load CURRENT_IFACE_* settings from config files again when entering this menu
 		'iface:'*) Menu_Interface "${NEXT_MENU#iface:}"; PRESERVE_SELECTED_SETTINGS=1;; # do not override changed CURRENT_IFACE_* settings from values in config files while in this menu
