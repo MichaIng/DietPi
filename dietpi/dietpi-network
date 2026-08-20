@@ -89,7 +89,7 @@ CURRENT_IFACE_IP_STATIC=
 CURRENT_IFACE_GATEWAY_STATIC=
 CURRENT_IFACE_DNS_STATIC=
 (( $G_HW_MODEL == 75 )) && CURRENT_IFACE_BOOT_MODE='auto' || CURRENT_IFACE_BOOT_MODE='allow-hotplug'
-CURRENT_IFACE_IP='0.0.0.0'
+CURRENT_IFACE_IP='0.0.0.0/24'
 CURRENT_IFACE_GATEWAY='0.0.0.0'
 CURRENT_IFACE_SOURCE=
 CURRENT_IFACE_HOTSPOT=0
@@ -252,21 +252,20 @@ Parse_Interface_Config()
 	[[ -f $file ]] || return 1
 	data=$(mawk -v iface="$iface" '
 		BEGIN{OFS="\034"}
-		function top(line){return line ~ /^[[:blank:]]*(iface|(allow-)?auto|allow-hotplug|mapping|source)([[:blank:]]|$)/}
 		{
-			if (inblock && top($0)) inblock=0
-			if ($0 ~ "^[[:blank:]]*(allow-hotplug|(allow-)?auto)[[:blank:]]+" iface "([[:blank:]]|$)") {enabled=1; found=1; bootmode=$1}
+			if (inblock && $1~/^(iface|auto|allow-auto|allow-hotplug|mapping|source)$/) inblock=0
+			if ($1~/^(auto|allow-auto|allow-hotplug)$/ && $2==iface) {found=1; enabled=1; bootmode=$1; next}
 			if ($1=="iface" && $2==iface) {inblock=1; found=1; mode=$4; next}
 			if (!inblock) next
 			if ($1=="address") address=$2
 			else if ($1=="netmask") netmask=$2
 			else if ($1=="gateway") gateway=$2
 			else if ($1=="dns-nameservers") {dns=""; for(i=2;i<=NF;i++) dns=dns (dns?" ":"") $i}
-			else if (($1=="up") && index($0,"iptables-restore")) hotspot=1
+			else if ($0=="up iptables-restore < /etc/iptables.ipv4.nat") hotspot=1
 		}
-		END{print found,enabled,mode,address,netmask,gateway,dns,bootmode,hotspot}
+		END{print found,enabled,bootmode,mode,address,netmask,gateway,dns,hotspot}
 	' "$file") || return 1
-	IFS=$'\034' read -r PARSE_FOUND PARSE_ENABLED PARSE_MODE PARSE_ADDRESS PARSE_NETMASK PARSE_GATEWAY PARSE_DNS PARSE_BOOT_MODE PARSE_HOTSPOT <<< "$data"
+	IFS=$'\034' read -r PARSE_FOUND PARSE_ENABLED PARSE_BOOT_MODE PARSE_MODE PARSE_ADDRESS PARSE_NETMASK PARSE_GATEWAY PARSE_DNS PARSE_HOTSPOT <<< "$data"
 	return 0
 }
 
@@ -275,17 +274,18 @@ Get_Interface_Stored_Settings()
 	local iface=$1
 	CURRENT_IFACE_SOURCE=
 	CURRENT_IFACE_ENABLED=1
+	(( $G_HW_MODEL == 75 )) && CURRENT_IFACE_BOOT_MODE='auto' || CURRENT_IFACE_BOOT_MODE='allow-hotplug'
 	CURRENT_IFACE_MODE='dhcp'
 	CURRENT_IFACE_IP_STATIC='192.168.0.100/24'
 	CURRENT_IFACE_GATEWAY_STATIC='192.168.0.1'
 	CURRENT_IFACE_DNS_STATIC=$(Get_Default_DNS)
-	(( $G_HW_MODEL == 75 )) && CURRENT_IFACE_BOOT_MODE='auto' || CURRENT_IFACE_BOOT_MODE='allow-hotplug'
+	CURRENT_IFACE_HOTSPOT=0
 
-	if Parse_Interface_Config "/etc/network/interfaces.d/$iface.conf" "$iface" && [[ $PARSE_FOUND == 1 ]]
+	if Parse_Interface_Config "/etc/network/interfaces.d/$iface.conf" "$iface" && (( $PARSE_FOUND ))
 	then
 		CURRENT_IFACE_SOURCE="/etc/network/interfaces.d/$iface.conf"
 
-	elif Parse_Interface_Config '/etc/network/interfaces' "$iface" && [[ $PARSE_FOUND == 1 ]]
+	elif Parse_Interface_Config '/etc/network/interfaces' "$iface" && (( $PARSE_FOUND ))
 	then
 		CURRENT_IFACE_SOURCE='/etc/network/interfaces'
 	else
@@ -293,7 +293,8 @@ Get_Interface_Stored_Settings()
 	fi
 
 	CURRENT_IFACE_ENABLED=${PARSE_ENABLED:-0}
-	[[ $PARSE_MODE == 'static' ]] && CURRENT_IFACE_MODE='static' || CURRENT_IFACE_MODE='dhcp'
+	[[ $PARSE_BOOT_MODE ]] && CURRENT_IFACE_BOOT_MODE=$PARSE_BOOT_MODE
+	[[ $PARSE_MODE == 'static' ]] && CURRENT_IFACE_MODE='static'
 	if [[ $PARSE_ADDRESS ]]
 	then
 		CURRENT_IFACE_IP_STATIC=$PARSE_ADDRESS
@@ -301,8 +302,7 @@ Get_Interface_Stored_Settings()
 	fi
 	[[ $PARSE_GATEWAY ]] && CURRENT_IFACE_GATEWAY_STATIC=$PARSE_GATEWAY
 	[[ $PARSE_DNS ]] && CURRENT_IFACE_DNS_STATIC=$PARSE_DNS
-	[[ $PARSE_BOOT_MODE ]] && CURRENT_IFACE_BOOT_MODE=$PARSE_BOOT_MODE
-	(( ${PARSE_HOTSPOT:-0} )) && CURRENT_IFACE_HOTSPOT=1
+	CURRENT_IFACE_HOTSPOT=${PARSE_HOTSPOT:-0}
 }
 
 Load_Hotspot_Settings()
@@ -337,7 +337,7 @@ Load_Interface_State()
 	Interface_Is_Real "$iface" && CURRENT_IFACE_REAL=1 || CURRENT_IFACE_REAL=0
 	Interface_Is_Wifi "$iface" && CURRENT_IFACE_TYPE='wifi' || CURRENT_IFACE_TYPE='eth'
 	CURRENT_IFACE_CONNECTED=0
-	CURRENT_IFACE_IP='0.0.0.0'
+	CURRENT_IFACE_IP='0.0.0.0/24'
 	CURRENT_IFACE_GATEWAY='0.0.0.0'
 	CURRENT_IFACE_WIFI_SSID='Disconnected / No SSID'
 	CURRENT_IFACE_WIFI_BITRATE=0
@@ -420,10 +420,10 @@ Remove_Interface_From_Main_File()
 
 Update_ResolvConf_Fallback()
 {
-	command -v resolvconf > /dev/null && return 0
 	(( $CURRENT_IFACE_ENABLED )) || return 0
 	[[ $CURRENT_IFACE_MODE == 'static' ]] || return 0
-	[[ $CURRENT_IFACE_DNS_STATIC ]] || return 0
+	(( $CURRENT_IFACE_DNS_STATIC )) || return 0
+	command -v resolvconf > /dev/null && return 0
 	> /etc/resolv.conf
 	local server
 	for server in $CURRENT_IFACE_DNS_STATIC
@@ -439,12 +439,14 @@ Write_Interface_Config()
 	local gateway_line dns_line
 
 	# WiFi Hotspot requires a static IP, but must not have a gateway or DNS
-	if [[ $CURRENT_IFACE_HOTSPOT == 1 ]]
+	if (( $CURRENT_IFACE_HOTSPOT ))
 	then
 		CURRENT_IFACE_MODE='static'
-	else
+
+	elif [[ $CURRENT_IFACE_MODE == 'static' ]]
+	then
 		[[ $CURRENT_IFACE_GATEWAY_STATIC ]] && gateway_line="gateway $CURRENT_IFACE_GATEWAY_STATIC"
-		command -v resolvconf > /dev/null && [[ $CURRENT_IFACE_DNS_STATIC ]] && dns_line="dns-nameservers $CURRENT_IFACE_DNS_STATIC"
+		[[ $CURRENT_IFACE_DNS_STATIC ]] && command -v resolvconf > /dev/null && dns_line="dns-nameservers $CURRENT_IFACE_DNS_STATIC"
 	fi
 
 	# Header
@@ -669,11 +671,11 @@ Subnets_Overlap()
 Get_Iface_Effective_Net()
 {
 	local iface=$1 enabled=0 mode='dhcp' cidr='' gateway=''
-	if Parse_Interface_Config "/etc/network/interfaces.d/$iface.conf" "$iface" && [[ $PARSE_FOUND == 1 ]]
+	if Parse_Interface_Config "/etc/network/interfaces.d/$iface.conf" "$iface" && (( $PARSE_FOUND ))
 	then
 		:
 
-	elif Parse_Interface_Config '/etc/network/interfaces' "$iface" && [[ $PARSE_FOUND == 1 ]]
+	elif Parse_Interface_Config '/etc/network/interfaces' "$iface" && (( $PARSE_FOUND ))
 	then
 		:
 	else
@@ -966,8 +968,9 @@ Menu_Interface()
 		G_WHIP_MENU_ARRAY=('' '●─ Basic Options ')
 		if (( $CURRENT_IFACE_HOTSPOT ))
 		then
-			local hotspot_state_text='[Off] | Select to turn on hotspot'
-			(( $CURRENT_IFACE_HOTSPOT_ACTIVE )) && hotspot_state_text='[On] | Select to turn off hotspot'
+			local status='Offline' hotspot_state_text='[Off] | Select to turn on hotspot'
+			(( $CURRENT_IFACE_HOTSPOT_ACTIVE )) && status='Online' hotspot_state_text='[On] | Select to turn off hotspot'
+			description+="Status  : $status"
 			local hotspot_n_text='Off' hotspot_ac_text='Off' hotspot_ax_text='Off' hotspot_freq_text='2.4' hotspot_channel_text=$HOTSPOT_CHANNEL
 			(( $HOTSPOT_WIFI4 )) && hotspot_n_text='On'
 			(( $HOTSPOT_WIFI5 )) && hotspot_ac_text='On'
@@ -977,7 +980,6 @@ Menu_Interface()
 				hotspot_freq_text='5'
 				hotspot_channel_text=$HOTSPOT_5G_CHANNEL
 			fi
-			description+="Status  : $([[ $CURRENT_IFACE_HOTSPOT_ACTIVE == 1 ]] && echo Online || echo Offline)"
 			G_WHIP_MENU_ARRAY+=(
 				'SSID' ": [$HOTSPOT_SSID]"
 				'Key' ": [$HOTSPOT_KEY]"
