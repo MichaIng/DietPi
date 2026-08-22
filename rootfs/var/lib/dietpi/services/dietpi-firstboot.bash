@@ -144,6 +144,17 @@
 			grep -q '^[[:blank:]]*fdtoverlays[[:blank:]]' /boot/extlinux/extlinux.conf && { reboot; exit 0; }
 		fi
 
+		# GRUB BIOS: Set install device: https://github.com/MichaIng/DietPi/issues/4542
+		if dpkg-query -s 'grub-pc' 2> /dev/null | grep -q '^Status: install ok installed$'
+		then
+			local root_drive=$(lsblk -npo PKNAME "$(findmnt -Ufvnro SOURCE /)")
+			if [[ $root_drive == '/dev/'* ]]
+			then
+				G_DIETPI-NOTIFY 2 "Applying the rootfs parent drive \"$root_drive\" as GRUB install target"
+				debconf-set-selections <<< "grub-pc grub-pc/install_devices multiselect $root_drive"
+			fi
+		fi
+
 		# End user automated script
 		if [[ -f '/boot/Automation_Custom_PreScript.sh' ]]
 		then
@@ -190,8 +201,8 @@ _EOF_
 		/boot/dietpi/func/dietpi-set_software apt-mirror "$(sed -n "/^[[:blank:]]*$target_repo=/{s/^[^=]*=//p;q}" /boot/dietpi.txt)"
 
 		# Recreate machine-id: https://github.com/MichaIng/DietPi/issues/2015
-		[[ -f '/etc/machine-id' ]] && rm /etc/machine-id
-		[[ -f '/var/lib/dbus/machine-id' ]] && rm /var/lib/dbus/machine-id
+		G_DIETPI-NOTIFY 2 'Resetting machine ID'
+		rm -v /etc/machine-id /var/lib/dbus/machine-id
 		systemd-machine-id-setup
 
 		# Apply time zone
@@ -214,24 +225,26 @@ _EOF_
 			/boot/dietpi/func/dietpi-set_software locale "$autoinstall_language"
 		fi
 
-		# Skip keyboard, SSH, serial console and network setup on container systems
-		(( $G_HW_MODEL == 75 )) && return 0
-
 		# Apply keyboard layout
-		/boot/dietpi/func/dietpi-set_hardware keyboard autosetup
+		dpkg-query -s 'console-setup' 2> /dev/null | grep -q '^Status: install ok installed$' && /boot/dietpi/func/dietpi-set_hardware keyboard autosetup
 
 		# Disable serial console if set in dietpi.txt
 		grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware serialconsole disable
 
 		# Regenerate unique Dropbear host keys
-		local i type
-		for i in /etc/dropbear/dropbear_*_host_key
-		do
-			type=${i#/etc/dropbear/dropbear_}
-			type=${type%_host_key}
-			rm -v "$i"
-			dropbearkey -t "$type" -f "$i"
-		done
+		# ToDo: Do as well for OpenSSH if installed
+		if dpkg-query -s 'dropbear-bin' 2> /dev/null | grep -q '^Status: install ok installed$'
+		then
+			G_DIETPI-NOTIFY 2 'Regenerating unique Dropbear SSH server host keys'
+			local i type
+			for i in /etc/dropbear/dropbear_*_host_key
+			do
+				type=${i#/etc/dropbear/dropbear_}
+				type=${type%_host_key}
+				rm -v "$i"
+				dropbearkey -t "$type" -f "$i"
+			done
+		fi
 
 		# Apply SSH pubkey(s) from dietpi.txt
 		/boot/dietpi/func/dietpi-set_software add_ssh_pubkeys
@@ -239,99 +252,76 @@ _EOF_
 		# Apply SSH password login setting
 		/boot/dietpi/func/dietpi-set_software disable_ssh_password_logins
 
-		# Apply forced Ethernet link speed if set in dietpi.txt
-		/boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
-
-		# Network setup
-		# - Grab available network interfaces
-		local iface_eth=$(G_GET_NET -q -t eth iface)
-		[[ $iface_eth ]] || iface_eth='eth0'
-		local iface_wlan=$(G_GET_NET -q -t wlan iface)
-		[[ $iface_wlan ]] || iface_wlan='wlan0'
-
-		# - Replace interface names with the ones obtained above
-		sed --follow-symlinks -i "s/eth[0-9]/$iface_eth/g" /etc/network/interfaces
-		sed --follow-symlinks -i "s/wlan[0-9]/$iface_wlan/g" /etc/network/interfaces
-
-		# - Grab user requested settings from dietpi.txt
-		local ethernet_enabled=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_ETHERNET_ENABLED=1' /boot/dietpi.txt)
-		local wifi_enabled=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_WIFI_ENABLED=1' /boot/dietpi.txt)
-		local use_static=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_USESTATIC=1' /boot/dietpi.txt)
-		local static_ip=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_IP=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		local static_mask=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_MASK=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		local static_gateway=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_GATEWAY=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		local static_dns=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_DNS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-
-		# - WiFi
-		if (( $wifi_enabled ))
-		then
-			# Enable WiFi kernel modules
-			/boot/dietpi/func/dietpi-set_hardware wifimodules enable
-
-			# Apply SSIDs/keys from /boot/dietpi-wifi.txt to /etc/wpa_supplicant/wpa_supplicant.conf
-			/boot/dietpi/func/dietpi-wifidb 1
-
-			# Apply WiFi country code from /boot/dietpi.txt
-			/boot/dietpi/func/dietpi-set_hardware wificountrycode
-
-			# Enable WiFi, disable Ethernet
-			ethernet_enabled=0
-			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\allow-hotplug $iface_wlan" /etc/network/interfaces
-			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\#allow-hotplug $iface_eth" /etc/network/interfaces
-
-		# - Ethernet
-		elif (( $ethernet_enabled ))
-		then
-			# Enable Ethernet, disable WiFi
-			wifi_enabled=0
-			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\allow-hotplug $iface_eth" /etc/network/interfaces
-			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\#allow-hotplug $iface_wlan" /etc/network/interfaces
-		fi
-
-		# - Static IP
-		if (( $use_static ))
-		then
-			if (( $wifi_enabled ))
-			then
-				sed --follow-symlinks -i "/iface wlan/c\iface $iface_wlan inet static" /etc/network/interfaces
-
-			elif (( $ethernet_enabled ))
-			then
-				sed --follow-symlinks -i "/iface eth/c\iface $iface_eth inet static" /etc/network/interfaces
-			fi
-			sed --follow-symlinks -i "/address/c\address $static_ip" /etc/network/interfaces
-			sed --follow-symlinks -i "/netmask/c\netmask $static_mask" /etc/network/interfaces
-			sed --follow-symlinks -i "/gateway/c\gateway $static_gateway" /etc/network/interfaces
-			if command -v resolvconf > /dev/null
-			then
-				sed --follow-symlinks -i "/dns-nameservers/c\dns-nameservers $static_dns" /etc/network/interfaces
-			else
-				> /etc/resolv.conf
-				for i in $static_dns; do echo "nameserver $i" >> /etc/resolv.conf; done
-				sed --follow-symlinks -i "/dns-nameservers/c\#dns-nameservers $static_dns" /etc/network/interfaces
-			fi
-		fi
-
-		# - IPv6
-		/boot/dietpi/func/dietpi-set_hardware enableipv6 "$(( ! $(grep -cm1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=0' /boot/dietpi.txt) ))"
-
-		# - Configure enabled interfaces now, /etc/network/interfaces will be effective from next boot on
-		#	Failsafe: Bring up Ethernet, whenever WiFi is disabled or fails to be configured, e.g. due to wrong credentials
-		# shellcheck disable=SC2015
-		(( $wifi_enabled )) && ifup "$iface_wlan" || ifup "$iface_eth"
-
-		# - Boot wait for network
+		# Boot wait for network
 		/boot/dietpi/func/dietpi-set_software boot_wait_for_network "$(( ! $(grep -cm1 '^[[:blank:]]*AUTO_SETUP_BOOT_WAIT_FOR_NETWORK=0' /boot/dietpi.txt) ))"
 
-		# Apply network time sync mirror and force sync now to speed up first run setup
-		/boot/dietpi/func/dietpi-set_software timesync-mirror
-		systemctl restart systemd-timesyncd
+		# IPv6
+		/boot/dietpi/func/dietpi-set_hardware enableipv6 "$(( ! $(grep -cm1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=0' /boot/dietpi.txt) ))"
 
-		# x86_64 BIOS: Set GRUB install device: https://github.com/MichaIng/DietPi/issues/4542
-		if (( $G_HW_ARCH == 10 )) && dpkg-query -s grub-pc &> /dev/null
+		# Network interface setup
+		if dpkg-query -s 'ifupdown' 2> /dev/null | grep -q '^Status: install ok installed$'
 		then
-			local root_drive=$(lsblk -npo PKNAME "$(findmnt -Ufvnro SOURCE /)")
-			[[ $root_drive == '/dev/'* ]] && debconf-set-selections <<< "grub-pc grub-pc/install_devices multiselect $root_drive"
+			# Apply forced Ethernet link speed if set in dietpi.txt
+			/boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
+
+			# Network setup
+			local eth_enabled=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_ETHERNET_ENABLED=1' /boot/dietpi.txt)
+			local wifi_enabled=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_WIFI_ENABLED=1' /boot/dietpi.txt)
+			if (( $eth_enabled || $wifi_enabled ))
+			then
+				# Force dietpi-network CLI arguments from user requested settings from dietpi.txt
+				local net_flags=('--enable' '--force' '--no-reload')
+				local use_static=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_USESTATIC=1' /boot/dietpi.txt)
+				if (( $use_static ))
+				then
+					local static_ip=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_IP=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+					local static_gateway=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_GATEWAY=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+					local static_dns=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_DNS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+
+					net_flags+=('--static')
+					[[ $static_ip ]] && net_flags+=('--ip' "$static_ip")
+					[[ $static_gateway ]] && net_flags+=('--gateway' "$static_gateway")
+					[[ $static_dns ]] && net_flags+=('--dns' "$static_dns")
+				else
+					net_flags+=('--dhcp')
+				fi
+
+				# Enable WiFi if requested
+				if (( $wifi_enabled ))
+				then
+					# Enable WiFi kernel modules
+					/boot/dietpi/func/dietpi-set_hardware wifimodules enable
+
+					# Apply SSIDs/keys from /boot/dietpi-wifi.txt to /etc/wpa_supplicant/wpa_supplicant.conf
+					/boot/dietpi/func/dietpi-wifidb 1
+
+					# Apply WiFi country code from /boot/dietpi.txt
+					/boot/dietpi/func/dietpi-set_hardware wificountrycode
+
+					# Grab available WiFi interface
+					local iface_wifi=$(G_GET_NET -q -t wlan iface)
+				fi
+
+				# Configure and bring up interfaces now, using Ethernet also as fallback if WiFi fails.
+				# - If no interface has been detected yet, configure with wlan0/eth0 names, but do not bring up now.
+				# - This way, ifupdown's udev rules can trigger ifup@.service once the interface is detected.
+				# - Use ifup here, instead of ifup@.service, for easier logging, and to support non-hotplug/auto interfaces.
+				# shellcheck disable=SC2015
+				(( $wifi_enabled )) &&
+				/boot/dietpi/dietpi-network apply "${iface_wifi:-wlan0}" "${net_flags[@]}" &&
+				[[ $iface_wifi ]] && ifup "$iface_wifi" || {
+					local iface_eth=$(G_GET_NET -q -t eth iface)
+					/boot/dietpi/dietpi-network apply "${iface_eth:-eth0}" "${net_flags[@]}" &&
+					[[ $iface_eth ]] && ifup "$iface_eth"
+				}
+			fi
+		fi
+
+		# Apply network time sync mirror and force sync now to speed up first run setup
+		if dpkg-query -s 'systemd-timesyncd' 2> /dev/null | grep -q '^Status: install ok installed$'
+		then
+			/boot/dietpi/func/dietpi-set_software timesync-mirror
+			systemctl restart systemd-timesyncd
 		fi
 	}
 
