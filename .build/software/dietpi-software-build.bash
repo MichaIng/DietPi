@@ -19,7 +19,7 @@ else
 		'12.'*|'bookworm/sid') G_DISTRO=7;;
 		'13.'*|'trixie/sid') G_DISTRO=8;;
 		'14.'*|'forky/sid') G_DISTRO=9;;
-		*) Error_Exit "Unsupported distro version \"$debian_version\"";;
+		*) Error_Exit "Unsupported Debian version \"$debian_version\"";;
 	esac
 	# Ubuntu ships with /etc/debian_version from Debian testing, hence we assume one version lower.
 	grep -q '^ID=ubuntu' /etc/os-release && ((G_DISTRO--))
