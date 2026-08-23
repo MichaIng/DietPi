@@ -19,7 +19,7 @@ else
 		'12.'*|'bookworm/sid') G_DISTRO=7;;
 		'13.'*|'trixie/sid') G_DISTRO=8;;
 		'14.'*|'forky/sid') G_DISTRO=9;;
-		*) Error_Exit "Unsupported distro version \"$debian_version\"";;
+		*) Error_Exit "Unsupported Debian version \"$debian_version\"";;
 	esac
 	# Ubuntu ships with /etc/debian_version from Debian testing, hence we assume one version lower.
 	grep -q '^ID=ubuntu' /etc/os-release && ((G_DISTRO--))
@@ -101,7 +101,15 @@ apackages=('xz-utils' 'parted' 'fdisk' 'systemd-container')
 emulation=0
 (( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || emulation=1
 
-(( $emulation )) && apackages+=('qemu-user-static')
+if (( $emulation ))
+then
+	if (( $G_DISTRO > 7 ))
+	then
+		apackages+=('qemu-user-binfmt')
+	else
+		apackages+=('qemu-user-static')
+	fi
+fi
 
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 

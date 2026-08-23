@@ -4719,7 +4719,7 @@ _EOF_
 
 		if To_Install 114 # Nextcloud
 		then
-			aDEPS=("php$PHP_VERSION-intl") # https://docs.nextcloud.com/server/stable/admin_manual/installation/source_installation.html#prerequisites-for-manual-installation
+			aDEPS=("php$PHP_VERSION-gmp" "php$PHP_VERSION-intl") # https://docs.nextcloud.com/server/stable/admin_manual/installation/php_configuration.html#recommended-general-php-modules
 
 			if [[ -f '/var/www/nextcloud/occ' ]]
 			then
@@ -4741,7 +4741,7 @@ _EOF_
 			[[ ${aDEPS[0]} ]] && { G_DIETPI-NOTIFY 2 'Installing required PHP modules'; G_AGI "${aDEPS[@]}"; aDEPS=(); }
 
 			G_DIETPI-NOTIFY 2 'Enabling required PHP modules'
-			G_EXEC phpenmod ctype curl dom gd intl mbstring pdo_mysql posix simplexml xmlreader xmlwriter zip fileinfo opcache apcu redis exif
+			G_EXEC phpenmod ctype curl dom gd gmp intl mbstring pdo_mysql posix simplexml xmlreader xmlwriter zip fileinfo opcache apcu redis exif
 
 			G_DIETPI-NOTIFY 2 'Applying PHP override settings for Nextcloud' # https://docs.nextcloud.com/server/stable/admin_manual/installation/server_tuning.html#enable-php-opcache
 			local memory_consumption=$(sed -n '/^[[:blank:]]*opcache.memory_consumption=/{s/^[^=]*=//p;q}' "/etc/php/$PHP_VERSION/mods-available/dietpi.ini")
@@ -5253,9 +5253,9 @@ _EOF_
 			then
 				if (( $G_HW_MODEL < 10 ))
 				then
-					# Enhance 4k support on RPi 4 and above with 512 MiB CMA
+					# Enhance 4k support on RPi 4 with 512 MiB CMA. Not needed from RPi 5 on: https://forums.raspberrypi.com/viewtopic.php?p=2385406#p2385532
 					local cma=()
-					(( $G_HW_MODEL > 3 )) && cma=(512)
+					(( $G_HW_MODEL == 4 )) && cma=(512)
 					/boot/dietpi/func/dietpi-set_hardware rpi-opengl vc4-kms-v3d "${cma[@]}"
 
 					# Enable hardware codecs
@@ -7553,8 +7553,10 @@ _EOF_
 			aDEPS=("php$PHP_VERSION-curl" "php$PHP_VERSION-intl" "php$PHP_VERSION-xml")
 
 			# Download
+			# - Ampache 8 requires PHP 8.5+: https://github.com/ampache/ampache/releases#release-8.0.0
+			# - Hence, find latest asset for used PHP version among all releases.
 			local fallback_url="https://github.com/ampache/ampache/releases/download/7.10.1/ampache-7.10.1_all_php$PHP_VERSION.zip"
-			Download_Install "$(curl -sSfL 'https://api.github.com/repos/ampache/ampache/releases/latest' | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/ampache-[0-9\.]*_all_php$PHP_VERSION\.zip(?=\")")" ampache
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/ampache/ampache/releases' | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/ampache-[0-9\.]*_all_php$PHP_VERSION\.zip(?=\")" | head -1)" ampache
 
 			# Reinstall: Preserve configs from old and new paths
 			[[ -f '/var/www/ampache/config/ampache.cfg.php' ]] && G_EXEC mv /var/www/ampache/config/ampache.cfg.php ampache/config/
@@ -7843,11 +7845,7 @@ _EOF_
 
 		if To_Install 60 # WiFi Hotspot
 		then
-			local packages=('hostapd' 'isc-dhcp-server' 'iptables')
-
-			G_AGI "${packages[@]}"
-			G_EXEC systemctl stop hostapd isc-dhcp-server
-			aSTART_SERVICES+=('hostapd' 'isc-dhcp-server')
+			G_AGI hostapd isc-dhcp-server iptables
 			Configure_iptables
 
 			# Unmask hostapd since it is masked via postinst when no config exists yet
@@ -7856,12 +7854,13 @@ _EOF_
 			# Enable WiFi modules
 			/boot/dietpi/func/dietpi-set_hardware wifimodules enable
 
+			# Detect interfaces
 			local eth_iface=$(G_GET_NET -t eth iface)
 			local wifi_iface=$(G_GET_NET -t wlan iface)
 
 			# DHCP server config
 			G_BACKUP_FP /etc/dhcp/dhcpd.conf
-			cat << '_EOF_' > /etc/dhcp/dhcpd.conf
+			cat << '_EOF_' > /etc/dhcp/dhcpd.conf || exit 1
 authoritative;
 #default-lease-time 43200;
 #max-lease-time 86400;
@@ -7876,30 +7875,6 @@ subnet 192.168.42.0 netmask 255.255.255.0 {
 _EOF_
 			# Assign detected WLAN interface
 			G_EXEC eval "echo 'INTERFACESv4=\"$wifi_iface\"' > /etc/default/isc-dhcp-server"
-
-			# Remove all entries below wlan, so we can recreate them
-			G_EXEC sed --follow-symlinks -Ei '/(allow-hotplug|auto)[[:blank:]]+wlan/q0' /etc/network/interfaces
-
-			# Enable up wlan
-			G_CONFIG_INJECT 'allow-hotplug wlan' "allow-hotplug $wifi_iface" /etc/network/interfaces
-
-			# Add WiFi settings to network interfaces config
-			cat << _EOF_ >> /etc/network/interfaces
-iface $wifi_iface inet static
-address 192.168.42.1
-netmask 255.255.255.0
-#gateway 192.168.0.1
-#dns-nameservers 9.9.9.9 149.112.112.112
-pre-up iw dev $wifi_iface set power_save off
-post-down iw dev $wifi_iface set power_save on
-
-# iptables NAT rules
-up iptables-restore < /etc/iptables.ipv4.nat
-up ip6tables-restore < /etc/iptables.ipv6.nat
-_EOF_
-			# Remove wireless-power setting if not supported by adapter/firmware
-			# shellcheck disable=SC2015
-			iw dev "$wifi_iface" set power_save on 2> /dev/null && iw dev "$wifi_iface" set power_save off 2> /dev/null || G_EXEC sed --follow-symlinks -i '/ iw dev .* set power_save /d' /etc/network/interfaces
 
 			# Access point config
 			# - Parse dietpi.txt
@@ -7918,7 +7893,7 @@ _EOF_
 			# - WiFi 5 implies 5 GHz and 5 GHz requires at least WiFi 4
 			(( $wifi5 )) && freq5=1
 			(( $freq5 && ! $wifi5 && ! $wifi6 )) && wifi4=1
-			# - Enable WMM with QoS if WiFi 4 or 5 is enabled
+			# - Enable WMM with QoS if WiFi 4, 5, or 6 is enabled
 			local wmm_enabled=0
 			(( $wifi4 || $wifi5 || $wifi6 )) && wmm_enabled=1
 			# - Apply mode channel based on frequency
@@ -7934,7 +7909,7 @@ _EOF_
 			fi
 			# - Create config
 			G_BACKUP_FP /etc/hostapd/hostapd.conf
-			cat << _EOF_ > /etc/hostapd/hostapd.conf
+			cat << _EOF_ > /etc/hostapd/hostapd.conf || exit 1
 interface=$wifi_iface
 driver=nl80211
 ssid=${ssid:-DietPi-Hotspot}
@@ -7972,12 +7947,11 @@ _EOF_
 			ip6tables -A FORWARD -i "$eth_iface" -o "$wifi_iface" -m state --state RELATED,ESTABLISHED -j ACCEPT
 			ip6tables -A FORWARD -i "$wifi_iface" -o "$eth_iface" -j ACCEPT
 
-			# Save iptables rules, applied via /etc/network/interfaces
+			# Save iptables rules, applied via /etc/network/interfaces.d/<iface>.conf
 			iptables-save > /etc/iptables.ipv4.nat
 			ip6tables-save > /etc/iptables.ipv6.nat
 
-			# Bring up interface now
-			G_EXEC_NOHALT=1 G_EXEC ifup "$wifi_iface"
+			/boot/dietpi/dietpi-network apply "$wifi_iface" --enable --hotspot --ip 192.168.42.1/24
 		fi
 
 		if To_Install 61 tor # Tor Hotspot
@@ -8986,8 +8960,9 @@ sudo sysctl -p /etc/sysctl.d/dietpi-syncthing.confs
 			# RPi: Enable hardware codecs
 			(( $G_HW_MODEL > 9 )) || /boot/dietpi/func/dietpi-set_hardware rpi-codec 1
 
-			# Flags: Allow root (disable sandbox) and minimise CPU usage: https://peter.sh/experiments/chromium-command-line-switches/
-			G_EXEC eval "echo 'export CHROMIUM_FLAGS=\"\$CHROMIUM_FLAGS --no-sandbox --test-type --disable-smooth-scrolling --disable-low-res-tiling --enable-low-end-device-mode --num-raster-threads=$G_HW_CPU_CORES --disable-composited-antialiasing\"' > /etc/chromium.d/dietpi"
+			# Flags: Allow root to run Chromium (--no-sandbox), and mute the warning that "--no-sandbox" was used (--test-type)
+			# shellcheck disable=SC2016
+			G_EXEC eval 'echo '\''[ "$(id -u)" -eq 0 ] && export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --test-type"'\'' > /etc/chromium.d/dietpi'
 
 			# Autostart script for kiosk mode, based on @AYapejian: https://github.com/MichaIng/DietPi/issues/1737#issue-318697621
 			G_EXEC mkdir -p /var/lib/dietpi/dietpi-software/installed
@@ -13972,6 +13947,7 @@ _EOF_
 		then
 			G_AGP hostapd isc-dhcp-server
 
+			# Remove hotspot config files
 			[[ -f '/etc/dhcp/dhcpd.conf' ]] && G_EXEC rm /etc/dhcp/dhcpd.conf
 			[[ -f '/etc/hostapd/hostapd.conf' ]] && G_EXEC rm /etc/hostapd/hostapd.conf
 			[[ -f '/etc/default/isc-dhcp-server' ]] && G_EXEC rm /etc/default/isc-dhcp-server
@@ -13980,26 +13956,11 @@ _EOF_
 			[[ -f '/etc/iptables.ipv6.nat' ]] && G_EXEC rm /etc/iptables.ipv6.nat
 			[[ -f '/etc/sysctl.d/dietpi-wifihotspot.conf' ]] && G_EXEC rm /etc/sysctl.d/dietpi-wifihotspot.conf
 
-			# Set WiFi interface back to inactive and ready for use with dietpi-config.
-			local wifi_iface=$(G_GET_NET -t wlan iface)
-			# - Remove WLAN block, so we can recreate it
-			G_EXEC sed --follow-symlinks -Ei '/(allow-hotplug|auto)[[:blank:]]+wlan/q0' /etc/network/interfaces
-			# - Disable
-			G_EXEC sed --follow-symlinks -i "/allow-hotplug wlan/c\#allow-hotplug $wifi_iface" /etc/network/interfaces
-			# - Add default WiFi settings to network interfaces config
-			cat << _EOF_ >> /etc/network/interfaces
-iface $wifi_iface inet dhcp
-address 192.168.0.101
-netmask 255.255.255.0
-#gateway 192.168.0.1
-#dns-nameservers 9.9.9.9 149.112.112.112
-pre-up iw dev $wifi_iface set power_save off
-post-down iw dev $wifi_iface set power_save on
-wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
-_EOF_
-			# shellcheck disable=SC2015
-			iw dev "$wifi_iface" set power_save on 2> /dev/null && iw dev "$wifi_iface" set power_save off 2> /dev/null || G_EXEC sed --follow-symlinks -i '/ iw dev .* set power_save /d' /etc/network/interfaces
-			# - Flush iptables
+			# Remove interface configuration
+			local wifi_iface=$(G_GET_NET -q -t wlan iface)
+			[[ $wifi_iface ]] && /boot/dietpi/dietpi-network remove "$wifi_iface"
+
+			# Flush iptables
 			iptables -F
 			iptables -t nat -F
 			ip6tables -F
@@ -15273,94 +15234,19 @@ _EOF_
 		then
 			G_DIETPI-NOTIFY 2 'Applying DHCP leased network settings as static network settings'
 
-			# Function to convert CIDR notation into dot-decimal notation
-			cidr2mask()
-			{
-				local i mask full_octets=$(( $1 / 8 )) partial_octet=$(( $1%8 ))
-				for i in {0..3}
-				do
-					if (( $i < $full_octets ))
-					then
-						mask+='255'
-
-					elif (( $i == $full_octets ))
-					then
-						mask+=$(( 256 - 2 ** ( 8 - $partial_octet ) ))
-					else
-						mask+='0'
-					fi
-					(( $i < 3 )) && mask+=.
-				done
-				echo "$mask"
-			}
-
-			# Get Ethernet index
-			local nameservers eth_index=$(sed -En '/^[[:blank:]]*(allow-hotplug|auto)[[:blank:]]+eth[0-9]+$/{s/^.*eth//p;q}' /etc/network/interfaces)
-			# - Is enabled and uses DHCP
-			if [[ $eth_index ]] && grep -Eq "^[[:blank:]]*iface[[:blank:]]+eth${eth_index}[[:blank:]]+inet[[:blank:]]+dhcp$" /etc/network/interfaces
-			then
-				G_DIETPI-NOTIFY 2 'Applying DHCP leased Ethernet settings as static Ethernet settings'
-
-				# Get current network info
-				local eth_ip=$(ip -br -f inet a s "eth$eth_index" | mawk '{print $3}' | sed 's|/.*$||')
-				local eth_mask=$(cidr2mask "$(ip -br -f inet a s "eth$eth_index" | mawk '{print $3}' | sed 's|^.*/||')")
-				local eth_gateway=$(ip r l dev "eth$eth_index" 0/0 | mawk '{print $3;exit}')
-				nameservers=$(mawk '/^[[:blank:]]*nameserver[[:blank:]]/{print $2}' ORS=' ' /etc/resolv.conf)
-
-				# Apply current network settings statically
-				G_CONFIG_INJECT "iface[[:blank:]]+eth$eth_index" "iface eth$eth_index inet static" /etc/network/interfaces
-				sed --follow-symlinks -i "0,\|^.*address[[:blank:]].*\$|s||address $eth_ip|" /etc/network/interfaces
-				sed --follow-symlinks -i "0,\|^.*netmask[[:blank:]].*\$|s||netmask $eth_mask|" /etc/network/interfaces
-				sed --follow-symlinks -i "0,\|^.*gateway[[:blank:]].*\$|s||gateway $eth_gateway|" /etc/network/interfaces
-			fi
-
-			# Get WiFi index
-			local wlan_index=$(sed -En '/^[[:blank:]]*(allow-hotplug|auto)[[:blank:]]+wlan[0-9]+$/{s/^.*wlan//p;q}' /etc/network/interfaces)
-			# - Is enabled and uses DHCP
-			if [[ $wlan_index ]] && grep -Eq "^[[:blank:]]*iface[[:blank:]]+wlan${wlan_index}[[:blank:]]+inet[[:blank:]]+dhcp$" /etc/network/interfaces
-			then
-				G_DIETPI-NOTIFY 2 'Applying DHCP leased WiFi settings as static WiFi settings'
-
-				# Get current network info
-				local wlan_ip=$(ip -br -f inet a s "wlan$wlan_index" | mawk '{print $3}' | sed 's|/.*$||')
-				local wlan_mask=$(cidr2mask "$(ip -br -f inet a s "wlan$wlan_index" | mawk '{print $3}' | sed 's|^.*/||')")
-				local wlan_gateway=$(ip r l dev "wlan$wlan_index" 0/0 | mawk '{print $3;exit}')
-				[[ $nameservers ]] || nameservers=$(mawk '/^[[:blank:]]*nameserver[[:blank:]]/{print $2}' ORS=' ' /etc/resolv.conf)
-
-				# Apply current network settings statically
-				G_CONFIG_INJECT "iface[[:blank:]]+wlan$wlan_index" "iface wlan$wlan_index inet static" /etc/network/interfaces
-				sed --follow-symlinks -i "\|^iface wlan|,\$s|^.*address[[:blank:]].*\$|address $wlan_ip|" /etc/network/interfaces
-				sed --follow-symlinks -i "\|^iface wlan|,\$s|^.*netmask[[:blank:]].*\$|netmask $wlan_mask|" /etc/network/interfaces
-				sed --follow-symlinks -i "\|^iface wlan|,\$s|^.*gateway[[:blank:]].*\$|gateway $wlan_gateway|" /etc/network/interfaces
-			fi
-			unset -f cidr2mask
-
-			# Apply DNS nameservers
-			if [[ $nameservers ]]
-			then
-				G_DIETPI-NOTIFY 2 'Applying DHCP leased DNS nameservers as static nameservers'
-
-				if command -v resolvconf > /dev/null
-				then
-					sed --follow-symlinks -i "/dns-nameservers[[:blank:]]/c\dns-nameservers ${nameservers% }" /etc/network/interfaces
-				else
-					sed --follow-symlinks -i "/dns-nameservers[[:blank:]]/c\#dns-nameservers ${nameservers% }" /etc/network/interfaces
-					> /etc/resolv.conf
-					for i in $nameservers; do echo "nameserver $i" >> /etc/resolv.conf; done
-				fi
-			fi
+			/boot/dietpi/dietpi-network apply "$(G_GET_NET iface)" --static --copy-current
 
 			G_DIETPI-NOTIFY 0 'Network changes will become effective with next reboot'
 		fi
 
 		# RPi: Disable onboard WiFi if WiFi modules were not enabled until now: https://github.com/MichaIng/DietPi/issues/5391
-		[[ $G_HW_MODEL -gt 9 || ! -f '/etc/modprobe.d/dietpi-disable_wifi.conf' ]] || /boot/dietpi/func/dietpi-set_hardware wifimodules onboard_disable
+		[[ $G_HW_MODEL -le 9 && -f '/etc/modprobe.d/dietpi-disable_wifi.conf' ]] && /boot/dietpi/func/dietpi-set_hardware wifimodules onboard_disable
 
 		# Apply AutoStart choice
 		/boot/dietpi/dietpi-autostart "$AUTOINSTALL_AUTOSTARTTARGET"
 
 		# Disable console on TTY1 for purely headless SBCs, enabled for automated first run setup
-		[[ $G_HW_MODEL =~ ^(47|48|55|56|57|59|60|64|65|73)$ ]] && G_EXEC systemctl --no-reload disable getty@tty1
+		[[ $G_HW_MODEL =~ ^(47|48|55|56|57|59|60|64|65|73|100|104)$ ]] && G_EXEC systemctl --no-reload disable getty@tty1
 
 		# Images are shipped with cron disabled, hence enable it now after first run setup has finished
 		G_EXEC systemctl enable cron
