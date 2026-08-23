@@ -270,7 +270,7 @@ _EOF_
 			if (( $eth_enabled || $wifi_enabled ))
 			then
 				# Force dietpi-network CLI arguments from user requested settings from dietpi.txt
-				local net_flags=('--enable' '--force' '--no-reload')
+				local net_flags=('--enable' '--force' '--no-restart')
 				local use_static=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_USESTATIC=1' /boot/dietpi.txt)
 				if (( $use_static ))
 				then
