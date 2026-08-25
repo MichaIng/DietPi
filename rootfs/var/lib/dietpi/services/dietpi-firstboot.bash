@@ -109,39 +109,41 @@
 			RPi_Set_Clock_Speeds
 
 		# VisionFive 2
-		elif [[ $G_HW_MODEL == 81 && -f '/proc/device-tree/serial-number' && -f '/boot/extlinux/extlinux.conf' ]] && ! grep -q '^[[:blank:]]*fdtoverlays[[:blank:]]' /boot/extlinux/extlinux.conf
+		elif [[ $G_HW_MODEL == 81 && -f '/proc/device-tree/serial-number' && -f '/boot/extlinux/extlinux.conf' ]]
 		then
-			local serial overlays=()
+			local serial overlays=() i reboot=0
 			read -r serial < /proc/device-tree/serial-number
 			if [[ $serial == 'VF7110A1-'* ]]
 			then
-				G_DIETPI-NOTIFY 2 'A revision detected, applying device tree overlay to fix Ethernet ...'
+				G_DIETPI-NOTIFY 2 'A1 revision detected, applying device tree overlay to fix Ethernet'
 				read -ra overlays < <(mawk '$1=="fdtoverlays"{$1="";print}' /boot/extlinux/extlinux.conf)
-				local i=
+				i=
 				for i in "${overlays[@]}"; do [[ $i == *'/ethernet-A12.dtbo' ]] && break; done
 				if [[ $i == *'/ethernet-A12.dtbo' ]]
 				then
-					G_DIETPI-NOTIFY 2 'A revision Ethernet overlay was applied already ...'
+					G_DIETPI-NOTIFY 2 'A1 revision Ethernet overlay was applied already'
 				else
 					overlays+=('/usr/lib/linux-image-visionfive2/starfive/vf2-overlay/ethernet-A12.dtbo')
 					G_CONFIG_INJECT 'fdtoverlays[[:blank:]]' "fdtoverlays ${overlays[*]}" /boot/extlinux/extlinux.conf
+					reboot=1
 				fi
 			fi
 			if [[ $serial == *'-D008E000-'* ]]
 			then
-				G_DIETPI-NOTIFY 2 '8 GB RAM model detected, applying device tree overlay to make all 8 GB available to the system ...'
+				G_DIETPI-NOTIFY 2 '8 GB RAM model detected, applying device tree overlay to make all 8 GB available to the system'
 				read -ra overlays < <(mawk '$1=="fdtoverlays"{$1="";print}' /boot/extlinux/extlinux.conf)
-				local i=
+				i=
 				for i in "${overlays[@]}"; do [[ $i == *'/8GB.dtbo' ]] && break; done
 				if [[ $i == *'/8GB.dtbo' ]]
 				then
-					G_DIETPI-NOTIFY 2 '8 GB RAM overlay was applied already ...'
+					G_DIETPI-NOTIFY 2 '8 GB RAM overlay was applied already'
 				else
 					overlays+=('/usr/lib/linux-image-visionfive2/starfive/vf2-overlay/8GB.dtbo')
 					G_CONFIG_INJECT 'fdtoverlays[[:blank:]]' "fdtoverlays ${overlays[*]}" /boot/extlinux/extlinux.conf
+					reboot=1
 				fi
 			fi
-			grep -q '^[[:blank:]]*fdtoverlays[[:blank:]]' /boot/extlinux/extlinux.conf && { reboot; exit 0; }
+			(( $reboot )) && { reboot; exit 0; }
 		fi
 
 		# GRUB BIOS: Set install device: https://github.com/MichaIng/DietPi/issues/4542
