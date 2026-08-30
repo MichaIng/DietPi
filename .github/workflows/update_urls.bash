@@ -425,7 +425,6 @@ aURL[$software_id]='https://registry.npmjs.org/@scrypted/server/latest'
 aCHECK[$software_id]='echo "$response" | grep -Po "\"tarball\": *\"\K[^\"]*\/server-[^\"\/]*\.tgz(?=\")"'
 aREGEX[$software_id]='https://registry.npmjs.org/@scrypted/server/-/server-.*.tgz'
 
-
 ### URL check loop ###
 
 for i in "${!aCHECK[@]}"
