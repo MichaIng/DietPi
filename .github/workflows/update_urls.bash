@@ -419,6 +419,13 @@ aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"
 aARCH[$software_id]='armv6 armv7 arm64 amd64 riscv64'
 aREGEX[$software_id]='https://github\.com/prometheus/prometheus/releases/download/.*/prometheus-[0-9][^/]*\.linux-\$arch\.tar\.gz'
 
+# Scrypted
+software_id=220
+aURL[$software_id]='https://registry.npmjs.org/@scrypted/server/latest'
+aCHECK[$software_id]='echo "$response" | grep -Po "\"tarball\": *\"\K[^\"]*\/server-[^\"\/]*\.tgz(?=\")"'
+aREGEX[$software_id]='https://registry.npmjs.org/@scrypted/server/-/server-.*.tgz'
+
+
 ### URL check loop ###
 
 for i in "${!aCHECK[@]}"

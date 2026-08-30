@@ -317,6 +317,7 @@ Process_Software()
 			216) aSERVICES[i]='immich-ml' aTCP[i]='3003';;
 			217) aCOMMANDS[i]='uv --version';;
 			218) aSERVICES[i]='prometheus' aTCP[i]='9090' aCOMMANDS[i]='curl -sSf '\''http://127.0.0.1:9090/api/v1/query?query=up'\'' | grep '\''"status":"success"'\';;
+			220) aSERVICES[i]='scrypted' aTCP[i]='10443';;
 			*) :;;
 		esac
 		aINSTALL[i]=1
