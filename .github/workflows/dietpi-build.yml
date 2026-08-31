@@ -16,7 +16,9 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.inputs.buildargs }}
   cancel-in-progress: true
-permissions: {}
+permissions:
+  contents: read
+  actions: write # upload/download build artifacts
 jobs:
   prep:
     outputs:
@@ -103,7 +105,8 @@ jobs:
         '"-m 105 -d 7", "-m 105 -d 8", "-m 105 -d 9",'\
         '"-m 106 -d 7", "-m 106 -d 8", "-m 106 -d 9",'\
         '"-m 107 -d 7", "-m 107 -d 8", "-m 107 -d 9",'\
-        '"-m 108 -d 7", "-m 108 -d 8", "-m 108 -d 9"]]' >> "$GITHUB_OUTPUT"
+        '"-m 108 -d 7", "-m 108 -d 8", "-m 108 -d 9",'\
+        '"-m 109 -d 7", "-m 109 -d 8", "-m 109 -d 9"]]' >> "$GITHUB_OUTPUT"
         elif [ "${{ github.event.inputs.buildargs }}" = 'quartz64' ]
         then
           echo buildargs=[\
@@ -122,6 +125,10 @@ jobs:
         '"-m 2 -d 7 -e all", "-m 2 -d 8 -e all", "-m 2 -d 9 -e all",'\
         '"-m 4 -d 7 -e all", "-m 4 -d 8 -e all", "-m 4 -d 9 -e all",'\
         '"-m 5 -d 7 -e all", "-m 5 -d 8 -e all", "-m 5 -d 9 -e all"]' >> "$GITHUB_OUTPUT"
+        elif [ "${{ github.event.inputs.buildargs }}" = 'tvbox' ]
+        then
+          echo buildargs=[\
+        '"-m 109 -d 7", "-m 109 -d 8", "-m 109 -d 9"]' >> "$GITHUB_OUTPUT"
         elif [ "${{ github.event.inputs.buildargs }}" = 'containers' ]
         then
           echo buildargs=[\
@@ -150,20 +157,6 @@ jobs:
     name: "Build: ${{ matrix.buildargs }}"
     runs-on: ${{ ( contains(matrix.buildargs, '-a 10') || contains(matrix.buildargs, '-m 21') || ( contains(matrix.buildargs, '-m 20') && ! contains(matrix.buildargs, '-a ') ) ) && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
     steps:
-    - name: Generate upload script
-      run: |
-        sudo dash -c 'umask 377; echo '\''${{ secrets.KNOWN_HOSTS }}'\'' > /root/.ssh/known_hosts; echo '\''${{ secrets.SSH_KEY }}'\'' > /root/.ssh/id_ed25519; > upload.sh; chmod 0711 upload.sh'
-        echo '#!/bin/dash
-        set -e
-        urls="\"https://dietpi.com/downloads/images/testing/\""
-        for i in "$@"; do urls="$urls,\"https://dietpi.com/downloads/images/testing/${i##*/}\""; done
-        IFS=,
-        curl -T "{$*}" --key /root/.ssh/id_ed25519 '\''${{ secrets.UPLOAD_URL }}testing/'\''
-        curl -H '\''Authorization: Bearer ${{ secrets.CF_TOKEN }}'\'' -H '\''Content-Type: application/json'\'' -d "{\"files\":[$urls]}" '\''https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache'\''
-        echo' | sudo tee upload.sh > /dev/null
-        sudo gpg --batch --import << _EOF_
-        ${{ secrets.GPG_KEY }}
-        _EOF_
     - name: Run DietPi-Build
       run: |
         sudo systemctl --now mask ssh ssh.socket systemd-resolved azure-proxy-agent
@@ -171,4 +164,31 @@ jobs:
         buildargs='${{ matrix.buildargs }}'
         [ "${{ github.event.inputs.testkernel }}" == 'true' ] && buildargs="$buildargs --test-kernel"
         [ "${{ github.event.inputs.testuboot }}" == 'true' ] && buildargs="$buildargs --test-uboot"
-        sudo bash -c "G_GITOWNER=$GITHUB_REPOSITORY_OWNER G_GITBRANCH=$GITHUB_REF_NAME; $(curl -sSf "https://raw.githubusercontent.com/$GITHUB_REPOSITORY_OWNER/DietPi/$GITHUB_REF_NAME/.build/images/dietpi-build" || echo false)" -- $buildargs --sign '${{ secrets.GPG_PASS }}' --upload-script 'upload.sh'
+        sudo bash -c "G_GITOWNER=$GITHUB_REPOSITORY_OWNER G_GITBRANCH=$GITHUB_REF_NAME GITREPO=${GITHUB_REPOSITORY#*/}; $(curl -sSf "https://raw.githubusercontent.com/$GITHUB_REPOSITORY_OWNER/${GITHUB_REPOSITORY#*/}/$GITHUB_REF_NAME/.build/images/dietpi-build" || echo false)" -- $buildargs -o "$GITHUB_REPOSITORY_OWNER" -b "$GITHUB_REF_NAME"
+    - name: Upload DietPi images
+      uses: actions/upload-artifact@v4
+      with:
+        name: tvbox-images-${{ strategy.job-index }}
+        path: |
+          DietPi_TVBoxS90X*.img.xz
+          DietPi_TVBoxS90X*.img.xz.sha256
+        if-no-files-found: error
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read # download build artifacts
+      contents: write # publish GitHub release
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        path: assets
+        merge-multiple: true
+    - name: Publish GitHub release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        shopt -s nullglob
+        files=( assets/* )
+        [[ -n ${files[0]} ]] || { echo '::error::No image assets found'; exit 1; }
+        gh release create "tvbox-s90x-${{ github.run_id }}" "${files[@]}" --title 'DietPi TVBox S90X (fork test build)' --notes "Built from $GITHUB_REF_NAME via the 'tvbox' preset" -R "$GITHUB_REPOSITORY"

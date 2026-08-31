@@ -1,0 +1,202 @@
+#!/bin/bash
+# Convert a standard single-partition DietPi image into the Amlogic TVBox S90X layout
+# - Source: standard DietPi image with ext4 root filesystem and trailing DIETPISETUP FAT partition
+# - Target: 3-partition layout required by Amlogic TVBox firmware bootloader
+#	- p1: FAT32 "BOOT_DIETPI" with vendor multiboot files (aml_autoscript, s905_autoscript, u-boot.ext, boot.scr)
+#	- p2: ext4 "ROOT_DIETPI" with the DietPi root filesystem, kernel, initramfs and device trees
+#	- p3: FAT16 "DIETPISETUP" with the first boot setup files
+# Created by the DietPi-S90X project
+{
+##########################################
+# Load DietPi-Globals
+##########################################
+Error_Exit(){ G_DIETPI-NOTIFY 1 "$1, aborting ..."; exit 1; }
+if [[ -f '/boot/dietpi/func/dietpi-globals' ]]
+then
+	. /boot/dietpi/func/dietpi-globals
+else
+	[[ $G_GITOWNER && $G_GITBRANCH ]] || { echo '[FAILED] You must export or pass G_GITOWNER and G_GITBRANCH to the script'; exit 1; }
+	GITREPO=${GITREPO:-DietPi}
+	curl -sSfo /tmp/dietpi-globals "https://raw.githubusercontent.com/$G_GITOWNER/$GITREPO/$G_GITBRANCH/dietpi/func/dietpi-globals" || Error_Exit 'Failed to download DietPi-Globals'
+	# shellcheck disable=SC1091
+	. /tmp/dietpi-globals
+	G_EXEC rm /tmp/dietpi-globals
+	read -r debian_version < /etc/debian_version
+	# shellcheck disable=SC2034 # G_DISTRO is consumed by functions in DietPi-Globals
+	case $debian_version in
+		'12.'*|'bookworm/sid') G_DISTRO=7;;
+		'13.'*|'trixie/sid') G_DISTRO=8;;
+		'14.'*|'forky/sid') G_DISTRO=9;;
+		*) Error_Exit "Unsupported distro version \"$debian_version\"";;
+	esac
+fi
+GITREPO=${GITREPO:-DietPi} # Define here in case DietPi-Globals were loaded from /boot, where the above URL-export was skipped
+# shellcheck disable=SC2034 # G_PROGRAM_NAME set: G_CHECK_ROOTFS_RW + G_EXEC use it to derive the working dir
+readonly G_PROGRAM_NAME='DietPi-TVBox'
+G_CHECK_ROOT_USER "$@"
+G_CHECK_ROOTFS_RW
+readonly FP_ORIGIN=$PWD # Store origin dir
+G_INIT
+G_EXEC cd "$FP_ORIGIN" # Process everything in origin dir instead of /tmp/$G_PROGRAM_NAME
+
+#------------------------------------------------------------------------------------------------
+# Process inputs
+#------------------------------------------------------------------------------------------------
+FP_SOURCE=$1
+[[ $FP_SOURCE ]] || Error_Exit 'No input image specified'
+[[ $FP_SOURCE =~ ^/ ]] || FP_SOURCE=$PWD/$FP_SOURCE
+[[ -f $FP_SOURCE ]] || Error_Exit "Invalid input source \"$FP_SOURCE\""
+FP_SOURCE_IMG=$FP_SOURCE
+OUTPUT_IMG_NAME=${OUTPUT_IMG_NAME:-${FP_SOURCE_IMG%.img}}
+[[ $EDITION && $EDITION != 'all' ]] && Error_Exit 'Television EDITION is not supported for TVBox S90X'
+
+#------------------------------------------------------------------------------------------------
+# Prepare tooling
+#------------------------------------------------------------------------------------------------
+G_AGI e2fsprogs dosfstools parted xz-utils
+
+#------------------------------------------------------------------------------------------------
+# Download TVBox S90X boot files from the build branch
+#------------------------------------------------------------------------------------------------
+G_DIETPI-NOTIFY 2 "Downloading TVBox S90X boot files from $G_GITOWNER/$GITREPO/$G_GITBRANCH"
+G_EXEC curl -sSfL "https://github.com/$G_GITOWNER/$GITREPO/archive/$G_GITBRANCH.tar.gz" -o dietpi-source.tar.gz
+src_dir=$(tar tf dietpi-source.tar.gz | head -1) src_dir=${src_dir%%/*}
+[[ $src_dir ]] || Error_Exit 'Invalid DietPi source archive'
+G_EXEC tar xf dietpi-source.tar.gz
+G_EXEC rm dietpi-source.tar.gz
+src_tvbox_dir="$src_dir/.build/images/TVBox_S90X"
+[[ -d $src_tvbox_dir ]] || Error_Exit 'TVBox_S90X directory not found in source archive'
+
+#------------------------------------------------------------------------------------------------
+# Attach source image
+#------------------------------------------------------------------------------------------------
+G_DIETPI-NOTIFY 2 "Attaching source image ($FP_SOURCE_IMG)"
+FP_SOURCE_LOOP=$(losetup -f)
+G_EXEC losetup -P "$FP_SOURCE_LOOP" "$FP_SOURCE_IMG"
+G_EXEC udevadm settle
+
+#------------------------------------------------------------------------------------------------
+# Create target image with the 3-partition TVBox layout
+#------------------------------------------------------------------------------------------------
+src_size_mb=$(du -m "$FP_SOURCE_IMG" | mawk '{print $1}')
+s90x_size_mb=$(( src_size_mb + 600 ))
+tmp_img="${OUTPUT_IMG_NAME}_TVBox.img"
+G_DIETPI-NOTIFY 2 "Creating $tmp_img with size ${s90x_size_mb} MiB"
+# shellcheck disable=SC2248 # Trailing size unit must stay unexpanded
+G_EXEC dd if=/dev/zero of="$tmp_img" bs=4k iflag=fullblock,count_bytes count=${s90x_size_mb}M
+FP_TARGET_LOOP=$(losetup -f)
+G_EXEC losetup -P "$FP_TARGET_LOOP" "$tmp_img"
+G_EXEC udevadm settle
+
+G_EXEC parted -s "$FP_TARGET_LOOP" mklabel msdos
+G_EXEC parted -s "$FP_TARGET_LOOP" mkpart primary fat32 4M 99M
+G_EXEC parted -s "$FP_TARGET_LOOP" mkpart primary ext4 100M 97%
+G_EXEC parted -s "$FP_TARGET_LOOP" mkpart primary fat16 98% 100%
+G_EXEC udevadm settle
+
+G_EXEC mkfs.fat -F 32 -n 'BOOT_DIETPI' "${FP_TARGET_LOOP}p1"
+G_EXEC mke2fs -F -q -t ext4 -L 'ROOT_DIETPI' -m 0 "${FP_TARGET_LOOP}p2"
+G_EXEC mkfs.fat -F 16 -n 'DIETPISETUP' "${FP_TARGET_LOOP}p3"
+
+# Copy the root filesystem from the source image
+G_DIETPI-NOTIFY 2 'Copying root filesystem to ROOT_DIETPI partition'
+G_EXEC dd if="${FP_SOURCE_LOOP}p1" of="${FP_TARGET_LOOP}p2" bs=1M status=progress
+G_EXEC_OUTPUT=1 G_EXEC e2fsck -fy "${FP_TARGET_LOOP}p2"
+G_EXEC_OUTPUT=1 G_EXEC resize2fs "${FP_TARGET_LOOP}p2"
+
+#------------------------------------------------------------------------------------------------
+# Populate partitions
+#------------------------------------------------------------------------------------------------
+G_EXEC mkdir -p S90X_IMG/{BOOT_DIETPI,ROOT_DIETPI,DIETPISETUP}
+G_EXEC mount "${FP_TARGET_LOOP}p1" S90X_IMG/BOOT_DIETPI
+G_EXEC mount "${FP_TARGET_LOOP}p2" S90X_IMG/ROOT_DIETPI
+G_EXEC mount "${FP_TARGET_LOOP}p3" S90X_IMG/DIETPISETUP
+
+# Copy the Amlogic multiboot files to the FAT BOOT_DIETPI partition, which the firmware bootloader reads first
+G_DIETPI-NOTIFY 2 'Copying multiboot files to BOOT_DIETPI partition'
+G_EXEC cp -a "$src_tvbox_dir/BOOT_PART1_FAT32_SDCARD"/. S90X_IMG/BOOT_DIETPI/
+cat << '_EOF_' > S90X_IMG/BOOT_DIETPI/TVBOX_SETUP.txt
+TVBox S90X DietPi boot partition
+
+The firmware bootloader reads aml_autoscript from this FAT partition and loads u-boot.ext to boot.
+- Default setup boots an S905X box.
+- Edit /boot/dietpiEnv.txt ON the EXT4 ROOT_DIETPI partition to change the boot configuration.
+- Change fdtfile=amlogic/...  to match the used DTB from /boot/dtb/amlogic or /boot/arm9xxx_dtb.
+- u-boot.ext on this FAT partition is used to boot:
+  - Default u-boot.ext works for S905X, S905W and S912.
+  - Rename u-boot-s905x2-s922.mnj to u-boot.ext for S905X2/S905X3.
+
+First boot
+1. Insert the SD card and press the reset button in the A/V port while connecting power.
+2. Release the button after 5 seconds.
+_EOF_
+
+# Copy the DIETPISETUP contents from the source image
+src_setup_part=$(lsblk -rnpno NAME,LABEL "$FP_SOURCE_LOOP" | mawk '$2=="DIETPISETUP"{print $1;exit}')
+[[ $src_setup_part ]] || Error_Exit 'Source image does not contain a DIETPISETUP partition'
+G_EXEC mkdir S90X_IMG/DIETPISETUP_SOURCE
+G_EXEC mount "$src_setup_part" S90X_IMG/DIETPISETUP_SOURCE
+G_DIETPI-NOTIFY 2 'Copying DIETPISETUP files'
+G_EXEC cp -a S90X_IMG/DIETPISETUP_SOURCE/. S90X_IMG/DIETPISETUP/
+G_EXEC umount S90X_IMG/DIETPISETUP_SOURCE
+G_EXEC rmdir S90X_IMG/DIETPISETUP_SOURCE
+
+# Add extra device trees and eMMC install scripts to the root filesystem
+G_EXEC cp -a "$src_tvbox_dir/arm9xxx_dtb" S90X_IMG/ROOT_DIETPI/boot/
+G_EXEC cp -a "$src_tvbox_dir/BOOT_EMMC" S90X_IMG/ROOT_DIETPI/boot/
+
+# Set a S905X device tree as default, add TVBox notes and assure root device is mounted via filesystem UUID
+G_CONFIG_INJECT 'rootdev=' "rootdev=UUID=$(findmnt -n -o UUID S90X_IMG/ROOT_DIETPI)" S90X_IMG/ROOT_DIETPI/boot/dietpiEnv.txt
+cat << 'EOF' >> S90X_IMG/ROOT_DIETPI/boot/dietpiEnv.txt
+
+# TVBox S90X: Default device tree, edit fdtfile to match your board.
+# - Available device trees: /boot/dtb/amlogic/ and /boot/arm9xxx_dtb/
+fdtfile=amlogic/meson-gxl-s905x-p212.dtb
+# s905w
+#fdtfile=amlogic/meson-gxl-s905w-p281.dtb
+# S912
+#fdtfile=amlogic/meson-gxm-q200.dtb
+# s905x3
+#fdtfile=amlogic/meson-sm1-x96-air.dtb
+EOF
+# Update the FAT DIETPISETUP copy as well
+G_EXEC cp -f S90X_IMG/ROOT_DIETPI/boot/dietpiEnv.txt S90X_IMG/DIETPISETUP/
+
+#------------------------------------------------------------------------------------------------
+# Detach and finalise
+#------------------------------------------------------------------------------------------------
+G_EXEC umount S90X_IMG/BOOT_DIETPI S90X_IMG/ROOT_DIETPI S90X_IMG/DIETPISETUP
+G_EXEC rmdir S90X_IMG/{BOOT_DIETPI,ROOT_DIETPI,DIETPISETUP}
+G_EXEC losetup -d "$FP_TARGET_LOOP"
+G_EXEC losetup -d "$FP_SOURCE_LOOP"
+G_EXEC rm -R "$src_dir"
+G_EXEC rm "$FP_SOURCE_IMG"
+G_EXEC rm -f "$FP_SOURCE_IMG.sha256"
+G_EXEC mv "$tmp_img" "$OUTPUT_IMG_NAME.img"
+
+#------------------------------------------------------------------------------------------------
+# Archive, sign and upload
+#------------------------------------------------------------------------------------------------
+FP_FINAL="$OUTPUT_IMG_NAME.img"
+G_EXEC_DESC='Generating xz-compressed image' G_EXEC xz -9e -T0 -M75% -k "$FP_FINAL"
+G_EXEC_DESC='Generating image hash' G_EXEC eval "sha256sum '$OUTPUT_IMG_NAME.img.xz' > '$OUTPUT_IMG_NAME.img.xz.sha256'"
+upload_list=("$FP_FINAL.xz" "$FP_FINAL.xz.sha256")
+
+# Generate GPG signature if requested
+if [[ $SIGN_PASS ]]
+then
+	G_DIETPI-NOTIFY 2 "Signing $FP_FINAL.xz ..."
+	gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$FP_FINAL.xz" || Error_Exit 'Signing failed, please check your signing key and passphrase'
+	upload_list+=("$FP_FINAL.xz.asc")
+fi
+
+G_DIETPI-NOTIFY 0 "DietPi-TVBox has successfully finished: $FP_FINAL.xz"
+
+# Upload if requested
+if [[ $UPLOAD_SCRIPT ]]
+then
+	[[ -x "$UPLOAD_SCRIPT" ]] || Error_Exit "Upload script $UPLOAD_SCRIPT does not exist or is not executable"
+	G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "${upload_list[@]}"
+fi
+exit 0
+}

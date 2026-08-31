@@ -9,11 +9,11 @@ if [[ -f '/boot/dietpi/func/dietpi-globals' ]]
 then
 	. /boot/dietpi/func/dietpi-globals
 else
-	curl -sSf "https://raw.githubusercontent.com/${G_GITOWNER:=MichaIng}/DietPi/${G_GITBRANCH:=master}/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || { echo 'Failed to download DietPi-Globals, aborting ...'; exit 1; }
+	curl -sSf "https://raw.githubusercontent.com/${G_GITOWNER:=MichaIng}/${GITREPO:=DietPi}/${G_GITBRANCH:=master}/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || { echo 'Failed to download DietPi-Globals, aborting ...'; exit 1; }
 	# shellcheck disable=SC1091
 	. /tmp/dietpi-globals
 	G_EXEC rm /tmp/dietpi-globals
-	export G_GITOWNER G_GITBRANCH G_HW_ARCH_NAME=$(uname -m)
+	export G_GITOWNER G_GITBRANCH GITREPO G_HW_ARCH_NAME=$(uname -m)
 	read -r debian_version < /etc/debian_version
 	case $debian_version in
 		'12.'*|'bookworm/sid') G_DISTRO=7;;
@@ -25,6 +25,7 @@ else
 	grep -q '^ID=ubuntu' /etc/os-release && ((G_DISTRO--))
 	(( $G_DISTRO < 7 )) && Error_Exit 'Unsupported Ubuntu version'
 fi
+export GITREPO=${GITREPO:-DietPi} # Define here in case DietPi-Globals were loaded from /boot, where the above URL-export was skipped
 case $G_HW_ARCH_NAME in
 	'armv6l') export G_HW_ARCH=1;;
 	'armv7l') export G_HW_ARCH=2;;
@@ -51,6 +52,7 @@ FSTYPE='ext4'
 VARIANT=
 GITBRANCH='master'
 GITOWNER='MichaIng'
+GITREPO=${GITREPO:-DietPi} # Preserve an exported repository name, e.g. passed by the CI workflow
 EDITION=
 SUFFIX=
 SKIP_ARCHIVE=0
@@ -75,6 +77,7 @@ do
 		'-v'|'--variant') shift; VARIANT=$1;;
 		'-b'|'--branch') shift; GITBRANCH=$1;;
 		'-o'|'--owner') shift; GITOWNER=$1;;
+		'-r'|'--repo') shift; GITREPO=$1;;
 		'-e'|'--edition') shift; EDITION=$1;;
 		'-s'|'--suffix') shift; SUFFIX=$1;;
 		'--skip-archive') SKIP_ARCHIVE=1;;
@@ -184,6 +187,7 @@ case $HW_MODEL in
 	106) iname='OrangePi5B' HW_ARCH=3 PTTYPE='gpt' partition_start=16 root_size='rockchip64';;
 	107) iname='OrangePi4Pro' HW_ARCH=3 partition_start=32 root_size='sun60iw2';;
 	108) iname='OrangePiZero3W' HW_ARCH=3 partition_start=32 root_size='sun60iw2';;
+	109) iname='TVBoxS90X' HW_ARCH=3 partition_start=4 root_size='meson64';;
 	*) Error_Exit "Invalid hardware model \"$HW_MODEL\" passed";;
 esac
 [[ $root_size == 'rk35xx' && $RK35XX_MAINLINE == 1 ]] && root_size='rockchip64'
@@ -246,7 +250,7 @@ esac
 [[ $ROOT_SIZE ]] && { disable_error=1 G_CHECK_VALIDINT "$ROOT_SIZE" 1 && root_size=$ROOT_SIZE || Error_Exit "Invalid initial root size \"$ROOT_SIZE\" passed"; }
 
 # Validate target Git owner and branch
-G_CHECK_URL "https://github.com/$GITOWNER/DietPi/tree/$GITBRANCH" || Error_Exit "Failed to access Git branch \"$GITBRANCH\""
+G_CHECK_URL "https://github.com/$GITOWNER/$GITREPO/tree/$GITBRANCH" || Error_Exit "Failed to access Git branch \"$GITBRANCH\""
 
 # Generate image name and define CLONING_TOOL for dietpi-installer
 OUTPUT_IMG_NAME="DietPi_$iname-$iarch-${distro^}"
@@ -267,6 +271,8 @@ fi
 ##########################################
 # EFI or FAT boot partition
 (( $efi_size )) || [[ $boot_size -gt 0 && $boot_fstype == 'fat'* ]] && afspackages+=('dosfstools')
+# TVBox S90X: The dietpi-tvbox post-processor needs dosfstools to create the FAT boot and setup partitions
+[[ $HW_MODEL == 109 ]] && afspackages+=('dosfstools')
 
 # Emulation support in case of incompatible architecture
 emulation=0 apackages+=("${afspackages[@]}")
@@ -513,9 +519,9 @@ cat << _EOF_ > rootfs/dietpi-build.sh || exit 1
 #!/bin/dash -e
 {
 infocmp "\$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsupported TERM=\"\$TERM\", switching to TERM=\"dumb\""; export TERM=dumb; }
-export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO=0 WIFI_REQUIRED=1 GUEST_NETWORK_REQUIRED=$GUEST_NETWORK_REQUIRED DISTRO_TARGET=$DISTRO TEST_KERNEL=$TEST_KERNEL TEST_UBOOT=$TEST_UBOOT RK35XX_MAINLINE=$RK35XX_MAINLINE TMPDIR='/tmp'
-echo '[ INFO ] Running DietPi-Installer for $G_GITOWNER/$G_GITBRANCH'
-bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-installer' || echo false)" || { echo '[FAILED] DietPi-Installer failed, shutting down ...'; journalctl -n 25; df -h; free -h; exit 1; }
+export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' GITREPO='$GITREPO' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO=0 WIFI_REQUIRED=1 GUEST_NETWORK_REQUIRED=$GUEST_NETWORK_REQUIRED DISTRO_TARGET=$DISTRO TEST_KERNEL=$TEST_KERNEL TEST_UBOOT=$TEST_UBOOT RK35XX_MAINLINE=$RK35XX_MAINLINE TMPDIR='/tmp'
+echo '[ INFO ] Running DietPi-Installer for $G_GITOWNER/$GITREPO/$G_GITBRANCH'
+bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/$GITREPO/$G_GITBRANCH/.build/images/dietpi-installer' || echo false)" || { echo '[FAILED] DietPi-Installer failed, shutting down ...'; journalctl -n 25; df -h; free -h; exit 1; }
 rm -v /etc/systemd/system/multi-user.target.wants/dietpi-build.service /etc/systemd/system/dietpi-build.service /dietpi-build.sh /etc/systemd/system/console-getty.service
 > /success
 exit 0
@@ -568,7 +574,10 @@ G_EXEC losetup -d "$FP_LOOP"
 [[ $VARIANT =~ ^(|iso|all)$ ]] || SKIP_ARCHIVE=1 UPLOAD_SCRIPT=''
 # Do not add trailing FAT partition for VM, container and ISO installer images, and if there is a boot FAT partition already
 [[ $HW_MODEL =~ ^(20|75)$ || $VARIANT == 'iso' || ( $boot_size -gt 0 && $boot_fstype == 'vfat' ) ]] && ADD_FAT_PART=0
-export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off' SKIP_FIRSTBOOT_RESIZE=1
+# TVBox S90X: The imager shall only create the raw image. Conversion to the TVBox layout plus archiving, signing and upload are done by DietPi-TVBox afterwards.
+TVBOX_SIGN=$SIGN_PASS TVBOX_UPLOAD=$UPLOAD_SCRIPT
+(( $HW_MODEL == 109 )) && SKIP_ARCHIVE=1 SIGN_PASS='' UPLOAD_SCRIPT=''
+export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME GITREPO MOUNT_IT='Off' SKIP_FIRSTBOOT_RESIZE=1
 IMAGER_ARGS=("$OUTPUT_IMG_NAME.img")
 (( $SKIP_ARCHIVE )) && IMAGER_ARGS+=('--skip-archive')
 [[ $UPLOAD_SCRIPT ]] && IMAGER_ARGS+=('--upload-script' "$UPLOAD_SCRIPT")
@@ -582,8 +591,8 @@ then
 	[[ $VARIANT == 'iso' ]] && ext='iso' || ext='img'
 	# Raspberry Pi Imager info
 	[[ $HW_MODEL == [1-5] && $DISTRO == 8 && $OUTPUT_IMG_NAME == *'-Trixie' ]] && IMAGER_ARGS+=('--raw-hash-size')
-	G_DIETPI-NOTIFY 2 "Running DietPi-Imager from $G_GITOWNER/$G_GITBRANCH to generate $OUTPUT_IMG_NAME.$ext"
-	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || { journalctl -n 25; exit 1; }
+	G_DIETPI-NOTIFY 2 "Running DietPi-Imager from $G_GITOWNER/$GITREPO/$G_GITBRANCH to generate $OUTPUT_IMG_NAME.$ext"
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/$GITREPO/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || { journalctl -n 25; exit 1; }
 	# Raspberry Pi Imager info: add for standard image only
 	[[ ${IMAGER_ARGS[-1]} == '--raw-hash-size' ]] && unset 'IMAGER_ARGS[-1]'
 fi
@@ -592,8 +601,8 @@ fi
 if [[ $HW_ARCH == 10 && $VARIANT == 'all' ]]
 then
 	CLONING_TOOL='Clonezilla' OUTPUT_IMG_NAME="${OUTPUT_IMG_NAME}_Installer"
-	G_DIETPI-NOTIFY 2 "Running DietPi-Imager from $G_GITOWNER/$G_GITBRANCH to generate $OUTPUT_IMG_NAME.iso"
-	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || { journalctl -n 25; exit 1; }
+	G_DIETPI-NOTIFY 2 "Running DietPi-Imager from $G_GITOWNER/$GITREPO/$G_GITBRANCH to generate $OUTPUT_IMG_NAME.iso"
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/$GITREPO/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || { journalctl -n 25; exit 1; }
 	CLONING_TOOL='dd' OUTPUT_IMG_NAME=${OUTPUT_IMG_NAME%_Installer}
 fi
 
@@ -636,8 +645,8 @@ then
 	G_EXEC rmdir rootfs
 	G_EXEC losetup -d "$FP_LOOP"
 
-	G_DIETPI-NOTIFY 2 "Running DietPi-Imager from $G_GITOWNER/$G_GITBRANCH to generate $OUTPUT_IMG_NAME.img"
-	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || { journalctl -n 25; exit 1; }
+	G_DIETPI-NOTIFY 2 "Running DietPi-Imager from $G_GITOWNER/$GITREPO/$G_GITBRANCH to generate $OUTPUT_IMG_NAME.img"
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/$GITREPO/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || { journalctl -n 25; exit 1; }
 fi
 
 ####### AlloGUI ##########################
@@ -785,8 +794,17 @@ _EOF_
 	G_EXEC rmdir rootfs
 	G_EXEC losetup -d "$FP_LOOP"
 
-	G_DIETPI-NOTIFY 2 "Running DietPi-Imager from $G_GITOWNER/$G_GITBRANCH to generate $OUTPUT_IMG_NAME.img"
-	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || { journalctl -n 25; exit 1; }
+	G_DIETPI-NOTIFY 2 "Running DietPi-Imager from $G_GITOWNER/$GITREPO/$G_GITBRANCH to generate $OUTPUT_IMG_NAME.img"
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/$GITREPO/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || { journalctl -n 25; exit 1; }
+fi
+
+####### TVBox S90X ########################
+# - Convert DietPi image for the TVBox S90X via dietpi-tvbox
+if (( $HW_MODEL == 109 )) && [[ ! $EDITION || $EDITION == 'all' ]]
+then
+	SIGN_PASS=$TVBOX_SIGN UPLOAD_SCRIPT=$TVBOX_UPLOAD
+	G_DIETPI-NOTIFY 2 "Running DietPi-TVBox from $G_GITOWNER/$GITREPO/$GITBRANCH to generate $OUTPUT_IMG_NAME.img.xz"
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/$GITREPO/$GITBRANCH/.build/images/dietpi-tvbox")" 'DietPi-TVBox' "$OUTPUT_IMG_NAME.img" || { journalctl -n 25; exit 1; }
 fi
 
 [[ $HW_MODEL == 20 && ! $VARIANT =~ ^(|iso)$ ]] || exit 0
