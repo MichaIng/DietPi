@@ -111,7 +111,7 @@ Available commands:
 	{
 		# Check network connectivity and sync system clock
 		G_CHECK_NET
-		/boot/dietpi/func/run_ntpd
+		/boot/dietpi/func/dietpi-timesync
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -847,6 +847,15 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=4
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#filebrowser'
 		#------------------
+		software_id=219
+		aSOFTWARE_NAME[$software_id]='HomeBox'
+		aSOFTWARE_DESC[$software_id]='self-hosted home inventory and organisation system'
+		aSOFTWARE_CATX[$software_id]=4
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#homebox'
+		# - 32-bit ARM: https://github.com/sysadminsmedia/homebox/releases
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=0
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,2]=0
+		#------------------
 		software_id=202
 		aSOFTWARE_NAME[$software_id]='Rclone'
 		aSOFTWARE_DESC[$software_id]='Utility to sync your files to cloud storages'
@@ -1250,7 +1259,7 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=10
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/hardware_projects/#wiringpi'
 		# RPi, Odroids and Orange Pi only
-		(( $G_HW_MODEL > 19 )) && [[ ! $G_HW_MODEL =~ ^(80|82|83|87|88|89|91|93|94|95|96|97|98)$ ]] && aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$G_HW_MODEL]=0
+		(( $G_HW_MODEL > 19 )) && [[ ! $G_HW_MODEL =~ ^(80|82|83|87|88|89|91|93|94|95|96|97|98|99|105|106|107|108)$ ]] && aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$G_HW_MODEL]=0
 		#------------------
 		software_id=71
 		aSOFTWARE_NAME[$software_id]='WebIOPi'
@@ -6381,7 +6390,9 @@ See the manual below for instructions on how to do this.
 			# Odroids
 			elif (( $G_HW_MODEL < 20 ))
 			then
-				aDEPS+=('automake' 'libtool' 'pkg-config' 'libgpiod-dev' 'libgpiod2') # Add libgpiod2 explicitly so purging *-dev packages, e.g. via dietpi-cleaner, does not break "gpio"
+				aDEPS+=('automake' 'libtool' 'pkg-config' 'libgpiod-dev')
+				# Add libgpiod runtime library explicitly, so purging *-dev packages, e.g. via dietpi-cleaner, does not break WiringPi
+				(( $G_DISTRO < 8 )) && aDEPS+=('libgpiod2') || aDEPS+=('libgpiod3')
 				Download_Install 'https://github.com/hardkernel/wiringPi/archive/master.tar.gz'
 				G_EXEC mv {w,W}iringPi-master
 				G_EXEC cd WiringPi-master
@@ -6408,6 +6419,11 @@ See the manual below for instructions on how to do this.
 					96) board='orangepi4a';;
 					97) board='orangepirv';;
 					98) board='orangepirv2';;
+					99) board='orangepi3';;
+					105) board='orangepi4-lts';;
+					106) board='orangepi5b';;
+					107) board='orangepi4pro';;
+					108) board='orangepizero3w';;
 					*) G_DIETPI-NOTIFY 1 "Invalid hardware model \"$G_HW_MODEL_NAME\" (ID \"$G_HW_MODEL\"). Aborting ..."; exit 1;;
 				esac
 				>> /etc/orangepi-release
@@ -11568,6 +11584,89 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
+		if To_Install 219 homebox # HomeBox
+		then
+			case $G_HW_ARCH in
+				3) local arch='arm64';;
+				11) local arch='riscv64';;
+				*) local arch='x86_64';;
+			esac
+
+			local fallback_url="https://github.com/sysadminsmedia/homebox/releases/download/v0.26.2/homebox_Linux_$arch.tar.gz"
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/sysadminsmedia/homebox/releases/latest' | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/homebox_Linux_$arch\.tar\.gz(?=\")")" homebox/
+
+			# Reinstall
+			[[ -d '/opt/homebox' ]] && G_EXEC rm -R /opt/homebox
+
+			# Install
+			G_EXEC mv homebox /opt/
+
+			# Data dir
+			G_EXEC mkdir -p /mnt/dietpi_userdata/homebox/data
+
+			# User
+			Create_User -d /mnt/dietpi_userdata/homebox homebox
+
+			# Permissions
+			G_EXEC chown -R 'homebox:homebox' /mnt/dietpi_userdata/homebox /opt/homebox
+
+			# Config: Generate persistent config on first install only
+			if [[ ! -f '/mnt/dietpi_userdata/homebox/homebox.env' ]]
+			then
+				G_EXEC install -o homebox -m 0600 /dev/null /mnt/dietpi_userdata/homebox/homebox.env
+				{
+					echo '# HomeBox configuration'
+					echo '# For all available options see: https://homebox.software/en/quick-start/configure/'
+				} > /mnt/dietpi_userdata/homebox/homebox.env
+				GCI_PASSWORD=1 G_CONFIG_INJECT 'HBOX_AUTH_API_KEY_PEPPER=' "HBOX_AUTH_API_KEY_PEPPER=$(openssl rand -base64 48)" /mnt/dietpi_userdata/homebox/homebox.env
+				G_CONFIG_INJECT 'HBOX_MODE=' 'HBOX_MODE=production' /mnt/dietpi_userdata/homebox/homebox.env
+				G_CONFIG_INJECT 'HBOX_WEB_HOST=' 'HBOX_WEB_HOST=0.0.0.0' /mnt/dietpi_userdata/homebox/homebox.env
+				G_CONFIG_INJECT 'HBOX_WEB_PORT=' 'HBOX_WEB_PORT=7745' /mnt/dietpi_userdata/homebox/homebox.env
+				G_CONFIG_INJECT 'HBOX_LOG_LEVEL=' 'HBOX_LOG_LEVEL=info' /mnt/dietpi_userdata/homebox/homebox.env
+				G_CONFIG_INJECT 'HBOX_LOG_FORMAT=' 'HBOX_LOG_FORMAT=text' /mnt/dietpi_userdata/homebox/homebox.env
+				G_CONFIG_INJECT 'HBOX_OPTIONS_ALLOW_ANALYTICS=' 'HBOX_OPTIONS_ALLOW_ANALYTICS=false' /mnt/dietpi_userdata/homebox/homebox.env
+				G_CONFIG_INJECT 'HBOX_DATABASE_SQLITE_PATH=' 'HBOX_DATABASE_SQLITE_PATH=/mnt/dietpi_userdata/homebox/homebox.db?_pragma=busy_timeout=2000&_pragma=journal_mode=WAL&_fk=1&_time_format=sqlite' /mnt/dietpi_userdata/homebox/homebox.env
+				G_CONFIG_INJECT 'HBOX_STORAGE_CONN_STRING=' 'HBOX_STORAGE_CONN_STRING=file:///mnt/dietpi_userdata/homebox?no_tmp_dir=true' /mnt/dietpi_userdata/homebox/homebox.env
+				G_CONFIG_INJECT 'HBOX_STORAGE_PREFIX_PATH=' 'HBOX_STORAGE_PREFIX_PATH=data' /mnt/dietpi_userdata/homebox/homebox.env
+			fi
+
+			# Service
+			cat << '_EOF_' > /etc/systemd/system/homebox.service || exit 1
+[Unit]
+Description=HomeBox (DietPi)
+Documentation=https://homebox.software/
+Wants=network-online.target
+After=network-online.target remote-fs.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+User=homebox
+WorkingDirectory=/mnt/dietpi_userdata/homebox
+# Workaround for failing systemd.automount: https://dietpi.com/forum/t/17463/22
+EnvironmentFile=-/mnt/dietpi_userdata/homebox/homebox.env
+ExecStartPre=/bin/test -e /mnt/dietpi_userdata/homebox/homebox.env
+ExecStart=/opt/homebox/homebox
+Restart=on-failure
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=1
+PrivateUsers=1
+PrivateTmp=1
+PrivateDevices=1
+ProtectKernelTunables=1
+ProtectControlGroups=1
+ProtectKernelModules=1
+ProtectKernelLogs=1
+ProtectClock=1
+ReadWritePaths=-/mnt/dietpi_userdata/homebox
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+		fi
+
 		if To_Install 199 spotifyd # Spotifyd
 		then
 			# Obtain supported version, variant and related dependencies. It became very complicated: https://github.com/MichaIng/DietPi/issues/6419
@@ -14738,6 +14837,13 @@ _EOF_
 			Remove_Service filebrowser 1
 			[[ -d '/opt/filebrowser' ]] && G_EXEC rm -R /opt/filebrowser
 			[[ -d '/mnt/dietpi_userdata/filebrowser' ]] && G_EXEC rm -R /mnt/dietpi_userdata/filebrowser
+		fi
+
+		if To_Uninstall 219 # HomeBox
+		then
+			Remove_Service homebox 1 1
+			G_EXEC rm -Rf /opt/homebox
+			G_EXEC rm -Rf /mnt/dietpi_userdata/homebox
 		fi
 
 		if To_Uninstall 199 # Spotifyd
