@@ -317,6 +317,7 @@ Process_Software()
 			216) aSERVICES[i]='immich-ml' aTCP[i]='3003';;
 			217) aCOMMANDS[i]='uv --version';;
 			218) aSERVICES[i]='prometheus' aTCP[i]='9090' aCOMMANDS[i]='curl -sSf '\''http://127.0.0.1:9090/api/v1/query?query=up'\'' | grep '\''"status":"success"'\';;
+			219) aSERVICES[i]='homebox' aTCP[i]='7745' aCOMMANDS[i]='curl -sSf '\''http://127.0.0.1:7745/api/v1/status'\'' | grep '\''"health":true'\';;
 			*) :;;
 		esac
 		aINSTALL[i]=1
@@ -367,7 +368,15 @@ done
 ##########################################
 apackages=('xz-utils' 'parted' 'fdisk' 'systemd-container')
 
-(( $emulation )) && apackages+=('qemu-user-static')
+if (( $emulation ))
+then
+	if (( $G_DISTRO > 7 ))
+	then
+		apackages+=('qemu-user-binfmt')
+	else
+		apackages+=('qemu-user-static')
+	fi
+fi
 
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
