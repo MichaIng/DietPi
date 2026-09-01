@@ -11516,53 +11516,45 @@ _EOF_
 
 		if To_Install 220 scrypted # Scrypted
 		then
-			# apt dependencies
+			# Install build dependencies
 			G_AGI make g++
 
-			# install locations
+			# Define directories
 			local scrypted_install='/opt/scrypted'
 			local scrypted_data='/mnt/dietpi_userdata/scrypted'
 
-			# purge old install, create install folder
-			[[ -d "$scrypted_install" ]] && G_EXEC rm -Rf "$scrypted_install"
-			G_EXEC mkdir -p "$scrypted_install"
-
-			# create user and home folder
+			# Create user and data dir
 			Create_User -G video,render -d "$scrypted_data" scrypted
 			G_EXEC mkdir -p "$scrypted_data"
 			G_EXEC chown -R 'scrypted:scrypted' "$scrypted_data"
 
-			# create tmp folders to run npm scripts as 'scrypted' user
-			local tmp_install=$(setpriv --re{u,g}id='scrypted' --clear-groups --reset-env -- mktemp -d) # safely run scripts
-			local cache=$(setpriv --re{u,g}id='scrypted' --clear-groups --reset-env -- mktemp -d) # dont save cache
+			# Create temporary cache and install dir, to not leave cruft behind and preserve disk install dir on reinstalls until build succeeded
+			G_EXEC mkdir cache scrypted
 
-			# install scrypted into tmp folder as 'scrypted' user
-			# we set bin paths so pkg scripts dont install them again
+			# Install Scrypted as scrypted user for safer script execution
+			G_EXEC chown 'scrypted' cache scrypted
+
+			# Set Python and FFmpeg path env vars, consumed by @scrypted/server and @scrypted/ffmpeg-static postinstall scripts, to avoid embedded binary installs
 			# 'node-addon-api' is a workaround for https://github.com/MichaIng/DietPi/pull/8277#issuecomment-5471151994
-			G_EXEC cd "$tmp_install"
-			G_EXEC_OUTPUT=1 G_EXEC setpriv --re{u,g}id='scrypted' --clear-groups --reset-env -- \
-				env -- SCRYPTED_PYTHON_PATH=/usr/bin/python3 SCRYPTED_FFMPEG_PATH=/usr/bin/ffmpeg \
-				npm i --cache="$cache" --omit=dev --no-save --no-audit --dangerously-allow-all-scripts '@scrypted/server' 'node-addon-api'
-			G_EXEC cd "$G_WORKING_DIR"
+			G_EXEC_OUTPUT=1 G_EXEC setpriv --re{u,g}id='scrypted' --clear-groups --reset-env --\
+				env -- SCRYPTED_PYTHON_PATH='/usr/bin/python3' SCRYPTED_FFMPEG_PATH='/usr/bin/ffmpeg'\
+				npm i --prefix='scrypted' --cache='cache' --omit='dev' --no-save --no-audit --dangerously-allow-all-scripts 'node-addon-api@latest' '@scrypted/server@latest'
 
-			# take ownership and move to install folder
-			G_EXEC chown -R 'root:root' "$tmp_install"
-			G_EXEC mv "$tmp_install/*" "$scrypted_install/."
+			# Cleanup
+			G_EXEC rm -R cache /tmp/node-compile-cache
 
-			# remove tmp folders
-			G_EXEC rm -R "$tmp_install"
-			G_EXEC rm -R "$cache"
+			# Hand over to root and move to disk
+			G_EXEC chown -R '0:0' scrypted
+			[[ -d $scrypted_install ]] && G_EXEC rm -R "$scrypted_install"
+			G_EXEC mv scrypted "$scrypted_install"
 
-			# create env file if it doesn't exist
-			if [[ ! -f "$scrypted_data/scrypted.env" ]]; then
-				cat << _EOF_ > "$scrypted_data/scrypted.env" || exit 1
+			# Create env file if it doesn't exist yet
+			[[ -f $scrypted_data/scrypted.env ]] || cat << _EOF_ > "$scrypted_data/scrypted.env" || exit 1
 SCRYPTED_SECURE_PORT=10443
 #SCRYPTED_HTTPS_OPTIONS_FILE=$scrypted_data/https-config.json # https://nodejs.org/api/tls.html#tlscreatesecurecontextoptions
 #SCRYPTED_NVR_VOLUME=/mnt/scrypted-nvr # recommended to use an external drive
 _EOF_
-			fi
-
-			# create systemd service file
+			# Create systemd service
 			cat << _EOF_ > /etc/systemd/system/scrypted.service || exit 1
 [Unit]
 Description=Scrypted (DietPi)
