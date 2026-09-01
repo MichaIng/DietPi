@@ -1577,6 +1577,15 @@ Available commands:
 		# - RISC-V: https://repo.homebridge.io/dists/stable/Release
 		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,11]=0
 		#------------------
+		software_id=220
+		aSOFTWARE_NAME[$software_id]='Scrypted'
+		aSOFTWARE_DESC[$software_id]='High performance video integration and automation platform'
+		aSOFTWARE_CATX[$software_id]=17
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/home_automation/#scrypted'
+		aSOFTWARE_DEPS[$software_id]='7 9'
+		# - RISC-V: https://github.com/Level/classic-level/issues/93
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,11]=0
+		#------------------
 
 		# Printing
 		#--------------------------------------------------------------------------------
@@ -11507,6 +11516,89 @@ _EOF_
 			G_EXEC usermod -d /var/lib/homebridge homebridge
 		fi
 
+		if To_Install 220 scrypted # Scrypted
+		then
+			# Install dependencies
+			G_AGI python3 make g++
+
+			# Define directories
+			local scrypted_install='/opt/scrypted'
+			local scrypted_data='/mnt/dietpi_userdata/scrypted'
+
+			# Create user and data dir
+			Create_User -G video,render -d "$scrypted_data" scrypted
+			G_EXEC mkdir -p "$scrypted_data"
+			G_EXEC chown -R 'scrypted:scrypted' "$scrypted_data"
+
+			# Create temporary cache and install dir, to not leave cruft behind and preserve disk install dir on reinstalls until build succeeded
+			G_EXEC mkdir cache scrypted
+
+			# Install Scrypted as scrypted user for safer script execution
+			G_EXEC chown 'scrypted' cache scrypted
+
+			# Set Python and FFmpeg path env vars, consumed by @scrypted/server and @scrypted/ffmpeg-static postinstall scripts, to avoid embedded binary installs
+			# 'node-addon-api' is a workaround for https://github.com/MichaIng/DietPi/pull/8277#issuecomment-5471151994
+			G_EXEC_OUTPUT=1 G_EXEC setpriv --re{u,g}id='scrypted' --clear-groups --reset-env --\
+				env -- SCRYPTED_PYTHON_PATH='/usr/bin/python3' SCRYPTED_FFMPEG_PATH='/usr/bin/ffmpeg'\
+				npm i --prefix='scrypted' --cache='cache' --omit='dev' --no-save --no-audit --dangerously-allow-all-scripts 'node-addon-api@latest' '@scrypted/server@latest'
+
+			# Cleanup
+			G_EXEC rm -R cache /tmp/node-compile-cache
+
+			# Hand over to root and move to disk
+			G_EXEC chown -R '0:0' scrypted
+			[[ -d $scrypted_install ]] && G_EXEC rm -R "$scrypted_install"
+			G_EXEC mv scrypted "$scrypted_install"
+
+			# Create env file if it doesn't exist yet
+			[[ -f $scrypted_data/scrypted.env ]] || cat << _EOF_ > "$scrypted_data/scrypted.env" || exit 1
+# HTTPS port
+SCRYPTED_SECURE_PORT=10443
+
+# Optionally adjust HTTPS settings: https://nodejs.org/api/tls.html#tlscreatesecurecontextoptions
+#SCRYPTED_HTTPS_OPTIONS_FILE='$scrypted_data/https-config.json'
+
+# NVR storage path, recommended on an external drive: https://docs.scrypted.app/scrypted-nvr/recording-storage.html
+#SCRYPTED_NVR_VOLUME='/mnt/scrypted-nvr'
+_EOF_
+			# Create systemd service
+			cat << _EOF_ > /etc/systemd/system/scrypted.service || exit 1
+[Unit]
+Description=Scrypted (DietPi)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+SyslogIdentifier=Scrypted
+User=scrypted
+Environment=SCRYPTED_PYTHON_PATH=/usr/bin/python3
+Environment=SCRYPTED_FFMPEG_PATH=/usr/bin/ffmpeg
+Environment=SCRYPTED_INSTALL_ENVIRONMENT=local
+Environment=SCRYPTED_VOLUME=$scrypted_data
+Environment=SCRYPTED_INSECURE_PORT=11080
+Environment=SCRYPTED_DEBUG_PORT=10081
+# Workaround for failing systemd.automount: https://dietpi.com/forum/t/17463/22
+EnvironmentFile=-$scrypted_data/scrypted.env
+ExecStartPre=/bin/test -e $scrypted_data/scrypted.env
+ExecStart=/usr/local/bin/node $scrypted_install/node_modules/@scrypted/server/bin/scrypted-serve
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=1
+PrivateTmp=1
+ProtectKernelTunables=1
+ProtectKernelModules=1
+ProtectControlGroups=1
+ProtectKernelLogs=1
+ProtectClock=1
+NoNewPrivileges=1
+ReadWritePaths=-/mnt -/media
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+		fi
+
 		if To_Install 205 # Homer
 		then
 			# Download the latest release
@@ -14830,6 +14922,13 @@ _EOF_
 
 			[[ -f '/etc/apt/sources.list.d/dietpi-homebridge.list' ]] && G_EXEC rm /etc/apt/sources.list.d/dietpi-homebridge.list
 			[[ -f '/etc/apt/trusted.gpg.d/dietpi-homebridge.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/dietpi-homebridge.gpg
+		fi
+
+		if To_Uninstall 220 # Scrypted
+		then
+			Remove_Service scrypted 1 1
+			G_EXEC rm -Rf /opt/scrypted
+			G_EXEC rm -Rf /mnt/dietpi_userdata/scrypted
 		fi
 
 		if To_Uninstall 198 # File Browser

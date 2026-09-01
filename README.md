@@ -336,6 +336,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Immich Machine Learning](https://github.com/immich-app/immich/tree/main/machine-learning)
 - [uv](https://github.com/astral-sh/uv)
 - [RustDesk Client](https://github.com/rustdesk/rustdesk)
+- [Scrypted](https://github.com/koush/scrypted)
 
 ---
 
