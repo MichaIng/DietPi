@@ -1562,17 +1562,6 @@ _EOF_
 		G_EXEC eval 'echo -e '\''blacklist bcm2835_codec\nblacklist rpi_hevc_dec'\'' > /etc/modprobe.d/dietpi-disable_rpi_codec.conf'
 		G_EXEC sed --follow-symlinks -i '/^blacklist bcm2835_codec$/d' /etc/modprobe.d/dietpi-disable_rpi_camera.conf
 	fi
-
-	# Software updates, migrations and patches
-	if [[ -f '/boot/dietpi/.installed' ]]
-	then
-		# Chromium: https://dietpi.com/forum/t/22518
-		if [[ -f '/etc/chromium.d/dietpi' ]] && grep -q ' --use-gl=egl"' /etc/chromium.d/dietpi
-		then
-			G_DIETPI-NOTIFY 2 'Fixing Chromium hardware acceleration'
-			G_EXEC sed --follow-symlinks -i 's/ --use-gl=egl"/"/' /etc/chromium.d/dietpi
-		fi
-	fi
 }
 
 Patch_9_15()
@@ -2580,7 +2569,46 @@ Patch_10_6()
 			G_DIETPI-NOTIFY 2 'Applying stricter mode to vaultwarden.env, as it can be used to provide secret hashes like ADMIN_TOKEN. Use the "vaultwarden" group if any other user requires read access.'
 			G_EXEC chmod 'o-r' /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
 		fi
+	fi
+}
 
+Patch_10_7()
+{
+	# Failsafe: Mark "login" as manually installed, as it is not "essential" anymore since Trixie, only "required", same as "mount" since Forky. Those are never autoremoved, but nothing prevents them from being manually removed either. Just mark as "manual" to make clear once that it is needed.
+	G_AGI login
+
+	if [[ -f '/etc/chromium.d/dietpi' ]]
+	then
+		G_DIETPI-NOTIFY 2 'Removing obsolete Chromium flags, and apply "--no-sandbox" for calls as root user only'
+		# --no-sandbox allows root to run Chromium, and --test-type mutes a warning that --no-sandbox was used.
+		# shellcheck disable=SC2016
+		G_EXEC eval 'echo '\''[ "$(id -u)" -eq 0 ] && export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --test-type"'\'' > /etc/chromium.d/dietpi'
+	fi
+
+	if [[ -f '/boot/firmware/config.txt' ]]
+	then
+		G_DIETPI-NOTIFY 2 'Moving all dtoverlay= lines to the end of config.txt, to assure dtparam= lines are effective.'
+		G_DIETPI-NOTIFY 2 'For reference: https://forums.raspberrypi.com/viewtopic.php?p=2385679#p2385532'
+		# shellcheck disable=SC2016
+		G_EXEC eval 'mawk '\''/^[[:blank:]#]*dtoverlay=/ { a = a $0 ORS; next } { print } END { printf "%s", a }'\'' /boot/firmware/config.txt > config.txt.new'
+		G_EXEC mv config.txt.new /boot/firmware/config.txt
+	fi
+
+	G_DIETPI-NOTIFY 2 'Removing obsolete dietpi.txt entry'
+	G_EXEC sed --follow-symlinks -i '/^[[:blank:]#]*AUTO_SETUP_NET_STATIC_MASK=/d' /boot/dietpi.txt
+
+	if (( $G_HW_MODEL < 10 ))
+	then
+		G_DIETPI-NOTIFY 2 'Removing possible stale first boot config files from /boot/firmware, which were imported to /boot already'
+		for f in 'dietpi.txt' 'dietpi-wifi.txt' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh' 'unattended_pivpn.conf' 'dietpi-k3s.yaml'
+		do
+			[[ -f /boot/firmware/$f ]] && G_EXEC rm "/boot/firmware/$f"
+		done
+	fi
+
+	# Software updates, migrations and patches
+	if [[ -f '/boot/dietpi/.installed' ]]
+	then
 		# Pi-hole v6 migration
 		# - /etc/pihole/pihole.toml indicates that Pi-hole has been upgraded to v6 already.
 		# - The /var/www/pihole symlink indicates that an instance installed via dietpi-software has not been migrated yet.

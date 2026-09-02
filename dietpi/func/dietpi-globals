@@ -54,8 +54,8 @@
 	[[ -f '/boot/dietpi/.version' ]] && . /boot/dietpi/.version
 	# - Assign defaults/code version as fallback
 	[[ $G_DIETPI_VERSION_CORE ]] || G_DIETPI_VERSION_CORE=10
-	[[ $G_DIETPI_VERSION_SUB ]] || G_DIETPI_VERSION_SUB=6
-	[[ $G_DIETPI_VERSION_RC ]] || G_DIETPI_VERSION_RC=2
+	[[ $G_DIETPI_VERSION_SUB ]] || G_DIETPI_VERSION_SUB=7
+	[[ $G_DIETPI_VERSION_RC ]] || G_DIETPI_VERSION_RC=1
 	[[ $G_GITBRANCH ]] || G_GITBRANCH='master'
 	[[ $G_GITOWNER ]] || G_GITOWNER='MichaIng'
 	# - Save current version and Git branch
@@ -1393,15 +1393,34 @@ Press any key to continue...'
 		# A command is required
 		[[ $command ]] || { G_DIETPI-NOTIFY 1 "No command was given."; return 1; }
 
+		# Match an interface name against the requested type: "wlan" = has a wireless subdir, "eth" = has a device subdir but no wireless one, else fall back to prefix match
+		Type_Match()
+		{
+			[[ $type ]] || return 0
+			if [[ $type == 'wlan' ]]
+			then
+				[[ -d /sys/class/net/$1/wireless ]]
+
+			elif [[ $type == 'eth' ]]
+			then
+				local type
+				read -r type < "/sys/class/net/$1/type" 2> /dev/null
+				[[ $type == 1 && ! ( -d /sys/class/net/$1/bridge || -d /sys/class/net/$1/bonding || -e /sys/class/net/$1/tun_flags ) ]]
+			else
+				[[ $1 == $type* ]]
+			fi
+		}
+		trap 'unset -f Type_Match' RETURN
+
 		# Early return if given interface does not exists or does not match given type
 		if [[ $iface ]]
 		then
-			if [[ ! -e /sys/class/net/$iface ]]
+			if [[ ! -d /sys/class/net/$iface ]]
 			then
 				(( $quite )) || G_DIETPI-NOTIFY 1 "The given interface \"$iface\" does not exist."
 				return 1
 
-			elif [[ $type && $iface != $type* ]]
+			elif ! Type_Match "$iface"
 			then
 				(( $quite )) || G_DIETPI-NOTIFY 1 "The given interface \"$iface\" is not of type \"$type\"."
 				return 1
@@ -1425,7 +1444,7 @@ Press any key to continue...'
 				if [[ $gateway ]]
 				then
 					# Check for interface type
-					if [[ $type && $if != $type* ]]
+					if ! Type_Match "$if"
 					then
 						(( $quite )) || G_DIETPI-NOTIFY 1 "The default gateway is not assigned to any interface of type \"$type\"."
 						return 1
@@ -1439,7 +1458,7 @@ Press any key to continue...'
 			fi
 
 			# Print interface/IP address if matching default gateway was found
-			if [[ $gateway && ( ! $type || $if == $type* ) ]]
+			if [[ $gateway ]] && Type_Match "$if"
 			then
 				iface=$if
 				# shellcheck disable=SC2086
@@ -1455,7 +1474,8 @@ Press any key to continue...'
 		then
 			while read -r if state mac details
 			do
-				[[ $if == 'eth'[0-9]* ]] || continue
+				if=${if%%@*} # Strip "@foo" link/peer suffix which "ip" prints e.g. for veth and VLAN interfaces
+				Type_Match "$if" || continue
 				[[ $state == 'UP' || $details == *'UP'* ]] && { aiface=(); break; }
 				aiface+=("$if")
 
@@ -1474,8 +1494,9 @@ Press any key to continue...'
 		# shellcheck disable=SC2086
 		while read -r if state ip
 		do
+			if=${if%%@*} # Strip "@foo" link/peer suffix which "ip" prints e.g. for veth and VLAN interfaces
 			[[ $if == 'lo' ]] && continue
-			[[ $type && $if != $type* ]] && continue
+			Type_Match "$if" || continue
 
 			# Cut off secondary IP addresses and CIDR mask
 			ip=${ip%%/*}
