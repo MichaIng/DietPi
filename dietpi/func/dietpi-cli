@@ -1,0 +1,295 @@
+#!/bin/bash
+
+{
+	#////////////////////////////////////
+	# DietPi CLI Configuration Script
+	#
+	#////////////////////////////////////
+	# Created by Tim Olson / timjolson@users.noreply.github.com
+	#
+	# Info:
+	# - Location: /boot/dietpi/func/dietpi-cli
+	# - Purpose: Provide a small interactive tool to preview and tune the
+	#   primary CLI colour slots used by `dietpi-banner` (accent, strong, weak,
+	#   alert, good, highlight, alt). This script loads current preferences from
+	#   /boot/dietpi/.dietpi-banner if present. Saving changes is optional, and
+    #   defaults can be restored at any time.
+	#
+	USAGE='
+- dietpi-cli    = CLI customisation menu
+- dietpi-cli 0  = Show default CLI preferences, prompt to save as the active settings
+'   #////////////////////////////////////
+
+	# Grab input
+	INPUT=$*
+
+	# Import DietPi-Globals --------------------------------------------------------------
+	. /boot/dietpi/func/dietpi-globals
+	# - Allow concurrent references (loading) but a single menu call only
+	if [[ ! $INPUT ]]
+	then
+		readonly G_PROGRAM_NAME='DietPi-CLI'
+		G_CHECK_ROOT_USER "$@" # Some operations may require root to store settings
+		G_INIT
+	else
+		# Apply safe locale in non-menu mode (where G_INIT does it)
+		export LC_ALL='C.UTF-8' LANG='C.UTF-8'
+	fi
+	# Import DietPi-Globals --------------------------------------------------------------
+
+	# Preferences file used by dietpi-banner. We source this file to reflect
+	# the current banner configuration when presenting examples to the user.
+	readonly FP_CLI='/boot/dietpi/.dietpi-banner'
+
+	# Minimal palette used by dietpi-banner
+	declare -g COLOUR_RESET='\e[0m'
+	declare -gA aCOLOUR_DEFAULTS=(
+		[accent]='\e[38;5;154m'  # Lines, bullets, separators (DietPi green)
+		[strong]='\e[1m'        # Bold / primary text
+		[weak]='\e[90m'         # Subdued / secondary text
+		[alert]='\e[91m'        # Alert / error
+		[good]='\e[1;32m'       # Success / positive
+		[highlight]='\e[1;33m'  # Warning / highlight
+		[alt]='\e[1;36m'        # Alternate / emphasis
+	)
+
+	# Predefined formats and defaults
+	declare -gA aFORMATS=()
+	declare -gA aCOLOUR=()
+	declare -ga FORMAT_ORDER=()
+    for key in "${!aCOLOUR_DEFAULTS[@]}"; do
+        aCOLOUR[$key]="${aCOLOUR_DEFAULTS[$key]}" # Make a transient copy of the settings for use in the menu. This is what the user edits.
+        aFORMATS[$key]="${aCOLOUR_DEFAULTS[$key]}" # Initialize the options array with default values
+        FORMAT_ORDER+=("$key") # Keep the order of the original keys for display in the menu
+    done
+
+    # Add additional predefined formats for selection in the menu
+    aFORMATS+=(
+		[PLAIN]=$'\e[0m'
+        [UNDERLINE]=$'\e[4m'
+		[DIM]=$'\e[2m'
+		[FG_BLACK]=$'\e[30m'
+		[FG_RED]=$'\e[31m'
+		[FG_GREEN]=$'\e[32m'
+		[FG_YELLOW]=$'\e[33m'
+		[FG_BLUE]=$'\e[34m'
+		[FG_MAGENTA]=$'\e[35m'
+		[FG_CYAN]=$'\e[36m'
+		[FG_WHITE]=$'\e[37m'
+		[BRIGHT_RED]=$'\e[91m'
+		[BRIGHT_GREEN]=$'\e[92m'
+		[BRIGHT_YELLOW]=$'\e[93m'
+		[BRIGHT_BLUE]=$'\e[94m'
+		[GOLD]=$'\e[38;5;220m'
+        [INVERSE]=$'\e[7m'
+		[BG_RED]=$'\e[41m'
+		[BG_GREEN]=$'\e[42m'
+		[BG_BLUE]=$'\e[44m'
+	)
+	# Append additional predefined formats to the display order
+	FORMAT_ORDER+=(PLAIN UNDERLINE DIM FG_BLACK FG_RED FG_GREEN FG_YELLOW FG_BLUE FG_MAGENTA FG_CYAN FG_WHITE BRIGHT_RED BRIGHT_GREEN BRIGHT_YELLOW GOLD INVERSE BG_RED BG_GREEN BG_BLUE)
+
+	# Convenience derived strings for examples and menus. Call Make_Patterns()
+	# after updating any aCOLOUR entries so the UI reflects changes.
+	Make_Patterns()
+	{
+		declare -g CLI_LINE=" ${aCOLOUR[accent]}─────────────────────────────────────────────────────$COLOUR_RESET"
+		declare -g CLI_BULLET=" ${aCOLOUR[accent]}-$COLOUR_RESET"
+		declare -g CLI_SEPARATOR="${aCOLOUR[accent]}:$COLOUR_RESET"
+	}
+
+	# Load defaults suitable for most displays. Intended to be a safe baseline.
+	Load_CLI_Defaults()
+	{
+        for key in "${!aCOLOUR_DEFAULTS[@]}"; do
+            aCOLOUR[$key]="${aCOLOUR_DEFAULTS[$key]}"
+        done
+
+		Make_Patterns
+	}
+
+	# Load current user preferences from $FP_CLI when available. Start with
+	# defaults so missing keys don't break the UI.
+	Load_CLI_Preferences()
+	{
+		Load_CLI_Defaults
+		# If the prefs file exists, source only whitelisted assignment lines so
+		# unexpected content cannot be executed.
+		if [[ -f $FP_CLI ]]
+		then
+			tmpfile=$(mktemp) || { G_DIETPI-NOTIFY 1 "Failed to create temporary file for dietpi-cli; aborting."; exit 1; }
+			# Keep only aCOLOUR assignments; we only want colour slots from prefs.
+			grep -E '^aCOLOUR\[' "$FP_CLI" > "$tmpfile" || true
+			# shellcheck disable=SC1090
+			. "$tmpfile"
+			rm -f "$tmpfile"
+		fi
+		Make_Patterns
+	}
+
+	# Print a sourceable preferences fragment to stdout. Convert actual ESC
+	# bytes into the two-character sequence \e so the file can be safely
+	# sourced into other shell scripts.
+	Save()
+	{
+		if [[ ! -f "$FP_CLI" ]]; then
+			if ! touch "$FP_CLI" 2>/dev/null; then
+				G_DIETPI-NOTIFY 1 "Failed to create preferences file: $FP_CLI" && return 1
+			fi
+		fi
+
+		# Persist each aCOLOUR entry using the in-place injector.
+		# Use a pattern that matches either quoted or unquoted keys inside []
+		for key in accent strong weak alert good highlight alt; do
+			val="${aCOLOUR[$key]}"
+			# Convert ESC byte to the two-character sequence \e. Use a
+			# pattern that embeds the literal ESC to avoid $'..' expansion
+			# edge-cases and ensure the resulting string contains a
+			# backslash followed by 'e'.
+			esc=$(printf '%s' "$val" | sed 's/'$'\x1b''/\\e/g')
+			esc=${esc//\'/\\\'}
+			setting="aCOLOUR[$key]='$esc'"
+			pattern="aCOLOUR\\[[^]]*${key}[^]]*\\]"
+			G_CONFIG_INJECT "$pattern" "$setting" "$FP_CLI"
+		done
+	}
+
+	# Show a compact example for each editable slot and a composed preview
+	# that mimics how dietpi-banner uses the colours.
+	Show_Example()
+	{
+        echo -e "\nSample CLI color settings:"
+		local keys=(accent strong weak alert good highlight alt)
+		local j=0
+		for i in "${keys[@]}"; do
+            ((j++))
+			echo -e "$j) $i) ${COLOUR_RESET}${aCOLOUR[$i]}This is an example${COLOUR_RESET}"
+		done
+
+		Make_Patterns
+		echo -e "\nDisplay types:"
+		echo -e "${aCOLOUR[strong]}HEADER${COLOUR_RESET}"
+		echo -e "BULLET $CLI_BULLET${COLOUR_RESET}"
+		echo -e "LINE $CLI_LINE${COLOUR_RESET}"
+		echo -e "SEPARATOR $CLI_SEPARATOR${COLOUR_RESET}"
+		echo -e "${COLOUR_RESET}PLAIN TEXT${COLOUR_RESET}"
+		echo -e "${aCOLOUR[highlight]}WARNING${COLOUR_RESET}"
+		echo -e "${aCOLOUR[alert]}ERROR${COLOUR_RESET}"
+        echo -e "${aCOLOUR[alt]}ALTERNATE${COLOUR_RESET}"
+	}
+
+	# Interactive menu: choose a colour slot and select the format to apply.
+	# Custom value accepts common backslash-escaped forms (e.g. \e[1;32m).
+	Menu_Main()
+	{
+		# Load current preferences before displaying the menu.
+		Load_CLI_Preferences
+
+		while true; do
+			Make_Patterns
+			Show_Example
+
+			echo -e "\nSelect a colour to change:"
+			echo "0) reset all to defaults"
+            echo "1) accent   2) strong     3) weak   4) alert"
+            echo "5) good     6) highlight  7) alt"
+            echo -e "\ns) Save configuration to preferences file ($FP_CLI)"
+            echo -e "q) Quit\n"
+			read -rp "Selection : " selected_item
+
+			case $selected_item in
+				0)
+					# Restore all slots to defaults
+                    Load_CLI_Defaults
+                    continue
+                ;;
+				1) key=accent ;;
+				2) key=strong ;;
+				3) key=weak ;;
+				4) key=alert ;;
+				5) key=good ;;
+				6) key=highlight ;;
+				7) key=alt ;;
+				s)
+					Save
+                    echo "Saved the configuration to '$FP_CLI'"
+					break
+				;;
+				q)
+					echo "Exiting menu..."
+					break
+				;;
+				*) echo "Invalid selection. Please try again."; continue ;;
+			esac
+
+			# Present predefined formats for selection (or allow custom input)
+			echo -e "\nChoose a predefined format for '$key', 'c' for custom, '0' for default, 'q' to cancel:"
+			local idx=1 fmt seq
+			for fmt in "${FORMAT_ORDER[@]}"; do
+				seq="${aFORMATS[$fmt]}"
+				# Print index and format name
+				printf "%2d) %-14s\t" "$idx" "$fmt"
+				# Print a small sample using printf %b to interpret escapes
+				echo -e "$seq" " Sample  $COLOUR_RESET"
+				((idx++))
+			done
+
+			echo -e "\nc) Custom sequence"
+            echo "0) Reset to default"
+			echo "q) Cancel"
+			read -rp "Selection: " sel
+
+			case $sel in
+				q) echo "Cancelled."; continue ;; # Return to main menu
+				c)
+					read -rp "Enter custom ANSI sequence (e.g. \\e[1;32m). Empty to cancel: " newval
+					if [[ -z "$newval" ]]; then
+						echo "No change."
+						continue
+					fi
+					# Store interpreted escape bytes
+					aCOLOUR[$key]=$(printf "%b" "$newval")
+					echo "Updated $key (custom)."
+					continue
+					;;
+                0)
+                    aCOLOUR[$key]="${aCOLOUR_DEFAULTS[$key]}"
+                    echo "Reset $key to default."
+                ;;
+				*)
+					if [[ "$sel" =~ ^[0-9]+$ ]] && (( sel >= 1 && sel <= ${#FORMAT_ORDER[@]} )); then
+						sel_index=$((sel-1))
+						chosen_fmt="${FORMAT_ORDER[$sel_index]}"
+						aCOLOUR[$key]="${aFORMATS[$chosen_fmt]}"
+						echo "Set $key -> $chosen_fmt"
+					else
+						echo "Invalid selection.";
+					fi
+					;;
+			esac
+		done
+	}
+
+	# If run directly, provide the simple CLI described in USAGE
+	if [[ "${BASH_SOURCE[0]}" == "$0" ]]
+	then
+		case $INPUT in
+			0)
+                echo "Loading default CLI preferences..."
+                Load_CLI_Defaults
+                echo -e "${aCOLOUR[good]}Default${COLOUR_RESET} CLI preferences loaded."
+                Show_Example
+                read -rp "Save these settings to '$FP_CLI'? (y/N): " save_choice
+                if [[ "$save_choice" =~ ^[Yy]$ ]]; then
+                    Save
+                    echo "Saved the configuration to '$FP_CLI'"
+                fi
+            ;;
+			'') Menu_Main ;;
+			*) G_DIETPI-NOTIFY 1 "Invalid input \"$*\"\n\nUsage:$USAGE"; exit 1 ;;
+		esac
+
+		exit 0
+	fi
+
+}
