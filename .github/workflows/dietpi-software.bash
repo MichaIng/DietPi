@@ -397,12 +397,14 @@ G_EXEC curl -sSfO "https://dietpi.com/downloads/images/$image.xz"
 G_EXEC xz -d "$image.xz"
 G_EXEC truncate -s 16G "$image"
 
-# Loop device
+# Mount as loop device
 FP_LOOP=$(losetup -f)
 G_EXEC losetup -P "$FP_LOOP" "$image"
 G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -N1 '$FP_LOOP' <<< ',+'"
 # - resize2fs: "Please run 'e2fsck -f /dev/loop0p1' first."
 # - e2fsck "-p": "need terminal for interactive repairs"
+# - sleep: e2fsck: No such file or directory while trying to open /dev/loop0p1
+G_SLEEP 0.1
 G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC_OUTPUT=1 G_EXEC resize2fs "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
