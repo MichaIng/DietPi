@@ -10,7 +10,7 @@ adeps2=('libgcrypt20')
 case $G_DISTRO in
 	7) adeps+=('libasound2' 'libssl3' 'libconfig9' 'libglib2.0-0' 'libavcodec59'); adeps2+=('libsodium23' 'libplist3');;
 	8) adeps+=('libasound2t64' 'libssl3t64' 'libconfig11' 'libglib2.0-0t64' 'libavcodec61'); adeps2+=('libsodium23' 'libplist-2.0-4'); adeps_build+=('systemd-dev');;
-	9) adeps+=('libasound2t64' 'libssl3t64' 'libconfig11' 'libglib2.0-0t64' 'libavcodec62'); [[ $G_HW_ARCH_NAME == 'armv6l' ]] && adeps2+=('libsodium23' 'libplist-2.0-4') || adeps2+=('libsodium26' 'libplist-2.0-4'); adeps_build+=('systemd-dev');;
+	9) adeps+=('libasound2t64' 'libssl3t64' 'libconfig15' 'libglib2.0-0t64' 'libavcodec62'); [[ $G_HW_ARCH_NAME == 'armv6l' ]] && adeps2+=('libsodium23' 'libplist-2.0-4') || adeps2+=('libsodium26' 'libplist-2.0-4'); adeps_build+=('systemd-dev');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 G_AGUP
