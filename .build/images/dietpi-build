@@ -60,6 +60,7 @@ SIGN_PASS=
 TEST_KERNEL=0
 TEST_UBOOT=0
 RK35XX_MAINLINE=0
+GUEST_NETWORK_REQUIRED=0
 # initial rootfs size override. dietpi-imager will shrink it as much as possible, but the larger the initial rootfs size, the larger the resulting image.
 # See "root_size" below for per-SBC defaults, which may not work with all combinations of options, and are updated regularly.
 ROOT_SIZE=
@@ -77,13 +78,19 @@ do
 		'-e'|'--edition') shift; EDITION=$1;;
 		'-s'|'--suffix') shift; SUFFIX=$1;;
 		'--skip-archive') SKIP_ARCHIVE=1;;
-		'--upload-script') shift; UPLOAD_SCRIPT=$1;;
+		'--upload-script')
+			# path to a script which uploads files given as positional arguments
+			shift
+			[[ -x $1 ]] || Error_Exit "Upload script \"$1\" does not exist or is not executable"
+			UPLOAD_SCRIPT=$1
+		;;
 		'--no-fat-part') ADD_FAT_PART=0;;
 		'--sign') shift; SIGN_PASS=$1;;
 		'--test-kernel') TEST_KERNEL=1;;
 		'--test-uboot') TEST_UBOOT=1;;
 		'--root-size') shift; ROOT_SIZE=$1;;
-		'--rk35xx-mainline') RK35XX_MAINLINE=1;;
+		'--rk35xx-mainline') RK35XX_MAINLINE=1;; # individual SBCs only
+		'--guest-network') GUEST_NETWORK_REQUIRED=1;; # containers only
 		*) Error_Exit "Invalid input \"$1\"";;
 	esac
 	shift
@@ -145,7 +152,7 @@ case $HW_MODEL in
 	'72.3') iname='ROCK4CPlus' HW_ARCH=3 partition_start=16 root_size='rockchip64';;
 	73) iname='ROCKPiS' HW_ARCH=3 partition_start=16 root_size='rockchip64';;
 	74) iname='RadxaZero' HW_ARCH=3 partition_start=4 root_size='meson64';;
-	75) iname='Container' HW_ARCH=${HW_ARCH:-10} root_size=700;;
+	75) iname='Container' HW_ARCH=${HW_ARCH:-10} root_size=300;;
 	'76.1') iname='NanoPiR5S' HW_ARCH=3 partition_start=16 root_size='rockchip64';;
 	'76.2') iname='NanoPiR5C' HW_ARCH=3 partition_start=16 root_size='rockchip64';;
 	77) iname='ROCK3A' HW_ARCH=3 partition_start=16 root_size='rockchip64';;
@@ -182,11 +189,13 @@ case $HW_MODEL in
 	106) iname='OrangePi5B' HW_ARCH=3 PTTYPE='gpt' partition_start=16 root_size='rockchip64';;
 	107) iname='OrangePi4Pro' HW_ARCH=3 partition_start=32 root_size='sun60iw2';;
 	108) iname='OrangePiZero3W' HW_ARCH=3 partition_start=32 root_size='sun60iw2';;
+	109) iname='LubanCat4' HW_ARCH=3 partition_start=16 root_size='rockchip64';;
 	*) Error_Exit "Invalid hardware model \"$HW_MODEL\" passed";;
 esac
+[[ $root_size == 'rk35xx' && $RK35XX_MAINLINE == 1 ]] && root_size='rockchip64'
 case $root_size in
 	'sun60iw2') root_size=600;;
-	'riscv') root_size=650; (( $DISTRO > 8 )) && ((root_size+=100));;
+	'riscv') root_size=650; (( $DISTRO > 8 )) && ((root_size+=150));;
 	'meson') root_size=650; (( $DISTRO > 7 && ! $boot_size )) && ((root_size+=50));;
 	'rockchip') root_size=700;;
 	'quartz64') root_size=700; (( $DISTRO > 8 )) && ((root_size+=100));;
@@ -198,7 +207,7 @@ case $root_size in
 	*) (( $root_size )) || Error_Exit "Invalid root_size=$root_size";;
 esac
 
-[[ $VARIANT =~ ^(|iso|vbox|vmx|esxi|hyperv|utm|proxmox|all)$ ]] || Error_Exit "Invalid variant \"$VARIANT\" passed"
+[[ $VARIANT =~ ^(|iso|vbox|vmx|esxi|hyperv|utm|qcow2|all)$ ]] || Error_Exit "Invalid variant \"$VARIANT\" passed"
 
 [[ $EDITION =~ ^(|Amiberry|AlloGUI|all)$ ]] || Error_Exit "Invalid edition \"$EDITION\" passed"
 
@@ -247,7 +256,8 @@ G_CHECK_URL "https://github.com/$GITOWNER/DietPi/tree/$GITBRANCH" || Error_Exit 
 
 # Generate image name and define CLONING_TOOL for dietpi-installer
 OUTPUT_IMG_NAME="DietPi_$iname-$iarch-${distro^}"
-[[ $RK35XX_MAINLINE == 1 && $HW_MODEL =~ ^(78|79'.'[1-3]|80|82|85|90|91|92|93|94|95|102|103)$ ]] && OUTPUT_IMG_NAME+='_mainline'
+(( $RK35XX_MAINLINE )) && OUTPUT_IMG_NAME+='_mainline'
+[[ $HW_MODEL == 75 && $GUEST_NETWORK_REQUIRED == 1 ]] && OUTPUT_IMG_NAME+='_network'
 [[ $fsname ]] && OUTPUT_IMG_NAME+="_$fsname"
 CLONING_TOOL='dd'
 if [[ $VARIANT == 'iso' ]]
@@ -293,7 +303,8 @@ fi
 ##########################################
 # Exit trap for cleanup
 # shellcheck disable=SC2329
-G_EXIT_CUSTOM(){
+G_EXIT_CUSTOM()
+{
 	findmnt "$FP_ORIGIN/rootfs" &> /dev/null && G_EXEC umount -R "$FP_ORIGIN/rootfs"
 	[[ -d $FP_ORIGIN/rootfs ]] && G_EXEC rmdir "$FP_ORIGIN/rootfs"
 	[[ $FP_LOOP ]] && losetup "$FP_LOOP" &> /dev/null && G_EXEC losetup -d "$FP_LOOP"
@@ -427,24 +438,44 @@ _EOF_
 ##########################################
 # debootstrap
 ##########################################
-# login is not "essential" anymore since Trixie, hence "mmdebstrap --variant apt" (essential + apt) does not install it. It is still "required", hence cannot be commonly removed, but we need to install it actively once.
-packages='apt,bash-completion,ca-certificates,cron,curl,fdisk,gpg,htop,iputils-ping,locales,login,mawk,mount,nano,parted,procps,psmisc,sudo,systemd-sysv,tzdata,udev,wget,whiptail,'
+# APT packages to install
+# - Base packages for all images
+packages='apt,bash-completion,ca-certificates,cron,curl,fdisk,gpg,htop,iputils-ping,locales,login,mawk,mount,nano,parted,passwd,procps,psmisc,sudo,systemd-sysv,tzdata,udev,wget,whiptail,'
+# - Filesystem packages
 IFS=, packages+=${afspackages[*]}; unset -v IFS
-[[ $HW_MODEL == 75 ]] && packages+=',iproute2' || packages+=',console-setup,dropbear,ethtool,fake-hwclock,ifupdown,kmod,rfkill,systemd-timesyncd,usbutils'
-# DHCP client: isc-dhcp-client has been removed from Forky, so we use dhcpcd for now, like BusyBox's udhcpc after https://salsa.debian.org/debian/ifupdown/-/merge_requests/29.
-(( $DISTRO < 9 )) && packages+=',isc-dhcp-client' || packages+=',dhcpcd-base'
-[[ $HW_MODEL =~ ^(20|75)$ ]] || packages+=',iw,wpasupplicant,wireless-regdb'
+# - Packages which are not needed for containers
+[[ $HW_MODEL == 75 ]] || packages+=',console-setup,ethtool,fake-hwclock,kmod,rfkill,systemd-timesyncd,usbutils'
+# - Network stack packages: Skip for container images without virtual network, including Dropbear which would conflict with the host's SSH server
+if [[ $HW_MODEL != 75 || $GUEST_NETWORK_REQUIRED == 1 ]]
+then
+	packages+=',dropbear,ifupdown'
+	# DHCP client: isc-dhcp-client has been removed from Forky, so we use dhcpcd for now, like BusyBox's udhcpc after https://salsa.debian.org/debian/ifupdown/-/merge_requests/29.
+	(( $DISTRO < 9 )) && packages+=',isc-dhcp-client' || packages+=',dhcpcd-base'
+else
+	# Even without virtual network, keep iproute2 for container images to list and utilize host interfaces.
+	packages+=',iproute2'
+fi
+# - WiFi packages and hdparm, needed only for physical systems
+[[ $HW_MODEL =~ ^(20|75)$ ]] || packages+=',hdparm,iw,wpasupplicant,wireless-regdb'
+
 # Add temporary tmpfs mounts to prevent certain files created by debootstrap being written to disk
 # - tmpfs mounts have 1777 mode by default.
 G_EXEC mount -m -t tmpfs tmpfs rootfs/dev
 G_EXEC mount -m -t tmpfs tmpfs rootfs/run
+G_EXEC mount -m -t tmpfs tmpfs rootfs/tmp
 G_EXEC mount -m -t tmpfs tmpfs rootfs/var/cache/apt
 G_EXEC mount -m -t tmpfs tmpfs rootfs/var/lib/apt/lists
 G_EXEC mount -m -t tmpfs tmpfs rootfs/var/log
-# - "--skip=check/empty" to ignore /etc/fstab, boot and tmpfs mounts we added above
-# - "--skip=check/qemu" to skip arch test, which requires the "arch-test" package. We however assure emulation support our end.
+
+# "--skip=check/empty" to ignore /etc/fstab, boot and tmpfs mounts we added above
+# "--skip=check/qemu" to skip arch test, which requires the "arch-test" package. We however assure emulation support our end.
 G_EXEC_OUTPUT=1 G_EXEC mmdebstrap --mode=root --format=dir --skip=check/empty,check/qemu --variant=apt --include="$packages" --arch="$parch" --keyring="$keyring" "$distro" ./rootfs "${mirrors[@]}"
-G_EXEC umount rootfs/dev rootfs/run rootfs/var/cache/apt rootfs/var/lib/apt/lists rootfs/var/log
+
+# Prevent doomed wpa_supplicant.service start attempt
+[[ $HW_MODEL =~ ^(20|75)$ ]] || G_EXEC systemctl --root=rootfs disable wpa_supplicant
+
+# Remove temporary tmpfs mounts
+G_EXEC umount rootfs/dev rootfs/run rootfs/tmp rootfs/var/cache/apt rootfs/var/lib/apt/lists rootfs/var/log
 
 ##########################################
 # Workarounds
@@ -481,27 +512,33 @@ fi
 ##########################################
 # Create boot script and systemd unit to automate DietPi-Installer
 # - NB: WIFI_REQUIRED=1 is always passed here, but ignored by DietPi-Installer for VMs and containers.
+# - NB: GUEST_NETWORK_REQUIRED is only effective for containers, ignored by DietPi-Installer for all other targets.
+# - Prevent console-getty.service from stealing the controlling terminal
+G_EXEC ln -s /dev/null rootfs/etc/systemd/system/console-getty.service
 cat << _EOF_ > rootfs/dietpi-build.sh || exit 1
 #!/bin/dash -e
 {
 infocmp "\$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsupported TERM=\"\$TERM\", switching to TERM=\"dumb\""; export TERM=dumb; }
-export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO=0 WIFI_REQUIRED=1 DISTRO_TARGET=$DISTRO TEST_KERNEL=$TEST_KERNEL TEST_UBOOT=$TEST_UBOOT RK35XX_MAINLINE=$RK35XX_MAINLINE TMPDIR='/tmp'
+export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO=0 WIFI_REQUIRED=1 GUEST_NETWORK_REQUIRED=$GUEST_NETWORK_REQUIRED DISTRO_TARGET=$DISTRO TEST_KERNEL=$TEST_KERNEL TEST_UBOOT=$TEST_UBOOT RK35XX_MAINLINE=$RK35XX_MAINLINE TMPDIR='/tmp'
 echo '[ INFO ] Running DietPi-Installer for $G_GITOWNER/$G_GITBRANCH'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-installer' || echo false)" || { echo '[FAILED] DietPi-Installer failed, shutting down ...'; journalctl -n 25; df -h; free -h; exit 1; }
-rm -v /etc/systemd/system/multi-user.target.wants/dietpi-build.service /etc/systemd/system/dietpi-build.service /dietpi-build.sh
+rm -v /etc/systemd/system/multi-user.target.wants/dietpi-build.service /etc/systemd/system/dietpi-build.service /dietpi-build.sh /etc/systemd/system/console-getty.service
 > /success
 exit 0
 }
 _EOF_
 G_EXEC chmod +x rootfs/dietpi-build.sh
 cat << '_EOF_' > rootfs/etc/systemd/system/dietpi-build.service || exit 1
+[Unit]
+After=multi-user.target
+
 [Service]
 Type=idle
 StandardOutput=tty
 ExecStart=-/dietpi-build.sh
 ExecStopPost=/usr/bin/systemctl --no-block start poweroff.target
 _EOF_
-G_EXEC ln -s /etc/systemd/system/dietpi-build.service rootfs/etc/systemd/system/multi-user.target.wants/dietpi-build.service
+G_EXEC ln -s ../dietpi-build.service rootfs/etc/systemd/system/multi-user.target.wants/dietpi-build.service
 
 # Start container
 # - Bind mounts required to allow container reading its own drive info, /dev/disk for GRUB and probably other tools to detect UUIDs
@@ -533,16 +570,20 @@ G_EXEC losetup -d "$FP_LOOP"
 ##########################################
 # DietPi-Imager
 ##########################################
-# Do not pack and upload raw VM image if not explicitly requested
-[[ $VARIANT =~ ^(|iso|all)$ ]] || SKIP_ARCHIVE=1 UPLOAD_SCRIPT=''
-# Do not add trailing FAT partition for VM, container and ISO installer images, and if there is a boot FAT partition already
-[[ $HW_MODEL =~ ^(20|75)$ || $VARIANT == 'iso' || ( $boot_size -gt 0 && $boot_fstype == 'vfat' ) ]] && ADD_FAT_PART=0
 export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off' SKIP_FIRSTBOOT_RESIZE=1
 IMAGER_ARGS=("$OUTPUT_IMG_NAME.img")
-(( $SKIP_ARCHIVE )) && IMAGER_ARGS+=('--skip-archive')
-[[ $UPLOAD_SCRIPT ]] && IMAGER_ARGS+=('--upload-script' "$UPLOAD_SCRIPT")
+# Do not add trailing FAT partition for VM, container and ISO installer images, and if there is a boot FAT partition already
+[[ $HW_MODEL =~ ^(20|75)$ || $VARIANT == 'iso' || ( $boot_size -gt 0 && $boot_fstype == 'vfat' ) ]] && ADD_FAT_PART=0
 (( $ADD_FAT_PART )) && IMAGER_ARGS+=('--add-fat-part')
 (( $HW_MODEL < 10 )) && IMAGER_ARGS+=('--configs-to-boot')
+# Do not pack and upload raw VM image if not explicitly requested
+if [[ $VARIANT =~ ^(|iso|all)$ ]]
+then
+	[[ $UPLOAD_SCRIPT ]] && IMAGER_ARGS+=('--upload-script' "$UPLOAD_SCRIPT")
+else
+	SKIP_ARCHIVE=1
+fi
+(( $SKIP_ARCHIVE )) && IMAGER_ARGS+=('--skip-archive')
 [[ $SIGN_PASS ]] && IMAGER_ARGS+=('--sign' "$SIGN_PASS")
 
 ####### IMG/ISO ##########################
@@ -767,356 +808,21 @@ fi
 # Since qemu-img does not support VMDK and VHDX resizing, we need to resize the raw .img. It is usually done as sparse file, hence the actual disk usage does not change.
 G_EXEC qemu-img resize "$OUTPUT_IMG_NAME.img" 8G
 
-####### VMX/VMware/Parallels #############
-if [[ $VARIANT =~ ^(vmx|all)$ ]]
+####### QCOW2/Proxmox ####################
+if [[ $VARIANT =~ ^(qcow2|all)$ ]]
 then
-	image_name=${OUTPUT_IMG_NAME/_VM-/_VMX-}
-	# Convert raw image to VMDK
-	G_EXEC qemu-img convert -O vmdk -o 'adapter_type=lsilogic' "$OUTPUT_IMG_NAME.img" "$image_name.vmdk"
-	# Create VM configuration
-	cat << _EOF_ > "$image_name.vmx"
-.encoding = "windows-1252"
-config.version = "8"
-virtualHW.version = "10"
-pciBridge0.present = "TRUE"
-pciBridge4.present = "TRUE"
-pciBridge4.virtualDev = "pcieRootPort"
-pciBridge4.functions = "8"
-pciBridge5.present = "TRUE"
-pciBridge5.virtualDev = "pcieRootPort"
-pciBridge5.functions = "8"
-pciBridge6.present = "TRUE"
-pciBridge6.virtualDev = "pcieRootPort"
-pciBridge6.functions = "8"
-pciBridge7.present = "TRUE"
-pciBridge7.virtualDev = "pcieRootPort"
-pciBridge7.functions = "8"
-vmci0.present = "TRUE"
-hpet0.present = "TRUE"
-nvram = "$image_name.nvram"
-virtualHW.productCompatibility = "hosted"
-gui.exitOnCLIHLT = "FALSE"
-powerType.powerOff = "soft"
-powerType.powerOn = "soft"
-powerType.suspend = "soft"
-powerType.reset = "soft"
-displayName = "$image_name"
-guestOS = "debian10-64"
-tools.syncTime = "FALSE"
-vcpu.hotadd = "TRUE"
-memsize = "1024"
-scsi0.virtualDev = "pvscsi"
-scsi0.present = "TRUE"
-scsi0:0.fileName = "$image_name.vmdk"
-scsi0:0.present = "TRUE"
-usb.present = "TRUE"
-ehci.present = "TRUE"
-usb_xhci.present = "TRUE"
-ethernet0.addressType = "generated"
-ethernet0.virtualDev = "e1000"
-ethernet0.present = "TRUE"
-extendedConfigFile = "$image_name.vmxf"
-floppy0.present = "FALSE"
-_EOF_
-	G_EXEC_DESC='Creating VMware tar.xz archive' XZ_OPT='-9e -T0 -M75%' G_EXEC tar -cJf "$image_name.tar.xz" "$image_name.vmdk" "$image_name.vmx"
-	G_EXEC rm "$image_name.vmdk" "$image_name.vmx"
-	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.tar.xz' > '$image_name.tar.xz.sha256'"
-	signature=()
-	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.tar.xz" || exit 1; signature=("$image_name.tar.xz.asc"); }
-	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.tar.xz"{,.sha256} "${signature[@]}" && G_EXEC rm "$image_name.tar.xz"{,.sha256} "${signature[@]}"
-fi
+	G_DIETPI-NOTIFY 2 'Converting raw image to compressed QCOW2 format'
+	G_EXEC qemu-img convert -c -O qcow2 "$OUTPUT_IMG_NAME.img" "$OUTPUT_IMG_NAME.qcow2"
 
-####### ESXi #############################
-if [[ $VARIANT =~ ^(esxi|all)$ ]]
-then
-	image_name=${OUTPUT_IMG_NAME/_VM-/_ESXi-}
-	# Convert raw image to VMDK
-	G_EXEC qemu-img convert -O vmdk -o 'adapter_type=lsilogic,subformat=streamOptimized' "$OUTPUT_IMG_NAME.img" "$image_name.vmdk"
-	# Create VM configuration
-	cat << _EOF_ > "$image_name.ovf"
-<?xml version='1.0' encoding='UTF-8'?>
-<Envelope xmlns="http://schemas.dmtf.org/ovf/envelope/1" xmlns:ovf="http://schemas.dmtf.org/ovf/envelope/1" xmlns:vmw="http://www.vmware.com/schema/ovf" xmlns:rasd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_ResourceAllocationSettingData" xmlns:vssd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_VirtualSystemSettingData">
-  <References>
-    <File ovf:id="file1" ovf:href="$image_name.vmdk"/>
-  </References>
-  <DiskSection>
-    <Info>List of the virtual disks</Info>
-    <Disk ovf:capacityAllocationUnits="byte * 2^30" ovf:format="http://www.vmware.com/interfaces/specifications/vmdk.html#streamOptimized" ovf:diskId="vmdisk1" ovf:capacity="8" ovf:fileRef="file1"/>
-  </DiskSection>
-  <NetworkSection>
-    <Info>The list of logical networks</Info>
-    <Network ovf:name="VM Network">
-      <Description>The VM Network network</Description>
-    </Network>
-  </NetworkSection>
-  <VirtualSystem ovf:id="$image_name">
-    <Info>A Virtual system</Info>
-    <Name>$image_name</Name>
-    <OperatingSystemSection ovf:id="96" ovf:version="10" vmw:osType="debian10_64Guest">
-      <Info>The operating system installed</Info>
-      <Description>Debian GNU/Linux 10 (64-bit)</Description>
-    </OperatingSystemSection>
-    <VirtualHardwareSection>
-      <Info>Virtual hardware requirements</Info>
-      <System>
-        <vssd:ElementName>Virtual Hardware Family</vssd:ElementName>
-        <vssd:InstanceID>0</vssd:InstanceID>
-        <vssd:VirtualSystemType>vmx-13</vssd:VirtualSystemType>
-      </System>
-      <Item>
-        <rasd:AllocationUnits>hertz * 10^6</rasd:AllocationUnits>
-        <rasd:Description>Number of Virtual CPUs</rasd:Description>
-        <rasd:ElementName>1 virtual CPU(s)</rasd:ElementName>
-        <rasd:InstanceID>1</rasd:InstanceID>
-        <rasd:ResourceType>3</rasd:ResourceType>
-        <rasd:VirtualQuantity>1</rasd:VirtualQuantity>
-        <vmw:CoresPerSocket ovf:required="false">1</vmw:CoresPerSocket>
-      </Item>
-      <Item>
-        <rasd:AllocationUnits>byte * 2^20</rasd:AllocationUnits>
-        <rasd:Description>Memory Size</rasd:Description>
-        <rasd:ElementName>1024MB of memory</rasd:ElementName>
-        <rasd:InstanceID>2</rasd:InstanceID>
-        <rasd:ResourceType>4</rasd:ResourceType>
-        <rasd:VirtualQuantity>1024</rasd:VirtualQuantity>
-      </Item>
-      <Item>
-        <rasd:Address>0</rasd:Address>
-        <rasd:Description>SCSI Controller</rasd:Description>
-        <rasd:ElementName>SCSI Controller 1</rasd:ElementName>
-        <rasd:InstanceID>3</rasd:InstanceID>
-        <rasd:ResourceSubType>VirtualSCSI</rasd:ResourceSubType>
-        <rasd:ResourceType>6</rasd:ResourceType>
-      </Item>
-      <Item>
-        <rasd:AddressOnParent>0</rasd:AddressOnParent>
-        <rasd:ElementName>Hard Disk 1</rasd:ElementName>
-        <rasd:HostResource>ovf:/disk/vmdisk1</rasd:HostResource>
-        <rasd:InstanceID>4</rasd:InstanceID>
-        <rasd:Parent>3</rasd:Parent>
-        <rasd:ResourceType>17</rasd:ResourceType>
-      </Item>
-      <Item>
-        <rasd:AddressOnParent>0</rasd:AddressOnParent>
-        <rasd:AutomaticAllocation>true</rasd:AutomaticAllocation>
-        <rasd:Connection>VM Network</rasd:Connection>
-        <rasd:ElementName>Network adapter 1</rasd:ElementName>
-        <rasd:InstanceID>5</rasd:InstanceID>
-        <rasd:ResourceSubType>VmxNet3</rasd:ResourceSubType>
-        <rasd:ResourceType>10</rasd:ResourceType>
-        <vmw:Config ovf:required="false" vmw:key="connectable.allowGuestControl" vmw:value="true"/>
-        <vmw:Config ovf:required="false" vmw:key="wakeOnLanEnabled" vmw:value="true"/>
-        <vmw:Config ovf:required="false" vmw:key="uptCompatibilityEnabled" vmw:value="true"/>
-      </Item>
-      <Item ovf:required="false">
-        <rasd:ElementName>Video card</rasd:ElementName>
-        <rasd:InstanceID>6</rasd:InstanceID>
-        <rasd:ResourceType>24</rasd:ResourceType>
-        <vmw:Config ovf:required="false" vmw:key="enable3DSupport" vmw:value="false"/>
-        <vmw:Config ovf:required="false" vmw:key="numDisplays" vmw:value="1"/>
-        <vmw:Config ovf:required="false" vmw:key="graphicsMemorySizeInKB" vmw:value="262144"/>
-        <vmw:Config ovf:required="false" vmw:key="videoRamSizeInKB" vmw:value="8192"/>
-        <vmw:Config ovf:required="false" vmw:key="useAutoDetect" vmw:value="false"/>
-        <vmw:Config ovf:required="false" vmw:key="use3dRenderer" vmw:value="automatic"/>
-      </Item>
-      <vmw:Config ovf:required="false" vmw:key="cpuHotAddEnabled" vmw:value="false"/>
-      <vmw:Config ovf:required="false" vmw:key="sgxInfo.epcSize" vmw:value="0"/>
-      <vmw:Config ovf:required="false" vmw:key="nestedHVEnabled" vmw:value="false"/>
-      <vmw:Config ovf:required="false" vmw:key="virtualSMCPresent" vmw:value="false"/>
-      <vmw:Config ovf:required="false" vmw:key="flags.vvtdEnabled" vmw:value="false"/>
-      <vmw:Config ovf:required="false" vmw:key="cpuHotRemoveEnabled" vmw:value="false"/>
-      <vmw:Config ovf:required="false" vmw:key="sgxInfo.flcMode" vmw:value="unlocked"/>
-      <vmw:Config ovf:required="false" vmw:key="sevEnabled" vmw:value="false"/>
-      <vmw:Config ovf:required="false" vmw:key="virtualICH7MPresent" vmw:value="false"/>
-      <vmw:Config ovf:required="false" vmw:key="flags.vbsEnabled" vmw:value="false"/>
-      <vmw:Config ovf:required="false" vmw:key="memoryHotAddEnabled" vmw:value="false"/>
-      <vmw:Config ovf:required="false" vmw:key="bootOptions.efiSecureBootEnabled" vmw:value="false"/>
-      <vmw:Config ovf:required="false" vmw:key="firmware" vmw:value="bios"/>
-      <vmw:ExtraConfig ovf:required="false" vmw:key="nvram" vmw:value="$image_name.nvram"/>
-    </VirtualHardwareSection>
-  </VirtualSystem>
-</Envelope>
-_EOF_
-	# Create manifest file for automatic integrity check
-	cat << _EOF_ > "$image_name.mf"
-SHA1($image_name.ovf)= $(sha1sum "$image_name.ovf" | mawk '{print $1}')
-SHA1($image_name.vmdk)= $(sha1sum "$image_name.vmdk" | mawk '{print $1}')
-_EOF_
-	# Pack everything as OVA appliance for ESXi import
-	G_EXEC tar -cf "$image_name.ova" "$image_name."{ovf,vmdk,mf}
-	[[ $VARIANT == 'all' ]] || G_EXEC rm "$image_name.vmdk"
-	G_EXEC rm "$image_name."{ovf,mf}
-
-	G_EXEC_DESC='Creating ESXi xz archive' G_EXEC xz -9e -T0 -M75% "$image_name.ova"
-	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.ova.xz' > '$image_name.ova.xz.sha256'"
-	signature=()
-	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.ova.xz" || exit 1; signature=("$image_name.ova.xz.asc"); }
-	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.ova.xz"{,.sha256} "${signature[@]}" && G_EXEC rm "$image_name.ova.xz"{,.sha256} "${signature[@]}"
-fi
-
-####### VirtualBox #######################
-if [[ $VARIANT =~ ^(vbox|all)$ ]]
-then
-	image_name=${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}
-	# Reuse or convert raw image to VMDK
-	if [[ $VARIANT == 'all' ]]
+	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$OUTPUT_IMG_NAME.qcow2' > '$OUTPUT_IMG_NAME.qcow2.sha256'"
+	files=("$OUTPUT_IMG_NAME.qcow2"{,.sha256})
+	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing image ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$OUTPUT_IMG_NAME.qcow2" || exit 1; files+=("$OUTPUT_IMG_NAME.qcow2.asc"); }
+	if [[ $UPLOAD_SCRIPT ]]
 	then
-		G_EXEC mv "${OUTPUT_IMG_NAME/_VM-/_ESXi-}.vmdk" "$image_name.vmdk"
-	else
-		G_EXEC qemu-img convert -O vmdk -o 'adapter_type=lsilogic,subformat=streamOptimized' "$OUTPUT_IMG_NAME.img" "$image_name.vmdk"
+		G_EXEC_OUTPUT=1 G_EXEC "$UPLOAD_SCRIPT" "${files[@]}"
+		[[ $VARIANT == 'all' ]] && unset -v 'files[0]' # keep QCOW2 image for UTM appliance
+		G_EXEC rm "${files[@]}"
 	fi
-	# Generate random UUIDs for VM and virtual disk
-	vmuuid=$(</proc/sys/kernel/random/uuid)
-	diskuuid=$(</proc/sys/kernel/random/uuid)
-	# Create VM configuration
-	cat << _EOF_ > "$image_name.ovf"
-<?xml version="1.0"?>
-<Envelope ovf:version="1.0" xml:lang="en-US" xmlns="http://schemas.dmtf.org/ovf/envelope/1" xmlns:ovf="http://schemas.dmtf.org/ovf/envelope/1" xmlns:rasd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_ResourceAllocationSettingData" xmlns:vssd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_VirtualSystemSettingData" xmlns:vbox="http://www.virtualbox.org/ovf/machine">
-  <References>
-    <File ovf:id="file1" ovf:href="$image_name.vmdk"/>
-  </References>
-  <DiskSection>
-    <Info>List of the virtual disks used in the package</Info>
-    <Disk ovf:capacity="8589934592" ovf:diskId="vmdisk1" ovf:fileRef="file1" ovf:format="http://www.vmware.com/interfaces/specifications/vmdk.html#streamOptimized" vbox:uuid="$diskuuid"/>
-  </DiskSection>
-  <NetworkSection>
-    <Info>Logical networks used in the package</Info>
-    <Network ovf:name="Bridged">
-      <Description>Logical network used by this appliance.</Description>
-    </Network>
-  </NetworkSection>
-  <VirtualSystem ovf:id="$image_name">
-    <Info>A virtual machine</Info>
-    <OperatingSystemSection ovf:id="96">
-      <Info>The kind of installed guest operating system</Info>
-      <Description>Debian_64</Description>
-      <vbox:OSType ovf:required="false">Debian_64</vbox:OSType>
-    </OperatingSystemSection>
-    <VirtualHardwareSection>
-      <Info>Virtual hardware requirements for a virtual machine</Info>
-      <System>
-        <vssd:ElementName>Virtual Hardware Family</vssd:ElementName>
-        <vssd:InstanceID>0</vssd:InstanceID>
-        <vssd:VirtualSystemIdentifier>$image_name</vssd:VirtualSystemIdentifier>
-        <vssd:VirtualSystemType>virtualbox-2.2</vssd:VirtualSystemType>
-      </System>
-      <Item>
-        <rasd:Caption>1 virtual CPU</rasd:Caption>
-        <rasd:Description>Number of virtual CPUs</rasd:Description>
-        <rasd:ElementName>1 virtual CPU</rasd:ElementName>
-        <rasd:InstanceID>1</rasd:InstanceID>
-        <rasd:ResourceType>3</rasd:ResourceType>
-        <rasd:VirtualQuantity>1</rasd:VirtualQuantity>
-      </Item>
-      <Item>
-        <rasd:AllocationUnits>MegaBytes</rasd:AllocationUnits>
-        <rasd:Caption>1024 MB of memory</rasd:Caption>
-        <rasd:Description>Memory Size</rasd:Description>
-        <rasd:ElementName>1024 MB of memory</rasd:ElementName>
-        <rasd:InstanceID>2</rasd:InstanceID>
-        <rasd:ResourceType>4</rasd:ResourceType>
-        <rasd:VirtualQuantity>1024</rasd:VirtualQuantity>
-      </Item>
-      <Item>
-        <rasd:Address>0</rasd:Address>
-        <rasd:Caption>virtioSCSIController0</rasd:Caption>
-        <rasd:Description>VirtioSCSI Controller</rasd:Description>
-        <rasd:ElementName>virtioSCSIController0</rasd:ElementName>
-        <rasd:InstanceID>3</rasd:InstanceID>
-        <rasd:ResourceSubType>VirtioSCSI</rasd:ResourceSubType>
-        <rasd:ResourceType>20</rasd:ResourceType>
-      </Item>
-      <Item>
-        <rasd:AddressOnParent>0</rasd:AddressOnParent>
-        <rasd:Caption>disk1</rasd:Caption>
-        <rasd:Description>Disk Image</rasd:Description>
-        <rasd:ElementName>disk1</rasd:ElementName>
-        <rasd:HostResource>/disk/vmdisk1</rasd:HostResource>
-        <rasd:InstanceID>4</rasd:InstanceID>
-        <rasd:Parent>3</rasd:Parent>
-        <rasd:ResourceType>17</rasd:ResourceType>
-      </Item>
-      <Item>
-        <rasd:AutomaticAllocation>true</rasd:AutomaticAllocation>
-        <rasd:Caption>Ethernet adapter on 'Bridged'</rasd:Caption>
-        <rasd:Connection>Bridged</rasd:Connection>
-        <rasd:ElementName>Ethernet adapter on 'Bridged'</rasd:ElementName>
-        <rasd:InstanceID>5</rasd:InstanceID>
-        <rasd:ResourceType>10</rasd:ResourceType>
-      </Item>
-    </VirtualHardwareSection>
-    <vbox:Machine ovf:required="false" version="1.16-windows" uuid="{$vmuuid}" name="$image_name" OSType="Debian_64" snapshotFolder="Snapshots" lastStateChange="$(date -u '+%Y-%M-%dT%TZ')">
-      <ovf:Info>Complete VirtualBox machine configuration in VirtualBox format</ovf:Info>
-      <Hardware>
-        <CPU>
-          <PAE enabled="false"/>
-          <LongMode enabled="true"/>
-          <X2APIC enabled="true"/>
-          <HardwareVirtExLargePages enabled="true"/>
-        </CPU>
-        <Memory RAMSize="1024"/>
-        <Chipset type="ICH9"/>
-        <Paravirt provider="KVM"/>
-        <Boot>
-          <Order position="1" device="HardDisk"/>
-        </Boot>
-        <Display controller="VMSVGA" VRAMSize="16"/>
-        <BIOS>
-          <IOAPIC enabled="true"/>
-          <SmbiosUuidLittleEndian enabled="true"/>
-        </BIOS>
-        <USB>
-          <Controllers>
-            <Controller name="xHCI" type="XHCI"/>
-          </Controllers>
-        </USB>
-        <Network>
-          <Adapter slot="0" enabled="true" type="virtio">
-            <BridgedInterface name="eth0"/>
-          </Adapter>
-        </Network>
-        <RTC localOrUTC="UTC"/>
-        <Clipboard/>
-        <StorageControllers>
-          <StorageController name="VirtIO" type="VirtioSCSI" PortCount="1" useHostIOCache="false" Bootable="true">
-            <AttachedDevice type="HardDisk" hotpluggable="false" port="0" device="0">
-              <Image uuid="{$diskuuid}"/>
-            </AttachedDevice>
-          </StorageController>
-        </StorageControllers>
-      </Hardware>
-    </vbox:Machine>
-  </VirtualSystem>
-</Envelope>
-_EOF_
-	# Create manifest file for automatic integrity check
-	cat << _EOF_ > "$image_name.mf"
-SHA1 ($image_name.ovf) = $(sha1sum "$image_name.ovf" | mawk '{print $1}')
-SHA1 ($image_name.vmdk) = $(sha1sum "$image_name.vmdk" | mawk '{print $1}')
-_EOF_
-	# Pack everything as OVA appliance for VirtualBox import
-	G_EXEC tar -cf "$image_name.ova" "$image_name."{ovf,vmdk,mf}
-	G_EXEC rm "$image_name."{ovf,vmdk,mf}
-
-	G_EXEC_DESC='Creating VirtualBox xz archive' G_EXEC xz -9e -T0 -M75% "$image_name.ova"
-	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.ova.xz' > '$image_name.ova.xz.sha256'"
-	signature=()
-	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.ova.xz" || exit 1; signature=("$image_name.ova.xz.asc"); }
-	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.ova.xz"{,.sha256} "${signature[@]}" && G_EXEC rm "$image_name.ova.xz"{,.sha256} "${signature[@]}"
-fi
-
-####### Hyper-V ##########################
-if [[ $VARIANT =~ ^(hyperv|all)$ ]]
-then
-	image_name=${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}
-	# Convert raw image to VHDX
-	G_EXEC qemu-img convert -O vhdx "$OUTPUT_IMG_NAME.img" "$image_name.vhdx"
-
-	G_EXEC_DESC='Creating Hyper-V xz archive' G_EXEC xz -9e -T0 -M75% "$image_name.vhdx"
-	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.vhdx.xz' > '$image_name.vhdx.xz.sha256'"
-	signature=()
-	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.vhdx.xz" || exit 1; signature=("$image_name.vhdx.xz.asc"); }
-	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.vhdx.xz"{,.sha256} "${signature[@]}" && G_EXEC rm "$image_name.vhdx.xz"{,.sha256} "${signature[@]}"
 fi
 
 ####### UTM ##############################
@@ -1125,8 +831,13 @@ then
 	image_name=${OUTPUT_IMG_NAME/_VM-/_UTM-}
 	# Create directory which is interpreted as VM appliance file on macOS
 	G_EXEC mkdir -p "$image_name.utm/Images"
-	# Convert raw image to QCOW2
-	G_EXEC qemu-img convert -c -O qcow2 "$OUTPUT_IMG_NAME.img" "$image_name.utm/Images/data.qcow2"
+	# Reuse or convert raw image to QCOW2
+	if [[ $VARIANT == 'all' ]]
+	then
+		G_EXEC mv "$OUTPUT_IMG_NAME.qcow2" "$image_name.utm/Images/data.qcow2"
+	else
+		G_EXEC qemu-img convert -c -O qcow2 "$OUTPUT_IMG_NAME.img" "$image_name.utm/Images/data.qcow2"
+	fi
 	# Generate random MAC address and UUID for VM
 	mac=$(tr -dc '0-9A-F' < /dev/urandom | head -c10 | sed -E 's/(..)/\1:/g;s/:$//;s/^/02:/') # ToDo: Beginning with "D2:"?
 	vmuuid=$(</proc/sys/kernel/random/uuid)
@@ -1282,21 +993,359 @@ _EOF_
 	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.tar.xz' > '$image_name.tar.xz.sha256'"
 	signature=()
 	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.tar.xz" || exit 1; signature=("$image_name.tar.xz.asc"); }
-	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.tar.xz"{,.sha256} "${signature[@]}" && G_EXEC rm "$image_name.tar.xz"{,.sha256} "${signature[@]}"
+	[[ $UPLOAD_SCRIPT ]] && G_EXEC_OUTPUT=1 G_EXEC "$UPLOAD_SCRIPT" "$image_name.tar.xz"{,.sha256} "${signature[@]}" && G_EXEC rm "$image_name.tar.xz"{,.sha256} "${signature[@]}"
 fi
 
-####### Proxmox ##########################
-if [[ $VARIANT =~ ^(proxmox|all)$ ]]
+####### VMX/VMware/Parallels #############
+if [[ $VARIANT =~ ^(vmx|all)$ ]]
 then
-	# Convert raw image to QCOW2
-	image_name=${OUTPUT_IMG_NAME/_VM-/_Proxmox-}
-	G_EXEC qemu-img convert -c -O qcow2 "$OUTPUT_IMG_NAME.img" "$image_name.qcow2"
-
-	G_EXEC_DESC='Creating Proxmox xz archive' G_EXEC xz -9e -T0 -M75% "$image_name.qcow2"
-	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.qcow2.xz' > '$image_name.qcow2.xz.sha256'"
+	image_name=${OUTPUT_IMG_NAME/_VM-/_VMX-}
+	# Convert raw image to VMDK
+	G_EXEC qemu-img convert -O vmdk -o 'adapter_type=lsilogic' "$OUTPUT_IMG_NAME.img" "$image_name.vmdk"
+	# Create VM configuration
+	cat << _EOF_ > "$image_name.vmx"
+.encoding = "windows-1252"
+config.version = "8"
+virtualHW.version = "10"
+pciBridge0.present = "TRUE"
+pciBridge4.present = "TRUE"
+pciBridge4.virtualDev = "pcieRootPort"
+pciBridge4.functions = "8"
+pciBridge5.present = "TRUE"
+pciBridge5.virtualDev = "pcieRootPort"
+pciBridge5.functions = "8"
+pciBridge6.present = "TRUE"
+pciBridge6.virtualDev = "pcieRootPort"
+pciBridge6.functions = "8"
+pciBridge7.present = "TRUE"
+pciBridge7.virtualDev = "pcieRootPort"
+pciBridge7.functions = "8"
+vmci0.present = "TRUE"
+hpet0.present = "TRUE"
+nvram = "$image_name.nvram"
+virtualHW.productCompatibility = "hosted"
+gui.exitOnCLIHLT = "FALSE"
+powerType.powerOff = "soft"
+powerType.powerOn = "soft"
+powerType.suspend = "soft"
+powerType.reset = "soft"
+displayName = "$image_name"
+guestOS = "debian10-64"
+tools.syncTime = "FALSE"
+vcpu.hotadd = "TRUE"
+memsize = "1024"
+scsi0.virtualDev = "pvscsi"
+scsi0.present = "TRUE"
+scsi0:0.fileName = "$image_name.vmdk"
+scsi0:0.present = "TRUE"
+usb.present = "TRUE"
+ehci.present = "TRUE"
+usb_xhci.present = "TRUE"
+ethernet0.addressType = "generated"
+ethernet0.virtualDev = "e1000"
+ethernet0.present = "TRUE"
+extendedConfigFile = "$image_name.vmxf"
+floppy0.present = "FALSE"
+_EOF_
+	G_EXEC_DESC='Creating VMX tar.xz archive' XZ_OPT='-9e -T0 -M75%' G_EXEC tar -cJf "$image_name.tar.xz" "$image_name.vmdk" "$image_name.vmx"
+	G_EXEC rm "$image_name.vmdk" "$image_name.vmx"
+	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.tar.xz' > '$image_name.tar.xz.sha256'"
 	signature=()
-	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.qcow2.xz" || exit 1; signature=("$image_name.qcow2.xz.asc"); }
-	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.qcow2.xz"{,.sha256} "${signature[@]}" && G_EXEC rm "$image_name.qcow2.xz"{,.sha256} "${signature[@]}"
+	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.tar.xz" || exit 1; signature=("$image_name.tar.xz.asc"); }
+	[[ $UPLOAD_SCRIPT ]] && G_EXEC_OUTPUT=1 G_EXEC "$UPLOAD_SCRIPT" "$image_name.tar.xz"{,.sha256} "${signature[@]}" && G_EXEC rm "$image_name.tar.xz"{,.sha256} "${signature[@]}"
+fi
+
+####### ESXi OVA #########################
+if [[ $VARIANT =~ ^(esxi|all)$ ]]
+then
+	image_name=${OUTPUT_IMG_NAME/_VM-/_ESXi-}
+	# Convert raw image to VMDK
+	G_EXEC qemu-img convert -O vmdk -o 'adapter_type=lsilogic,subformat=streamOptimized' "$OUTPUT_IMG_NAME.img" "$image_name.vmdk"
+	# Create VM configuration
+	cat << _EOF_ > "$image_name.ovf"
+<?xml version='1.0' encoding='UTF-8'?>
+<Envelope xmlns="http://schemas.dmtf.org/ovf/envelope/1" xmlns:ovf="http://schemas.dmtf.org/ovf/envelope/1" xmlns:vmw="http://www.vmware.com/schema/ovf" xmlns:rasd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_ResourceAllocationSettingData" xmlns:vssd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_VirtualSystemSettingData">
+  <References>
+    <File ovf:id="file1" ovf:href="$image_name.vmdk"/>
+  </References>
+  <DiskSection>
+    <Info>List of the virtual disks</Info>
+    <Disk ovf:capacityAllocationUnits="byte * 2^30" ovf:format="http://www.vmware.com/interfaces/specifications/vmdk.html#streamOptimized" ovf:diskId="vmdisk1" ovf:capacity="8" ovf:fileRef="file1"/>
+  </DiskSection>
+  <NetworkSection>
+    <Info>The list of logical networks</Info>
+    <Network ovf:name="VM Network">
+      <Description>The VM Network network</Description>
+    </Network>
+  </NetworkSection>
+  <VirtualSystem ovf:id="$image_name">
+    <Info>A Virtual system</Info>
+    <Name>$image_name</Name>
+    <OperatingSystemSection ovf:id="96" ovf:version="10" vmw:osType="debian10_64Guest">
+      <Info>The operating system installed</Info>
+      <Description>Debian GNU/Linux 10 (64-bit)</Description>
+    </OperatingSystemSection>
+    <VirtualHardwareSection>
+      <Info>Virtual hardware requirements</Info>
+      <System>
+        <vssd:ElementName>Virtual Hardware Family</vssd:ElementName>
+        <vssd:InstanceID>0</vssd:InstanceID>
+        <vssd:VirtualSystemType>vmx-13</vssd:VirtualSystemType>
+      </System>
+      <Item>
+        <rasd:AllocationUnits>hertz * 10^6</rasd:AllocationUnits>
+        <rasd:Description>Number of Virtual CPUs</rasd:Description>
+        <rasd:ElementName>1 virtual CPU(s)</rasd:ElementName>
+        <rasd:InstanceID>1</rasd:InstanceID>
+        <rasd:ResourceType>3</rasd:ResourceType>
+        <rasd:VirtualQuantity>1</rasd:VirtualQuantity>
+        <vmw:CoresPerSocket ovf:required="false">1</vmw:CoresPerSocket>
+      </Item>
+      <Item>
+        <rasd:AllocationUnits>byte * 2^20</rasd:AllocationUnits>
+        <rasd:Description>Memory Size</rasd:Description>
+        <rasd:ElementName>1024MB of memory</rasd:ElementName>
+        <rasd:InstanceID>2</rasd:InstanceID>
+        <rasd:ResourceType>4</rasd:ResourceType>
+        <rasd:VirtualQuantity>1024</rasd:VirtualQuantity>
+      </Item>
+      <Item>
+        <rasd:Address>0</rasd:Address>
+        <rasd:Description>SCSI Controller</rasd:Description>
+        <rasd:ElementName>SCSI Controller 1</rasd:ElementName>
+        <rasd:InstanceID>3</rasd:InstanceID>
+        <rasd:ResourceSubType>VirtualSCSI</rasd:ResourceSubType>
+        <rasd:ResourceType>6</rasd:ResourceType>
+      </Item>
+      <Item>
+        <rasd:AddressOnParent>0</rasd:AddressOnParent>
+        <rasd:ElementName>Hard Disk 1</rasd:ElementName>
+        <rasd:HostResource>ovf:/disk/vmdisk1</rasd:HostResource>
+        <rasd:InstanceID>4</rasd:InstanceID>
+        <rasd:Parent>3</rasd:Parent>
+        <rasd:ResourceType>17</rasd:ResourceType>
+      </Item>
+      <Item>
+        <rasd:AddressOnParent>0</rasd:AddressOnParent>
+        <rasd:AutomaticAllocation>true</rasd:AutomaticAllocation>
+        <rasd:Connection>VM Network</rasd:Connection>
+        <rasd:ElementName>Network adapter 1</rasd:ElementName>
+        <rasd:InstanceID>5</rasd:InstanceID>
+        <rasd:ResourceSubType>VmxNet3</rasd:ResourceSubType>
+        <rasd:ResourceType>10</rasd:ResourceType>
+        <vmw:Config ovf:required="false" vmw:key="connectable.allowGuestControl" vmw:value="true"/>
+        <vmw:Config ovf:required="false" vmw:key="wakeOnLanEnabled" vmw:value="true"/>
+        <vmw:Config ovf:required="false" vmw:key="uptCompatibilityEnabled" vmw:value="true"/>
+      </Item>
+      <Item ovf:required="false">
+        <rasd:ElementName>Video card</rasd:ElementName>
+        <rasd:InstanceID>6</rasd:InstanceID>
+        <rasd:ResourceType>24</rasd:ResourceType>
+        <vmw:Config ovf:required="false" vmw:key="enable3DSupport" vmw:value="false"/>
+        <vmw:Config ovf:required="false" vmw:key="numDisplays" vmw:value="1"/>
+        <vmw:Config ovf:required="false" vmw:key="graphicsMemorySizeInKB" vmw:value="262144"/>
+        <vmw:Config ovf:required="false" vmw:key="videoRamSizeInKB" vmw:value="8192"/>
+        <vmw:Config ovf:required="false" vmw:key="useAutoDetect" vmw:value="false"/>
+        <vmw:Config ovf:required="false" vmw:key="use3dRenderer" vmw:value="automatic"/>
+      </Item>
+      <vmw:Config ovf:required="false" vmw:key="cpuHotAddEnabled" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="sgxInfo.epcSize" vmw:value="0"/>
+      <vmw:Config ovf:required="false" vmw:key="nestedHVEnabled" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="virtualSMCPresent" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="flags.vvtdEnabled" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="cpuHotRemoveEnabled" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="sgxInfo.flcMode" vmw:value="unlocked"/>
+      <vmw:Config ovf:required="false" vmw:key="sevEnabled" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="virtualICH7MPresent" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="flags.vbsEnabled" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="memoryHotAddEnabled" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="bootOptions.efiSecureBootEnabled" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="firmware" vmw:value="bios"/>
+      <vmw:ExtraConfig ovf:required="false" vmw:key="nvram" vmw:value="$image_name.nvram"/>
+    </VirtualHardwareSection>
+  </VirtualSystem>
+</Envelope>
+_EOF_
+	# Create manifest file for automatic integrity check
+	cat << _EOF_ > "$image_name.mf"
+SHA1($image_name.ovf)= $(sha1sum "$image_name.ovf" | mawk '{print $1}')
+SHA1($image_name.vmdk)= $(sha1sum "$image_name.vmdk" | mawk '{print $1}')
+_EOF_
+	# Pack everything as OVA appliance for ESXi import
+	G_EXEC tar -cf "$image_name.ova" "$image_name."{ovf,vmdk,mf}
+	[[ $VARIANT == 'all' ]] || G_EXEC rm "$image_name.vmdk" # keep VMDK image for VirtualBox appliance
+	G_EXEC rm "$image_name."{ovf,mf}
+
+	G_EXEC_DESC='Creating ESXi xz archive' G_EXEC xz -9e -T0 -M75% "$image_name.ova"
+	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.ova.xz' > '$image_name.ova.xz.sha256'"
+	signature=()
+	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.ova.xz" || exit 1; signature=("$image_name.ova.xz.asc"); }
+	[[ $UPLOAD_SCRIPT ]] && G_EXEC_OUTPUT=1 G_EXEC "$UPLOAD_SCRIPT" "$image_name.ova.xz"{,.sha256} "${signature[@]}" && G_EXEC rm "$image_name.ova.xz"{,.sha256} "${signature[@]}"
+fi
+
+####### VirtualBox OVA ###################
+if [[ $VARIANT =~ ^(vbox|all)$ ]]
+then
+	image_name=${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}
+	# Reuse or convert raw image to VMDK
+	if [[ $VARIANT == 'all' ]]
+	then
+		G_EXEC mv "${OUTPUT_IMG_NAME/_VM-/_ESXi-}.vmdk" "$image_name.vmdk"
+	else
+		G_EXEC qemu-img convert -O vmdk -o 'adapter_type=lsilogic,subformat=streamOptimized' "$OUTPUT_IMG_NAME.img" "$image_name.vmdk"
+	fi
+	# Generate random UUIDs for VM and virtual disk
+	vmuuid=$(</proc/sys/kernel/random/uuid)
+	diskuuid=$(</proc/sys/kernel/random/uuid)
+	# Create VM configuration
+	cat << _EOF_ > "$image_name.ovf"
+<?xml version="1.0"?>
+<Envelope ovf:version="1.0" xml:lang="en-US" xmlns="http://schemas.dmtf.org/ovf/envelope/1" xmlns:ovf="http://schemas.dmtf.org/ovf/envelope/1" xmlns:rasd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_ResourceAllocationSettingData" xmlns:vssd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_VirtualSystemSettingData" xmlns:vbox="http://www.virtualbox.org/ovf/machine">
+  <References>
+    <File ovf:id="file1" ovf:href="$image_name.vmdk"/>
+  </References>
+  <DiskSection>
+    <Info>List of the virtual disks used in the package</Info>
+    <Disk ovf:capacity="8589934592" ovf:diskId="vmdisk1" ovf:fileRef="file1" ovf:format="http://www.vmware.com/interfaces/specifications/vmdk.html#streamOptimized" vbox:uuid="$diskuuid"/>
+  </DiskSection>
+  <NetworkSection>
+    <Info>Logical networks used in the package</Info>
+    <Network ovf:name="Bridged">
+      <Description>Logical network used by this appliance.</Description>
+    </Network>
+  </NetworkSection>
+  <VirtualSystem ovf:id="$image_name">
+    <Info>A virtual machine</Info>
+    <OperatingSystemSection ovf:id="96">
+      <Info>The kind of installed guest operating system</Info>
+      <Description>Debian_64</Description>
+      <vbox:OSType ovf:required="false">Debian_64</vbox:OSType>
+    </OperatingSystemSection>
+    <VirtualHardwareSection>
+      <Info>Virtual hardware requirements for a virtual machine</Info>
+      <System>
+        <vssd:ElementName>Virtual Hardware Family</vssd:ElementName>
+        <vssd:InstanceID>0</vssd:InstanceID>
+        <vssd:VirtualSystemIdentifier>$image_name</vssd:VirtualSystemIdentifier>
+        <vssd:VirtualSystemType>virtualbox-2.2</vssd:VirtualSystemType>
+      </System>
+      <Item>
+        <rasd:Caption>1 virtual CPU</rasd:Caption>
+        <rasd:Description>Number of virtual CPUs</rasd:Description>
+        <rasd:ElementName>1 virtual CPU</rasd:ElementName>
+        <rasd:InstanceID>1</rasd:InstanceID>
+        <rasd:ResourceType>3</rasd:ResourceType>
+        <rasd:VirtualQuantity>1</rasd:VirtualQuantity>
+      </Item>
+      <Item>
+        <rasd:AllocationUnits>MegaBytes</rasd:AllocationUnits>
+        <rasd:Caption>1024 MB of memory</rasd:Caption>
+        <rasd:Description>Memory Size</rasd:Description>
+        <rasd:ElementName>1024 MB of memory</rasd:ElementName>
+        <rasd:InstanceID>2</rasd:InstanceID>
+        <rasd:ResourceType>4</rasd:ResourceType>
+        <rasd:VirtualQuantity>1024</rasd:VirtualQuantity>
+      </Item>
+      <Item>
+        <rasd:Address>0</rasd:Address>
+        <rasd:Caption>virtioSCSIController0</rasd:Caption>
+        <rasd:Description>VirtioSCSI Controller</rasd:Description>
+        <rasd:ElementName>virtioSCSIController0</rasd:ElementName>
+        <rasd:InstanceID>3</rasd:InstanceID>
+        <rasd:ResourceSubType>VirtioSCSI</rasd:ResourceSubType>
+        <rasd:ResourceType>20</rasd:ResourceType>
+      </Item>
+      <Item>
+        <rasd:AddressOnParent>0</rasd:AddressOnParent>
+        <rasd:Caption>disk1</rasd:Caption>
+        <rasd:Description>Disk Image</rasd:Description>
+        <rasd:ElementName>disk1</rasd:ElementName>
+        <rasd:HostResource>/disk/vmdisk1</rasd:HostResource>
+        <rasd:InstanceID>4</rasd:InstanceID>
+        <rasd:Parent>3</rasd:Parent>
+        <rasd:ResourceType>17</rasd:ResourceType>
+      </Item>
+      <Item>
+        <rasd:AutomaticAllocation>true</rasd:AutomaticAllocation>
+        <rasd:Caption>Ethernet adapter on 'Bridged'</rasd:Caption>
+        <rasd:Connection>Bridged</rasd:Connection>
+        <rasd:ElementName>Ethernet adapter on 'Bridged'</rasd:ElementName>
+        <rasd:InstanceID>5</rasd:InstanceID>
+        <rasd:ResourceType>10</rasd:ResourceType>
+      </Item>
+    </VirtualHardwareSection>
+    <vbox:Machine ovf:required="false" version="1.16-windows" uuid="{$vmuuid}" name="$image_name" OSType="Debian_64" snapshotFolder="Snapshots" lastStateChange="$(date -u '+%FT%TZ')">
+      <ovf:Info>Complete VirtualBox machine configuration in VirtualBox format</ovf:Info>
+      <Hardware>
+        <CPU>
+          <PAE enabled="false"/>
+          <LongMode enabled="true"/>
+          <X2APIC enabled="true"/>
+          <HardwareVirtExLargePages enabled="true"/>
+        </CPU>
+        <Memory RAMSize="1024"/>
+        <Chipset type="ICH9"/>
+        <Paravirt provider="KVM"/>
+        <Boot>
+          <Order position="1" device="HardDisk"/>
+        </Boot>
+        <Display controller="VMSVGA" VRAMSize="16"/>
+        <BIOS>
+          <IOAPIC enabled="true"/>
+          <SmbiosUuidLittleEndian enabled="true"/>
+        </BIOS>
+        <USB>
+          <Controllers>
+            <Controller name="xHCI" type="XHCI"/>
+          </Controllers>
+        </USB>
+        <Network>
+          <Adapter slot="0" enabled="true" type="virtio">
+            <BridgedInterface name="eth0"/>
+          </Adapter>
+        </Network>
+        <RTC localOrUTC="UTC"/>
+        <Clipboard/>
+        <StorageControllers>
+          <StorageController name="VirtIO" type="VirtioSCSI" PortCount="1" useHostIOCache="false" Bootable="true">
+            <AttachedDevice type="HardDisk" hotpluggable="false" port="0" device="0">
+              <Image uuid="{$diskuuid}"/>
+            </AttachedDevice>
+          </StorageController>
+        </StorageControllers>
+      </Hardware>
+    </vbox:Machine>
+  </VirtualSystem>
+</Envelope>
+_EOF_
+	# Create manifest file for automatic integrity check
+	cat << _EOF_ > "$image_name.mf"
+SHA1 ($image_name.ovf) = $(sha1sum "$image_name.ovf" | mawk '{print $1}')
+SHA1 ($image_name.vmdk) = $(sha1sum "$image_name.vmdk" | mawk '{print $1}')
+_EOF_
+	# Pack everything as OVA appliance for VirtualBox import
+	G_EXEC tar -cf "$image_name.ova" "$image_name."{ovf,vmdk,mf}
+	G_EXEC rm "$image_name."{ovf,vmdk,mf}
+
+	G_EXEC_DESC='Creating VirtualBox xz archive' G_EXEC xz -9e -T0 -M75% "$image_name.ova"
+	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.ova.xz' > '$image_name.ova.xz.sha256'"
+	signature=()
+	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.ova.xz" || exit 1; signature=("$image_name.ova.xz.asc"); }
+	[[ $UPLOAD_SCRIPT ]] && G_EXEC_OUTPUT=1 G_EXEC "$UPLOAD_SCRIPT" "$image_name.ova.xz"{,.sha256} "${signature[@]}" && G_EXEC rm "$image_name.ova.xz"{,.sha256} "${signature[@]}"
+fi
+
+####### VHDX/Hyper-V #####################
+if [[ $VARIANT =~ ^(hyperv|all)$ ]]
+then
+	image_name=${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}
+	# Convert raw image to VHDX
+	G_EXEC qemu-img convert -O vhdx "$OUTPUT_IMG_NAME.img" "$image_name.vhdx"
+
+	G_EXEC_DESC='Creating Hyper-V xz archive' G_EXEC xz -9e -T0 -M75% "$image_name.vhdx"
+	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.vhdx.xz' > '$image_name.vhdx.xz.sha256'"
+	signature=()
+	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.vhdx.xz" || exit 1; signature=("$image_name.vhdx.xz.asc"); }
+	[[ $UPLOAD_SCRIPT ]] && G_EXEC_OUTPUT=1 G_EXEC "$UPLOAD_SCRIPT" "$image_name.vhdx.xz"{,.sha256} "${signature[@]}" && G_EXEC rm "$image_name.vhdx.xz"{,.sha256} "${signature[@]}"
 fi
 
 exit 0

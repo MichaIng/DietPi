@@ -13,20 +13,20 @@
 	readonly FP_SCRIPT='/boot/dietpi/func/dietpi-set_software'
 	readonly AVAIABLE_COMMANDS="
 Available commands:
-$FP_SCRIPT	locale				xx_XX.UTF-8 (eg: en_GB.UTF-8)
-$FP_SCRIPT	allo				eth_dhcp|eth_static [<address>] [<gateway>] [<netmask>] [<dns-nameservers>]
-$FP_SCRIPT	useradd				X=create user with name X and default permissions, using global DietPi password (dietpi)
-$FP_SCRIPT	apt-mirror			<url>|default
-$FP_SCRIPT	apt				clean|reset|cache|lists|archives|compress [enable|disable|ram|disk]
-$FP_SCRIPT	ntpd-mode			[0-4] Time sync modes: 0=custom|1=boot|2=boot+daily|3=boot+hourly|4=daemon+drift
-$FP_SCRIPT	timesync-mirror			Apply network time sync mirror from dietpi.txt
-$FP_SCRIPT	verify_dietpi.txt		Verifies dietpi.txt entries, adds missing entries if required
-$FP_SCRIPT	password			users|software [check] Change passwords for \"root\" and \"dietpi\" users, respectively the global software password [if default is still applied].
-$FP_SCRIPT	boot_wait_for_network		[01] Enable or disable waiting for network interface configuration before DietPi-PostBoot is started, including postboot.d custom scripts and service startups
-$FP_SCRIPT	add_ssh_pubkeys			<empty>
-$FP_SCRIPT	disable_ssh_password_logins	[01]|root|<empty> Whether to disable SSH password logins for all users or root only; Leave empty to apply setting from /boot/dietpi.txt
-$FP_SCRIPT	rpi_firmware_migration		Migrate to the new Raspberry Pi kernel/firmware stack. Supported on Debian Bookworm or newer on Raspberry Pi only.
-$FP_SCRIPT	rpi_kernel_choice		<empty> Supported on Debian Bookworm or newer on Raspberry Pi only
+$FP_SCRIPT locale                       xx_XX.UTF-8 (eg: en_GB.UTF-8)
+$FP_SCRIPT allo (deprecated)            eth_dhcp|eth_static [<address>] [<gateway>] [<netmask>] [<dns-nameservers>] (use dietpi-network CLI instead)
+$FP_SCRIPT useradd                      X=create user with name X and default permissions, using global DietPi password (dietpi)
+$FP_SCRIPT apt-mirror                   <url>|default
+$FP_SCRIPT apt                          clean|reset|cache|lists|archives|compress [enable|disable|ram|disk]
+$FP_SCRIPT ntpd-mode                    [0-4] Time sync modes: 0=custom|1=boot|2=boot+daily|3=boot+hourly|4=daemon+drift
+$FP_SCRIPT timesync-mirror              Apply network time sync mirror from dietpi.txt
+$FP_SCRIPT verify_dietpi.txt            Verifies dietpi.txt entries, adds missing entries if required
+$FP_SCRIPT password                     users|software [check] Change passwords for \"root\" and \"dietpi\" users, respectively the global software password [if default is still applied].
+$FP_SCRIPT boot_wait_for_network        [01] Enable or disable waiting for network interface configuration before DietPi-PostBoot is started, including postboot.d custom scripts and service startups
+$FP_SCRIPT add_ssh_pubkeys              <empty>
+$FP_SCRIPT disable_ssh_password_logins  [01]|root|<empty> Whether to disable SSH password logins for all users or root only; Leave empty to apply setting from /boot/dietpi.txt
+$FP_SCRIPT rpi_firmware_migration       Migrate to the new Raspberry Pi kernel/firmware stack. Supported on Debian Bookworm or newer on Raspberry Pi only.
+$FP_SCRIPT rpi_kernel_choice            <empty> Supported on Debian Bookworm or newer on Raspberry Pi only
 "	#////////////////////////////////////
 
 	# Inputs
@@ -300,6 +300,7 @@ $FP_SCRIPT	rpi_kernel_choice		<empty> Supported on Debian Bookworm or newer on R
 			106) all_components='orangepi5b';;
 			107) all_components='orangepi4pro';;
 			108) all_components='orangepizero3w';;
+			109) all_components='lubancat4';;
 			*) :;;
 		esac
 		G_EXEC eval "echo 'deb https://dietpi.com/apt $G_DISTRO_NAME $components' > /etc/apt/sources.list.d/dietpi.list"
@@ -514,31 +515,20 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free non-free-fi
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# allo
+	# allo: deprecated: use dietpi-network CLI instead
 	#/////////////////////////////////////////////////////////////////////////////////////
 	Allo_Main()
 	{
+		local iface=$(G_GET_NET -t eth iface)
 		if [[ $INPUT_MODE_VALUE == 'eth_dhcp' ]]
 		then
-			G_CONFIG_INJECT 'iface eth' 'iface eth0 inet dhcp' /etc/network/interfaces
-			sed --follow-symlinks -i '0,/^.*dns-nameservers[[:blank:]].*$/s//#dns-nameservers 9.9.9.9 149.112.112.112/' /etc/network/interfaces
+			/boot/dietpi/dietpi-network apply "$iface" --dhcp --no-restart
 
 		elif [[ $INPUT_MODE_VALUE == 'eth_static' ]]
 		then
-			G_CONFIG_INJECT 'iface eth' 'iface eth0 inet static' /etc/network/interfaces
-			[[ $INPUT_ADDITIONAL_1 ]] && sed --follow-symlinks -i "0,\|^.*address[[:blank:]].*\$|s||address $INPUT_ADDITIONAL_1|" /etc/network/interfaces
-			[[ $INPUT_ADDITIONAL_2 ]] && sed --follow-symlinks -i "0,\|^.*gateway[[:blank:]].*\$|s||gateway $INPUT_ADDITIONAL_2|" /etc/network/interfaces
-			[[ $INPUT_ADDITIONAL_3 ]] && sed --follow-symlinks -i "0,\|^.*netmask[[:blank:]].*\$|s||netmask $INPUT_ADDITIONAL_3|" /etc/network/interfaces
-			[[ $INPUT_ADDITIONAL_4 ]] || return 0
-			if command -v resolvconf > /dev/null
-			then
-				sed --follow-symlinks -i "0,\|^.*dns-nameservers[[:blank:]].*\$|s||dns-nameservers $INPUT_ADDITIONAL_4|" /etc/network/interfaces
-			else
-				sed --follow-symlinks -i "0,\|^.*dns-nameservers[[:blank:]].*\$|s||#dns-nameservers $INPUT_ADDITIONAL_4|" /etc/network/interfaces
-				> /etc/resolv.conf
-				local i
-				for i in $INPUT_ADDITIONAL_4; do echo "nameserver $i" >> /etc/resolv.conf; done
-			fi
+			local ip=$INPUT_ADDITIONAL_1 gateway=$INPUT_ADDITIONAL_2 mask=$INPUT_ADDITIONAL_3 dns=$INPUT_ADDITIONAL_4
+			[[ $ip && $mask ]] && ip+=$(mawk -v m="$mask" 'BEGIN{n=split(m,a,"."); bits=0; for(i=1;i<=n;i++) {v=a[i]; while(v>0) {bits+=v%2;v=int(v/2)}}; print "/" bits}')
+			/boot/dietpi/dietpi-network apply "$iface" --static ${ip:+--ip "$ip"} ${gateway:+--gateway "$gateway"} ${dns:+--dns "$dns"} --no-restart
 		else
 			Unknown_Input_Mode
 		fi

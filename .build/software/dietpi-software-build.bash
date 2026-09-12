@@ -19,7 +19,7 @@ else
 		'12.'*|'bookworm/sid') G_DISTRO=7;;
 		'13.'*|'trixie/sid') G_DISTRO=8;;
 		'14.'*|'forky/sid') G_DISTRO=9;;
-		*) Error_Exit "Unsupported distro version \"$debian_version\"";;
+		*) Error_Exit "Unsupported Debian version \"$debian_version\"";;
 	esac
 	# Ubuntu ships with /etc/debian_version from Debian testing, hence we assume one version lower.
 	grep -q '^ID=ubuntu' /etc/os-release && ((G_DISTRO--))
@@ -101,7 +101,15 @@ apackages=('xz-utils' 'parted' 'fdisk' 'systemd-container')
 emulation=0
 (( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || emulation=1
 
-(( $emulation )) && apackages+=('qemu-user-static')
+if (( $emulation ))
+then
+	if (( $G_DISTRO > 7 ))
+	then
+		apackages+=('qemu-user-binfmt')
+	else
+		apackages+=('qemu-user-static')
+	fi
+fi
 
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
@@ -119,10 +127,13 @@ G_EXEC truncate -s 8G "$image"
 # Mount as loop device
 FP_LOOP=$(losetup -f)
 G_EXEC losetup -P "$FP_LOOP" "$image"
-G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -N1 '$FP_LOOP' <<< ',+'"
-G_EXEC_OUTPUT=1 G_EXEC resize2fs "${FP_LOOP}p1"
+# - resize2fs: "Please run 'e2fsck -f /dev/loop0p1' first."
+# - e2fsck "-p": "need terminal for interactive repairs"
+# - sleep: e2fsck: No such file or directory while trying to open /dev/loop0p1
+G_SLEEP 0.1
 G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
+G_EXEC_OUTPUT=1 G_EXEC resize2fs "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 

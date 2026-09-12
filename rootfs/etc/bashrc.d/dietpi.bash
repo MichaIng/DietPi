@@ -18,7 +18,7 @@
 	[[ -t 0 && $- == *'i'* ]] || return 0
 
 	# DietPi-Globals: dietpi-* aliases, G_* functions and variables
-	. /boot/dietpi/func/dietpi-globals || { echo -e '[\e[31mFAILED\e[0m] DietPi-Login | Failed to load DietPi-Globals. Skipping DietPi login scripts...'; return 1; }
+	. /boot/dietpi/func/dietpi-globals || { echo -e '[\e[31mFAILED\e[0m] DietPi-Login | Failed to load DietPi-Globals. Skipping DietPi login scripts...' >&2; return 1; }
 
 	# Aliases
 	# - sudo alias that allows running other aliases with "sudo": https://github.com/MichaIng/DietPi/issues/424
@@ -49,6 +49,7 @@
 	alias dietpi-cloudshell='/boot/dietpi/dietpi-cloudshell'
 	alias dietpi-vpn='/boot/dietpi/dietpi-vpn'
 	alias dietpi-ddns='/boot/dietpi/dietpi-ddns'
+	alias dietpi-network='/boot/dietpi/dietpi-network'
 	alias dietpi-display='/boot/dietpi/dietpi-display'
 	alias dietpi-benchmark='/boot/dietpi/dietpi-benchmark'
 	alias cpu='/boot/dietpi/dietpi-cpuinfo'
@@ -61,7 +62,7 @@
 	# - 1337 moments ;)
 	alias 1337='echo "Indeed, you are =)"'
 
-	# "G_DIETPI-NOFITY -2 message" starts a process animation. If scripts fail to kill the animation, e.g. cancelled by user, terminal bash prompt has to do it as last resort.
+	# "G_DIETPI-NOTIFY -2 message" starts a process animation. If scripts fail to kill the animation, e.g. cancelled by user, terminal bash prompt has to do it as last resort.
 	[[ $PROMPT_COMMAND == *'dietpi-process.pid'* ]] || PROMPT_COMMAND="[[ -w '/tmp/dietpi-process.pid' ]] && rm -f /tmp/dietpi-process.pid &> /dev/null && echo -ne '\r\e[J'; $PROMPT_COMMAND"
 
 	# Workaround if SSH client overrides locale with "POSIX" fallback: https://github.com/MichaIng/DietPi/issues/1540#issuecomment-367066178

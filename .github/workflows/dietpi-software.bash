@@ -317,6 +317,8 @@ Process_Software()
 			216) aSERVICES[i]='immich-ml' aTCP[i]='3003';;
 			217) aCOMMANDS[i]='uv --version';;
 			218) aSERVICES[i]='prometheus' aTCP[i]='9090' aCOMMANDS[i]='curl -sSf '\''http://127.0.0.1:9090/api/v1/query?query=up'\'' | grep '\''"status":"success"'\';;
+			219) aSERVICES[i]='homebox' aTCP[i]='7745' aCOMMANDS[i]='curl -sSf '\''http://127.0.0.1:7745/api/v1/status'\'' | grep '\''"health":true'\';;
+			220) aSERVICES[i]='scrypted' aTCP[i]='10443 11080 10081';; # ports: https (secure), http (insecure), debug
 			*) :;;
 		esac
 		aINSTALL[i]=1
@@ -367,7 +369,15 @@ done
 ##########################################
 apackages=('xz-utils' 'parted' 'fdisk' 'systemd-container')
 
-(( $emulation )) && apackages+=('qemu-user-static')
+if (( $emulation ))
+then
+	if (( $G_DISTRO > 7 ))
+	then
+		apackages+=('qemu-user-binfmt')
+	else
+		apackages+=('qemu-user-static')
+	fi
+fi
 
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
@@ -387,12 +397,14 @@ G_EXEC curl -sSfO "https://dietpi.com/downloads/images/$image.xz"
 G_EXEC xz -d "$image.xz"
 G_EXEC truncate -s 16G "$image"
 
-# Loop device
+# Mount as loop device
 FP_LOOP=$(losetup -f)
 G_EXEC losetup -P "$FP_LOOP" "$image"
 G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -N1 '$FP_LOOP' <<< ',+'"
 # - resize2fs: "Please run 'e2fsck -f /dev/loop0p1' first."
 # - e2fsck "-p": "need terminal for interactive repairs"
+# - sleep: e2fsck: No such file or directory while trying to open /dev/loop0p1
+G_SLEEP 0.1
 G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC_OUTPUT=1 G_EXEC resize2fs "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
