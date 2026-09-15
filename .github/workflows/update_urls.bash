@@ -127,10 +127,7 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/phpmyadmin/phpm
 aREGEX[$software_id]='version='\''[^'\'']*'\'
 aREPLACE[$software_id]='version='\''$release'\'
 
-# HAProxy
-software_id=98
-aCHECK[$software_id]='url=$(curl -sSf '\''https://www.haproxy.org/'\'' | grep -Po '\''(?<=href=")/download/.*/src/haproxy-.*\.tar\.gz(?=")'\'' | head -1); echo "${url:+https://www.haproxy.org$url}"'
-aREGEX[$software_id]='https://www.haproxy.org/download/.*/src/haproxy-.*.tar.gz'
+# HAProxy: Installed as Debian package via https://haproxy.debian.net, no source URL to track anymore.
 
 # Prometheus Node Exporter
 software_id=99
