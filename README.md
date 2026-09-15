@@ -288,6 +288,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [OpenJDK](https://github.com/openjdk)
 - [Blynk Server](https://github.com/Peterkn2001/blynk-server)
 - [File Browser](https://github.com/filebrowser/filebrowser)
+- [FileBrowser Quantum](https://github.com/gtsteffaniak/filebrowser)
 - [HomeBox](https://github.com/sysadminsmedia/homebox)
 - [Spotifyd](https://github.com/Spotifyd/spotifyd)
 - [DietPi-Dashboard](https://github.com/ravenclaw900/dietpi-dashboard)
