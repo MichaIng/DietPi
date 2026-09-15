@@ -126,7 +126,7 @@ _EOF_
 
 # - conffiles
 G_EXEC eval "echo '/etc/$NAME/$NAME.cfg' > '$DIR/DEBIAN/conffiles'"
-for i in "$DIR/etc/$NAME/errors/"*.http; do G_EXEC eval "echo '${i#$DIR}' >> '$DIR/DEBIAN/conffiles'"; done
+for i in "$DIR/etc/$NAME/errors/"*.http; do G_EXEC eval "echo '${i#"$DIR"}' >> '$DIR/DEBIAN/conffiles'"; done
 
 # - postinst
 cat << _EOF_ > "$DIR/DEBIAN/postinst" || exit 1
