@@ -37,7 +37,8 @@ G_EXEC curl -sSfO "https://www.haproxy.org$url"
 G_EXEC tar xf "$NAME-$version.tar.gz"
 G_EXEC rm "$NAME-$version.tar.gz"
 G_EXEC cd "$NAME-$version"
-G_EXEC_OUTPUT=1 G_EXEC make -j "$(nproc)" TARGET='linux-glibc' USE_PCRE2=1 USE_PCRE2_JIT=1 USE_OPENSSL=1 USE_ECH=1 USE_QUIC=1 USE_SLZ=1 USE_PROMEX=1 CFLAGS='-g0 -O3' LDFLAGS='-Wl,-z,relro -Wl,-z,now -Wl,--as-needed'
+# From OpenSSL 4.0 on, we can add USE_ECH=1
+G_EXEC_OUTPUT=1 G_EXEC make -j "$(nproc)" TARGET='linux-glibc' USE_PCRE2=1 USE_PCRE2_JIT=1 USE_OPENSSL=1 USE_QUIC=1 USE_SLZ=1 USE_PROMEX=1 CFLAGS='-g0 -O3' LDFLAGS='-Wl,-z,relro -Wl,-z,now -Wl,--as-needed'
 G_EXEC strip --remove-section=.comment --remove-section=.note "$NAME"
 grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l'
 DIR="/tmp/${NAME}_$G_HW_ARCH_NAME"
