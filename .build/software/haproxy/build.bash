@@ -28,7 +28,7 @@ done
 NAME='haproxy'
 PRETTY='HAProxy'
 url=$(curl -sSf "${header[@]}" 'https://www.haproxy.org/' | grep -Po 'href="\K/download/3\..*/src/haproxy-.*\.tar\.gz(?=")' | head -1)
-version=${url##haproxy-}; version=${version%.tar.gz}
+version=${url##*haproxy-}; version=${version%.tar.gz}
 [[ $version ]] || { G_DIETPI-NOTIFY 1 "No latest $PRETTY version found, aborting ..."; exit 1; }
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
