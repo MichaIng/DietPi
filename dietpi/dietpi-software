@@ -6954,45 +6954,40 @@ _EOF_
 
 		if To_Install 98 haproxy # HAProxy
 		then
-			# Dependencies
-			aDEPS=('make' 'gcc' 'libpcre2-dev' 'libssl-dev' 'zlib1g-dev' 'libsystemd-dev')
+			# Pre-v10.8: Migrate a source-built install to the Debian package. Remove the custom systemd unit first, since a unit below
+			# "/etc/systemd/system" takes priority over the one shipped with the package below "/lib/systemd/system", which would else
+			# still point to the now removed self-compiled binary.
+			if [[ -f '/usr/local/sbin/haproxy' ]]
+			then
+				G_DIETPI-NOTIFY 2 'Migrating existing source-built HAProxy install to the Debian package'
+				G_WHIP_MSG '[ INFO ] Migrating HAProxy to the Debian package
+\nHAProxy was previously installed from source. It is now switched to the officially maintained Debian package, while your existing config is retained as is:
+- /etc/haproxy/haproxy.cfg
+\nAs the Debian package additionally moves the daemon from "root" to a dedicated, unprivileged "haproxy" user/group, you may want to review and adjust your config: https://dietpi.com/docs/software/advanced_networking/#haproxy'
+				G_EXEC systemctl stop haproxy
+				[[ -f '/etc/systemd/system/haproxy.service' ]] && G_EXEC rm /etc/systemd/system/haproxy.service
+				G_EXEC rm -Rf /usr/local/{sbin/haproxy,sbin/halog,doc/haproxy} /usr/local/share/man/man1/haproxy.1
+				[[ -d '/usr/local/share/man/man1' ]] && G_EXEC rmdir -p --ignore-fail-on-non-empty /usr/local/share/man/man1
+				G_EXEC systemctl daemon-reload
+			fi
 
-			# Obtain latest version: Stick with v3. Once v4 is released, we will surely need to adjust below code.
-			local url=$(curl -sSfL 'https://www.haproxy.org/' | grep -Po '(?<=href=")/download/3\..*/src/haproxy-.*\.tar\.gz(?=")' | head -1)
-			local fallback_url='https://www.haproxy.org/download/3.4/src/haproxy-3.4.4.tar.gz'
-			Download_Install "${url:+https://www.haproxy.org$url}"
-
-			# Compile
-			G_EXEC cd haproxy-3.*
-			G_EXEC_OUTPUT=1 G_EXEC make -j "$G_HW_CPU_CORES" TARGET=linux-glibc USE_PCRE2=1 USE_OPENSSL=1 USE_ZLIB=1 USE_SYSTEMD=1 USE_PROMEX=1 DEBUG_CFLAGS='-g0 -O3' LDFLAGS='-Wl,-z,relro -Wl,-z,now -Wl,--as-needed'
-			# Strip binary size
-			G_EXEC strip --remove-section=.comment --remove-section=.note haproxy
-			# Install
-			G_EXEC_OUTPUT=1 G_EXEC make install
-			# - systemd unit
-			G_EXEC cd admin/systemd
-			G_EXEC_OUTPUT=1 G_EXEC make
-			G_EXEC mv {,/etc/systemd/system/}haproxy.service
-			# - Error pages
-			G_EXEC cd "$G_WORKING_DIR"
-			G_EXEC mkdir -p /etc/haproxy/errors
-			G_EXEC mv haproxy-3.*/examples/errorfiles/*.http /etc/haproxy/errors/
-			# Cleanup
-			G_EXEC rm -R haproxy-3.*
-
-			# Jail directory
-			G_EXEC mkdir -p /var/lib/haproxy
-
-			# Config
-			[[ -f '/etc/haproxy/haproxy.cfg' ]] || cat << _EOF_ > /etc/haproxy/haproxy.cfg
+			# Config: Assure that the config is in place before the package is installed below. The Debian package ships its own
+			# default "/etc/haproxy/haproxy.cfg" as config file, but only writes it if none is present yet. Hence, on a fresh
+			# install, apply the DietPi default config here already, hardened to run as the same unprivileged "haproxy"
+			# user/group and chroot as used/created by the Debian package, instead of "root". On a reinstall, or after a
+			# migration from the previous source install, the config already in place is left untouched.
+			if [[ ! -f '/etc/haproxy/haproxy.cfg' ]]
+			then
+				G_EXEC mkdir -p /etc/haproxy
+				cat << _EOF_ > /etc/haproxy/haproxy.cfg
 global
 	maxconn 64
 	# Jail directory
 	chroot /var/lib/haproxy
-	stats socket /run/haproxy.sock mode 660 level admin
+	stats socket /run/haproxy/admin.sock mode 660 level admin
 	stats timeout 30s
-	user root
-	group root
+	user haproxy
+	group haproxy
 	daemon
 
 	# Default SSL material locations
@@ -7050,7 +7045,20 @@ backend nodes
 	stats hide-version
 	stats auth admin:$GLOBAL_PW
 _EOF_
-			G_EXEC chmod 0600 /etc/haproxy/haproxy.cfg
+				G_EXEC chmod 0600 /etc/haproxy/haproxy.cfg
+			fi
+
+			# APT package: haproxy.debian.net provides more up to date LTS releases than Debian's own repository: 3.2 for Bookworm,
+			# 3.4 for Trixie and later: https://haproxy.debian.net. Forky is not listed there yet, hence map it to Trixie, as done
+			# elsewhere in this script for repositories which do not support it yet.
+			local dist=${G_DISTRO_NAME/forky/trixie} hdn_version='3.4'
+			(( $G_DISTRO == 7 )) && hdn_version='3.2' # Bookworm
+			G_EXEC mkdir -p /etc/apt/keyrings
+			G_EXEC curl -sSfLo /etc/apt/keyrings/dietpi-haproxy.gpg 'https://haproxy.debian.net/haproxy-archive-keyring.gpg'
+			G_EXEC eval "echo 'deb [signed-by=/etc/apt/keyrings/dietpi-haproxy.gpg] https://haproxy.debian.net $dist-backports-$hdn_version main' > /etc/apt/sources.list.d/dietpi-haproxy.list"
+			G_AGUP
+			G_AGI "haproxy=$hdn_version.*"
+			unset -v dist hdn_version
 		fi
 
 		if To_Install 35 lyrionmusicserver # Lyrion Music Server
@@ -13962,7 +13970,13 @@ _EOF_
 		if To_Uninstall 98 # HAProxy
 		then
 			Remove_Service haproxy
-			G_EXEC rm -Rf /{etc,var/lib,/usr/local/{doc,sbin}}/haproxy /usr/local/share/man/man1/haproxy.1
+			G_AGP haproxy
+			G_EXEC rm -f /etc/apt/sources.list.d/dietpi-haproxy.list
+			G_EXEC rm -f /etc/apt/keyrings/dietpi-haproxy.gpg
+			G_EXEC rm -Rf /etc/haproxy /var/lib/haproxy
+
+			# Pre-v10.8: Source-built install leftovers
+			G_EXEC rm -Rf /usr/local/{sbin/haproxy,sbin/halog,doc/haproxy} /usr/local/share/man/man1/haproxy.1
 			[[ -d '/usr/local/share/man/man1' ]] && G_EXEC rmdir -p --ignore-fail-on-non-empty /usr/local/share/man/man1
 		fi
 
