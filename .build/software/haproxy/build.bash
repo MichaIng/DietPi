@@ -7,12 +7,15 @@ header=()
 [[ $GH_TOKEN ]] && header=('-H' "Authorization: token $GH_TOKEN")
 
 # APT dependencies
-adeps_build=('make' 'gcc' 'libpcre2-dev' 'libssl-dev')
-adeps=('libc6' 'libpcre2-8-0')
+adeps_build=('make' 'gcc' 'libpcre2-dev' 'libssl-dev' 'libcrypt-dev')
+adeps=('libc6' 'libpcre2-8-0' 'libcrypt1')
+flags=()
+# From OpenSSL 3.5 on, use USE_QUIC=1
+# From OpenSSL 4.0 on, use USE_ECH=1 (currently in Debian experimental)
 case $G_DISTRO in
 	7) adeps+=('libssl3');;
-	8) adeps+=('libssl3t64');;
-	9) adeps+=('libssl3t64');;
+	8) adeps+=('libssl3t64') flags+=('USE_QUIC=1');;
+	9) adeps+=('libssl3t64') flags+=('USE_QUIC=1');;
 	*) Error_Exit "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)";;
 esac
 G_AGUP
@@ -37,8 +40,7 @@ G_EXEC curl -sSfO "https://www.haproxy.org$url"
 G_EXEC tar xf "$NAME-$version.tar.gz"
 G_EXEC rm "$NAME-$version.tar.gz"
 G_EXEC cd "$NAME-$version"
-# From OpenSSL 4.0 on, we can add USE_ECH=1
-G_EXEC_OUTPUT=1 G_EXEC make -j "$(nproc)" TARGET='linux-glibc' USE_PCRE2=1 USE_PCRE2_JIT=1 USE_OPENSSL=1 USE_QUIC=1 USE_SLZ=1 USE_PROMEX=1 CFLAGS='-g0 -O3' LDFLAGS='-Wl,-z,relro -Wl,-z,now -Wl,--as-needed'
+G_EXEC_OUTPUT=1 G_EXEC make -j "$(nproc)" TARGET='linux-glibc' USE_PCRE2=1 USE_PCRE2_JIT=1 USE_OPENSSL=1 USE_SLZ=1 USE_PROMEX=1 "${flags[@]}" CFLAGS='-g0 -O3' LDFLAGS='-Wl,-z,relro -Wl,-z,now -Wl,--as-needed'
 G_EXEC strip --remove-section=.comment --remove-section=.note "$NAME"
 grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l'
 DIR="/tmp/${NAME}_$G_HW_ARCH_NAME"
