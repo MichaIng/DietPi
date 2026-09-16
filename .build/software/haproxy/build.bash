@@ -149,7 +149,7 @@ then
 	echo 'Configuring $PRETTY systemd service ...'
 	systemctl --no-reload unmask $NAME
 	systemctl enable $NAME
-	systemctl restart $NAME
+	pgrep -x 'dietpi-software' > /dev/null || systemctl restart $NAME
 fi
 _EOF_
 
