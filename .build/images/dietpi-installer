@@ -24,7 +24,7 @@
 	# - HW_MODEL=0				(must match one of the supported IDs below)
 	# - WIFI_REQUIRED=0			[01]
 	# - GUEST_NETWORK_REQUIRED=0		[01] (containers only: install Dropbear, ifupdown + DHCP client and configure Ethernet, for containers with their own network stack, e.g. Proxmox LXC)
-	# - DISTRO_TARGET=8			[789] (Bookworm: 7, Trixie: 8, Forky: 9)
+	# - DISTRO_TARGET='auto'		[789]|auto (Bookworm: 7, Trixie: 8, Forky: 9, 'auto' keeps the current Debian version, unless it is EOL)
 	# - TEST_KERNEL=1			Install test kernel from https://dietpi.com/downloads/binaries/testing/
 	# - TEST_UBOOT=1			Install test U-Boot from https://dietpi.com/downloads/binaries/testing/
 	# - RK35XX_MAINLINE=1			Install mainline kernel on RK35xx based SBCs we would otherwise install the vendor kernel
@@ -86,7 +86,7 @@
 	# - Remove all configs except debconf pre-configuration: It does not work until apt-utils is installed but shall work as fast as it is.
 	find /etc/apt/apt.conf.d -type f ! -name '70debconf' -exec rm -v {} +
 	# - Apply wanted APT configs: Overwritten by DietPi code archive: https://raw.githubusercontent.com/MichaIng/DietPi/dev/rootfs/etc/apt/apt.conf.d/97dietpi
-	cat << '_EOF_' > /etc/apt/apt.conf.d/97dietpi
+	cat << '_EOF_' > /etc/apt/apt.conf.d/97dietpi || exit 1
 APT::Install-Recommends "false";
 APT::Install-Suggests "false";
 APT::AutoRemove::RecommendsImportant "false";
@@ -99,7 +99,7 @@ Acquire::IndexTargets::deb::Translations::KeepCompressedAs "xz";
 Acquire::IndexTargets::deb-src::Sources::KeepCompressedAs "xz";
 _EOF_
 	# - During install only: Force new DEB package config files and tmpfs lists + archives
-	cat << '_EOF_' > /etc/apt/apt.conf.d/98dietpi-installer
+	cat << '_EOF_' > /etc/apt/apt.conf.d/98dietpi-installer || exit 1
 #clear DPkg::options;
 DPkg::options:: "--force-confmiss,confnew";
 Dir::Cache "/tmp/apt";
@@ -132,7 +132,7 @@ _EOF_
 	GITOWNER=${GITOWNER:-MichaIng}
 
 	# Select Git branch
-	if [[ ! $GITBRANCH ]]
+	if [[ ! $GITBRANCH && $G_INTERACTIVE != 0 && -t 0 ]]
 	then
 		aWHIP_BRANCH=(
 
@@ -147,7 +147,7 @@ _EOF_
 		fi
 		unset -v aWHIP_BRANCH
 	fi
-	echo "[ INFO ] Selected Git branch: $GITOWNER/$GITBRANCH"
+	echo "[ INFO ] Selected Git branch: $GITOWNER/${GITBRANCH:=master}"
 
 	#------------------------------------------------------------------------------------------------
 	# DietPi-Globals
@@ -590,6 +590,8 @@ _EOF_
 
 		while :
 		do
+			# "auto" keeps the current or lowest supported Debian version
+			[[ $DISTRO_TARGET == 'auto' ]] && DISTRO_TARGET=${G_WHIP_MENU_ARRAY[0]}
 			[[ $DISTRO_TARGET =~ ^[0-9]+$ ]] && for i in "${G_WHIP_MENU_ARRAY[@]}"
 			do
 				[[ $DISTRO_TARGET == "$i" ]] && break 2
@@ -597,7 +599,7 @@ _EOF_
 
 			G_WHIP_DEFAULT_ITEM=${G_WHIP_MENU_ARRAY[0]} # First item matches current distro version
 			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-			if G_WHIP_MENU "Please select a Debian version to install on this system.\n\nCurrently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"
+			if G_WHIP_MENU "Please select a Debian version to install on this system.\n\nCurrently installed: $G_DISTRO_NAME (ID: $G_DISTRO)" || [[ $G_WHIP_RETURNED_VALUE ]]
 			then
 				DISTRO_TARGET=$G_WHIP_RETURNED_VALUE
 				break
@@ -1142,7 +1144,7 @@ _EOF_'
 			if dpkg --compare-versions "$(dpkg-query -Wf '${Version}' base-files)" gt 20
 			then
 				G_DIETPI-NOTIFY 2 'Enforcing downgrade of Armbian'\''s base-files package to Debian'\''s'
-				cat << '_EOF_' > /etc/apt/preferences.d/dietpi-armbian-tmp
+				cat << '_EOF_' > /etc/apt/preferences.d/dietpi-armbian-tmp || exit 1
 Package: base-files
 Pin: release o=Debian
 Pin-Priority: 1000
@@ -1250,7 +1252,7 @@ _EOF_
 			if [[ $G_HW_MODEL =~ ^(55|56)$ ]]
 			then
 				G_DIETPI-NOTIFY 2 'Blacklisting video related kernel modules'
-				cat << '_EOF_' > /etc/modprobe.d/dietpi-headless.conf
+				cat << '_EOF_' > /etc/modprobe.d/dietpi-headless.conf || exit 1
 blacklist hantro_vpu
 blacklist lima
 blacklist rockchip_rga
@@ -1333,7 +1335,7 @@ fi' /boot/boot.cmd
 			then
 				G_AGI device-tree-compiler
 				G_EXEC mkdir -p /boot/overlay-user
-				cat << '_EOF_' > /boot/overlay-user/dietpi-usb-otg.dts
+				cat << '_EOF_' > /boot/overlay-user/dietpi-usb-otg.dts || exit 1
 /dts-v1/;
 /plugin/;
 / {
@@ -1355,7 +1357,7 @@ _EOF_
 			then
 				G_AGI device-tree-compiler
 				G_EXEC mkdir -p /boot/overlay-user
-				cat << '_EOF_' > /boot/overlay-user/dietpi-spi1_1.dts
+				cat << '_EOF_' > /boot/overlay-user/dietpi-spi1_1.dts || exit 1
 /dts-v1/;
 /plugin/;
 / {
@@ -1487,7 +1489,7 @@ _EOF_
 		elif [[ $G_HW_MODEL != 75 && $(dpkg-query -Wf '${Package} ') == *'armbian'* ]]
 		then
 			# Prevent any unintended packages from being installed from Armbian's APT repository, like base-files: https://github.com/MichaIng/DietPi/issues/6227#issuecomment-1713688577
-			cat << '_EOF_' > /etc/apt/preferences.d/dietpi-armbian
+			cat << '_EOF_' > /etc/apt/preferences.d/dietpi-armbian || exit 1
 Package: *
 Pin: origin apt.armbian.com
 Pin-Priority: -1
@@ -1499,7 +1501,7 @@ _EOF_
 			if dpkg --compare-versions "$(dpkg-query -Wf '${Version}' base-files)" gt 20
 			then
 				G_DIETPI-NOTIFY 2 'Enforcing downgrade of Armbian'\''s base-files package to Debian'\''s'
-				cat << '_EOF_' > /etc/apt/preferences.d/dietpi-armbian-tmp
+				cat << '_EOF_' > /etc/apt/preferences.d/dietpi-armbian-tmp || exit 1
 Package: base-files
 Pin: release o=Debian
 Pin-Priority: 1000
@@ -1527,7 +1529,7 @@ _EOF_
 			local arch='arm'
 			(( $G_HW_ARCH == 3 )) && arch='arm64'
 			G_EXEC mkdir -p /etc/kernel/post{inst,rm}.d /etc/initramfs/post-update.d
-			cat << _EOF_ > /etc/initramfs/post-update.d/99-dietpi-uboot
+			cat << _EOF_ > /etc/initramfs/post-update.d/99-dietpi-uboot || exit 1
 #!/bin/dash -e
 echo 'update-initramfs: Converting to U-Boot format'
 mkimage -A $arch -O linux -T ramdisk -C gzip -n uInitrd -d "\$2" "/boot/uInitrd-\$1"
@@ -1535,7 +1537,7 @@ ln -sfv "uInitrd-\$1" /boot/uInitrd || mv -v "/boot/uInitrd-\$1" /boot/uInitrd
 exit 0
 _EOF_
 			G_EXEC chmod +x /etc/initramfs/post-update.d/99-dietpi-uboot
-			cat << '_EOF_' > /etc/kernel/postinst.d/dietpi-initramfs_cleanup
+			cat << '_EOF_' > /etc/kernel/postinst.d/dietpi-initramfs_cleanup || exit 1
 #!/bin/dash -e
 echo 'Removing obsolete initramfs images'
 find /boot -maxdepth 1 -name 'initrd.img-*' -o -name 'uInitrd-*' | while read -r f
@@ -2171,7 +2173,7 @@ _EOF_'
 		then
 			G_DIETPI-NOTIFY 2 'Enabling NanoPi R2S Ethernet LEDs'
 			G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-eth-leds.conf'
-			cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
+			cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules || exit 1
 SUBSYSTEM=="leds", KERNEL=="wan_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth0 up", RUN+="/bin/ip l s eth0 down"
 SUBSYSTEM=="leds", KERNEL=="lan_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth1 up", RUN+="/bin/ip l s eth1 down"
 _EOF_
@@ -2180,13 +2182,13 @@ _EOF_
 		then
 			G_DIETPI-NOTIFY 2 'Enabling NanoPi R5C Ethernet LEDs'
 			G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-eth-leds.conf'
-			cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
+			cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules || exit 1
 SUBSYSTEM=="leds", KERNEL=="green:lan", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth0 up", RUN+="/bin/ip l s eth0 down"
 SUBSYSTEM=="leds", KERNEL=="green:wan", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth1 up", RUN+="/bin/ip l s eth1 down"
 SUBSYSTEM=="leds", KERNEL=="green:wlan", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="wlan0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s wlan0 up", RUN+="/bin/ip l s wlan0 down"
 _EOF_
 			G_DIETPI-NOTIFY 2 'Assuring persistent classic Ethernet interface names: /etc/udev/rules.d/99-dietpi-nanopir5c.rules'
-			cat << '_EOF_' > /etc/udev/rules.d/99-dietpi-nanopir5c.rules
+			cat << '_EOF_' > /etc/udev/rules.d/99-dietpi-nanopir5c.rules || exit 1
 SUBSYSTEM=="net", KERNEL=="eth0", KERNELS=="0002:21:00.0", RUN:="/bin/true"
 SUBSYSTEM=="net", KERNEL=="eth1", KERNELS=="0001:11:00.0", NAME="to_eth0", RUN:="/bin/true"
 SUBSYSTEM=="net", KERNEL=="to_eth0", RUN="/bin/ip l s dev eth0 name eth1", RUN+="/bin/ip l s dev to_eth0 name eth0", RUN+="/bin/udevadm trigger -c add /sys/class/net/eth0 /sys/class/net/eth1"
@@ -2196,7 +2198,7 @@ _EOF_
 		then
 			G_DIETPI-NOTIFY 2 'Enabling NanoPi R6S Ethernet LEDs'
 			G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-eth-leds.conf'
-			cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
+			cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules || exit 1
 SUBSYSTEM=="leds", KERNEL=="lan2_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth0 up", RUN+="/bin/ip l s eth0 down"
 SUBSYSTEM=="leds", KERNEL=="wan_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth1 up", RUN+="/bin/ip l s eth1 down"
 SUBSYSTEM=="leds", KERNEL=="lan1_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth2", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth2 up", RUN+="/bin/ip l s eth2 down"
@@ -2206,7 +2208,7 @@ _EOF_
 		then
 			G_DIETPI-NOTIFY 2 'Enabling NanoPi R6C Ethernet LEDs'
 			G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-eth-leds.conf'
-			cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
+			cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules || exit 1
 SUBSYSTEM=="leds", KERNEL=="wan_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth0 up", RUN+="/bin/ip l s eth0 down"
 SUBSYSTEM=="leds", KERNEL=="lan1_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth1 up", RUN+="/bin/ip l s eth1 down"
 SUBSYSTEM=="leds", KERNEL=="user_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="wlan0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s wlan0 up", RUN+="/bin/ip l s wlan0 down"
@@ -2215,7 +2217,7 @@ _EOF_
 		elif [[ $G_HW_MODEL == 102 && $kernel == 'rk35xx' ]]
 		then
 			G_DIETPI-NOTIFY 2 'Assuring persistent classic Ethernet interface names: /etc/udev/rules.d/99-dietpi-persistent-eth-interfaces.rules'
-			cat << '_EOF_' > /etc/udev/rules.d/99-dietpi-persistent-eth-interfaces.rules
+			cat << '_EOF_' > /etc/udev/rules.d/99-dietpi-persistent-eth-interfaces.rules || exit 1
 SUBSYSTEM=="net", KERNEL=="eth0", KERNELS=="0000:21:00.0", RUN:="/bin/true"
 SUBSYSTEM=="net", KERNEL=="eth1", KERNELS=="0000:01:00.0", NAME="to_eth0", RUN:="/bin/true"
 SUBSYSTEM=="net", KERNEL=="to_eth0", RUN="/bin/ip l s dev eth0 name eth1", RUN+="/bin/ip l s dev to_eth0 name eth0", RUN+="/bin/udevadm trigger -c add /sys/class/net/eth0 /sys/class/net/eth1"
@@ -2224,7 +2226,7 @@ _EOF_
 		elif [[ $G_HW_MODEL == 82 && $kernel == 'rk35xx' ]]
 		then
 			G_DIETPI-NOTIFY 2 'Assuring persistent classic Ethernet interface names: /etc/udev/rules.d/99-dietpi-orangepi5plus.rules'
-			cat << '_EOF_' > /etc/udev/rules.d/99-dietpi-orangepi5plus.rules
+			cat << '_EOF_' > /etc/udev/rules.d/99-dietpi-orangepi5plus.rules || exit 1
 SUBSYSTEM=="net", KERNEL=="eth0", KERNELS=="0004:41:00.0", RUN:="/bin/true"
 SUBSYSTEM=="net", KERNEL=="eth1", KERNELS=="0003:31:00.0", NAME="to_eth0", RUN:="/bin/true"
 SUBSYSTEM=="net", KERNEL=="to_eth0", RUN="/bin/ip l s dev eth0 name eth1", RUN+="/bin/ip l s dev to_eth0 name eth0", RUN+="/bin/udevadm trigger -c add /sys/class/net/eth0 /sys/class/net/eth1"
@@ -2233,7 +2235,7 @@ _EOF_
 		elif (( $G_HW_MODEL == 88 ))
 		then
 			G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-eth-leds.conf'
-			cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
+			cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules || exit 1
 SUBSYSTEM=="leds", KERNEL=="100m_link", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1"
 SUBSYSTEM=="leds", KERNEL=="100m_act", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{rx}="1", ATTR{tx}="1"
 _EOF_
@@ -2395,6 +2397,17 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
 		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*- /var/{cache/debconf,lib/dpkg}/*-old /var/lib/dhcp{,cd}/{,.}*
 		find /usr -type d -name '__pycache__' -exec rm -Rv {} +
+
+		# Binary hwdb
+		if (( $G_HW_MODEL == 75 ))
+		then
+			# Since udev does not run in containers, nothing makes use of the database. It is recreated on a udev package upgrade, but we can save ~13 MiB disk usage here.
+			rm -fv /{etc,usr/lib}/udev/hwdb.bin
+		else
+			# Revert to static /usr/lib/udev/hwdb.bin, which however must be present for udev to assign all device properties. That file is created by udev's postinst, hence should always exist. Error out if it does not. We want to check cases where it is missing, if any.
+			rm -fv /etc/udev/hwdb.bin
+			[[ -f '/usr/lib/udev/hwdb.bin' ]] || { G_DIETPI-NOTIFY 1 '/usr/lib/udev/hwdb.bin does not exist. Please report this at https://github.com/MichaIng/DietPi/issues or https://dietpi.com/forum/c/troubleshooting/10.'; exit 1; }
+		fi
 
 		# Remove installer script
 		[[ -f $FP_SCRIPT ]] && G_EXEC rm -v "$FP_SCRIPT"
