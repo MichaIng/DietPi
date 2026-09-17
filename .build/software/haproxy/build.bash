@@ -57,7 +57,7 @@ G_EXEC mv examples/errorfiles/*.http "$DIR"/etc/"$NAME"/errors/
 # - service: https://github.com/haproxy/haproxy/blob/master/admin/systemd/haproxy.service.in
 #G_EXEC_OUTPUT=1 G_EXEC make -C admin/systemd PREFIX='/usr'
 #G_EXEC mv {admin/systemd,"$DIR"/lib/systemd/system}/"$NAME".service
-cat << '_EOF_' > "$DIR"/lib/systemd/system}/"$NAME".service || exit 1
+cat << '_EOF_' > "$DIR/lib/systemd/system/$NAME.service" || exit 1
 [Unit]
 Description=HAProxy Load Balancer
 After=network-online.target
