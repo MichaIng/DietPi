@@ -7,8 +7,8 @@ header=()
 [[ $GH_TOKEN ]] && header=('-H' "Authorization: token $GH_TOKEN")
 
 # APT dependencies
-adeps_build=('make' 'gcc' 'libpcre2-dev' 'libssl-dev' 'libcrypt-dev')
-adeps=('libc6' 'libpcre2-8-0' 'libcrypt1')
+adeps_build=('make' 'gcc' 'libcrypt-dev' 'libpcre2-dev' 'libssl-dev')
+adeps=('libc6' 'libcrypt1' 'libpcre2-8-0')
 flags=()
 # From OpenSSL 3.5 on, use USE_QUIC=1
 # From OpenSSL 4.0 on, use USE_ECH=1 (currently in Debian experimental)
@@ -49,14 +49,46 @@ G_EXEC_OUTPUT=1 G_EXEC make DESTDIR="$DIR" PREFIX='/usr' install
 
 # Prepare DEB package
 G_DIETPI-NOTIFY 2 "Building $PRETTY DEB package"
-G_EXEC mkdir -p "$DIR"/{DEBIAN,etc/"$NAME"/errors,lib/systemd/system,var/lib/"$NAME"}
+G_EXEC mkdir -p "$DIR"/{DEBIAN,etc/"$NAME"/{conf.d,errors},lib/systemd/system,var/lib/"$NAME"}
 
 # - error pages
 G_EXEC mv examples/errorfiles/*.http "$DIR"/etc/"$NAME"/errors/
 
-# - service
-G_EXEC_OUTPUT=1 G_EXEC make -C admin/systemd
-G_EXEC mv {admin/systemd,"$DIR"/lib/systemd/system}/"$NAME".service
+# - service: https://github.com/haproxy/haproxy/blob/master/admin/systemd/haproxy.service.in
+#G_EXEC_OUTPUT=1 G_EXEC make -C admin/systemd PREFIX='/usr'
+#G_EXEC mv {admin/systemd,"$DIR"/lib/systemd/system}/"$NAME".service
+cat << '_EOF_' > "$DIR/lib/systemd/system/$NAME.service" || exit 1
+[Unit]
+Description=HAProxy Load Balancer
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=notify
+RuntimeDirectory=haproxy
+EnvironmentFile=-/etc/default/haproxy
+Environment="CONFIG=/etc/haproxy/haproxy.cfg" "CFGDIR=/etc/haproxy/conf.d" "EXTRAOPTS=-S /run/haproxy/master.sock"
+ExecStart=/usr/sbin/haproxy -Ws -f "$CONFIG" -f "$CFGDIR" $EXTRAOPTS
+ExecReload=/usr/sbin/haproxy -Ws -f "$CONFIG" -f "$CFGDIR" -c $EXTRAOPTS
+ExecReload=/bin/kill -USR2 $MAINPID
+KillMode=mixed
+Restart=always
+SuccessExitStatus=143
+
+# Hardening
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+SystemCallFilter=~@cpu-emulation @keyring @module @obsolete @raw-io @reboot @swap @sync
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
 
 # - config
 cat << '_EOF_' > "$DIR/etc/$NAME/$NAME.cfg" || exit 1
@@ -67,7 +99,9 @@ global
 	stats timeout 30s
 	user haproxy
 	group haproxy
-	daemon
+
+	# Logging
+	log stdout format short daemon notice
 
 	# Default SSL material locations
 	ca-base /etc/ssl/certs
@@ -101,10 +135,11 @@ defaults
 	errorfile 504 /etc/haproxy/errors/504.http
 
 frontend localnodes
-	bind *:80
+	bind :80
 	mode http
 	default_backend nodes
 
+# Example load balancer
 backend nodes
 	mode http
 	balance roundrobin
@@ -113,18 +148,22 @@ backend nodes
 	http-request add-header X-Forwarded-Proto https if { ssl_fc }
 	option httpchk HEAD / HTTP/1.1
 	http-check send meth HEAD uri / ver HTTP/1.1 hdr host localhost
-	server web01 127.0.0.1:9000 check
-	server web02 127.0.0.1:9001 check
-	server web03 127.0.0.1:9002 check
+	# Define your backend nodes for the load balancer here:
+	#server web01 127.0.0.1:9000 check
+	#server web02 127.0.0.1:9001 check
+	#server web03 127.0.0.1:9002 check
 
-# Admin web page
-	listen stats
-	bind *:1338
-	stats enable
-	stats uri /
-	http-request use-service prometheus-exporter if { path /metrics }
-	stats hide-version
+# Statistics/admin web page
+frontend stats
+	bind :1338
+	mode http
+	# Enable statistics on this port at given URI path
+	#stats uri /
 	stats auth admin:dietpi
+	stats hide-version
+	http-request use-service prometheus-exporter if { path /metrics }
+	# Allow backend server administration from the stats page
+	#stats admin if TRUE
 _EOF_
 
 # - conffiles
@@ -173,6 +212,12 @@ then
 	then
 		echo 'Removing $PRETTY systemd service overrides ...'
 		rm -Rv /etc/systemd/system/$NAME.service.d
+	fi
+
+	if [ -f '/etc/default/$NAME' ]
+	then
+		echo 'Removing $PRETTY environment file ...'
+		rm -v /etc/default/$NAME
 	fi
 
 	if [ -d '/etc/$NAME' ]
