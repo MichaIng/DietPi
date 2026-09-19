@@ -369,7 +369,7 @@ aREGEX[$software_id]='https://github\.com/fclairamb/solidping/releases/download/
 software_id='nextexplorer'
 aURL[$software_id]='https://api.github.com/repos/cerede2000/NextExplorer/releases/latest'
 aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/nextexplorer-[0-9][^\"\/]*\.linux-$arch-minimal\.tar\.gz(?=\")"'
-aARCH[$software_id]='arm64 x86'
+aARCH[$software_id]='arm64 x64'
 aARCH_CHECK[$software_id]='riscv64'
 aREGEX[$software_id]='https://github\.com/cerede2000/NextExplorer/releases/download/.*/nextexplorer-[0-9][^/]*\.linux-\$arch-minimal\.tar\.gz'
 
