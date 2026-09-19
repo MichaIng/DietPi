@@ -207,6 +207,7 @@ Process_Software()
 			'netdata') aSERVICES[$i]='netdata' aTCP[$i]='19999';;
 			'nextcloud') aCOMMANDS[$i]='sudo -u www-data php /var/www/nextcloud/occ status && curl -sSf '\''http://127.0.0.1/nextcloud/status.php'\'' && echo';;
 			'nextcloudtalk') aSERVICES[$i]='coturn' aTCP[$i]=3478 aUDP[$i]=3478;;
+			'nextexplorer') aSERVICES[i]='nextexplorer' aTCP[i]='5173' aCOMMANDS[i]='curl -sSf '\''http://127.0.0.1:5173/healthz'\'' | grep '\''"TODO"'\';;
 			'nfsclient') aCOMMANDS[$i]='mount.nfs -V';;
 			'nfsserver') aSERVICES[$i]='nfs-kernel-server' aTCP[$i]='2049';;
 			'nginx') aSERVICES[$i]='nginx' aTCP[$i]='80';;
