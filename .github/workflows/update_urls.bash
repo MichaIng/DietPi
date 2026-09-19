@@ -294,21 +294,14 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/ptitSeb/box64/r
 aREGEX[$software_id]='version='\''[^'\'']*'\'
 aREPLACE[$software_id]='version='\''$release'\'
 
-# File Browser
-software_id=198
-aURL[$software_id]='https://api.github.com/repos/filebrowser/filebrowser/releases/latest'
-aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/linux-$arch-filebrowser\.tar\.gz(?=\")"'
-aARCH[$software_id]='armv6 armv7 arm64 amd64 riscv64'
-aREGEX[$software_id]='https://github.com/filebrowser/filebrowser/releases/download/.*/linux-\$arch-filebrowser.tar.gz'
-
 # FileBrowser Quantum
-software_id=221
+software_id=198
 #aURL[$software_id]='https://api.github.com/repos/gtsteffaniak/filebrowser/releases/latest'
 #aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/linux-$arch-filebrowser(?=\")"'
 # TODO: remove grep for "v2" once v2 is marked as latest
 aURL[$software_id]='https://api.github.com/repos/gtsteffaniak/filebrowser/releases'
 aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/linux-$arch-filebrowser(?=\")" | grep -m 1 "v2"'
-aARCH[$software_id]='armv6 armv7 arm64 amd64'
+aARCH[$software_id]='armv6 armv7 arm64 amd64 riscv64'
 aREGEX[$software_id]='https://github.com/gtsteffaniak/filebrowser/releases/download/.*/linux-\$arch-filebrowser'
 
 # HomeBox

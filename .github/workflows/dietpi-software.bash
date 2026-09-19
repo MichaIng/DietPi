@@ -296,7 +296,7 @@ Process_Software()
 			195) aCOMMANDS[i]='yt-dlp --version';;
 			196) aCOMMANDS[i]='java -version';;
 			197) aCOMMANDS[i]='box64 -v';;
-			198) aSERVICES[i]='filebrowser' aTCP[i]='8084';;
+			198) aSERVICES[i]='filebrowser-quantum' aTCP[i]='8084' aCOMMANDS[i]='curl -sSf '\''http://127.0.0.1:8084/health'\'' | grep '\''"message":"ok"'\';;
 			199) aSERVICES[i]='spotifyd' aUDP[i]='5353';; # + random high TCP port
 			200) aSERVICES[i]='dietpi-dashboard-frontend dietpi-dashboard-backend' aTCP[i]='5252 5253';;
 			201) aSERVICES[i]='zerotier-one' aTCP[i]='9993';;
@@ -319,7 +319,6 @@ Process_Software()
 			218) aSERVICES[i]='prometheus' aTCP[i]='9090' aCOMMANDS[i]='curl -sSf '\''http://127.0.0.1:9090/api/v1/query?query=up'\'' | grep '\''"status":"success"'\';;
 			219) aSERVICES[i]='homebox' aTCP[i]='7745' aCOMMANDS[i]='curl -sSf '\''http://127.0.0.1:7745/api/v1/status'\'' | grep '\''"health":true'\';;
 			220) aSERVICES[i]='scrypted' aTCP[i]='10443 11080 10081';; # ports: https (secure), http (insecure), debug
-			221) aSERVICES[i]='filebrowser-quantum' aTCP[i]='8085' aCOMMANDS[i]='curl -sSf '\''http://127.0.0.1:8085/health'\'' | grep '\''"message":"ok"'\';;
 			*) :;;
 		esac
 		aINSTALL[i]=1
