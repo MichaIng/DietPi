@@ -842,10 +842,11 @@ Available commands:
 		aSOFTWARE_DEPS[$software_id]='87'
 		#------------------
 		software_id=198
-		aSOFTWARE_NAME[$software_id]='File Browser'
-		aSOFTWARE_DESC[$software_id]='web based file manager'
+		aSOFTWARE_NAME[$software_id]='FileBrowser Quantum'
+		aSOFTWARE_DESC[$software_id]='web-based file manager forked from the original File Browser'
 		aSOFTWARE_CATX[$software_id]=4
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#filebrowser'
+		aSOFTWARE_DEPS[$software_id]='7'
 		#------------------
 		software_id=219
 		aSOFTWARE_NAME[$software_id]='HomeBox'
@@ -11543,7 +11544,7 @@ _EOF_
 			[[ -f '/var/www/homer/assets/config.yml' ]] || G_EXEC cp /var/www/homer/assets/config.yml{.dist,}
 		fi
 
-		if To_Install 198 filebrowser # File Browser
+		if To_Install 198 filebrowser # FileBrowser Quantum
 		then
 			case $G_HW_ARCH in
 				1) local arch='armv6';;
@@ -11553,46 +11554,149 @@ _EOF_
 				*) local arch='amd64';;
 			esac
 
-			local fallback_url="https://github.com/filebrowser/filebrowser/releases/download/v2.63.23/linux-$arch-filebrowser.tar.gz"
-			Download_Install "$(curl -sSfL 'https://api.github.com/repos/filebrowser/filebrowser/releases/latest' | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/linux-$arch-filebrowser\.tar\.gz(?=\")")" ./filebrowser/
-
-			# Reinstall
+			# Delete old install dir
 			[[ -d '/opt/filebrowser' ]] && G_EXEC rm -R /opt/filebrowser
 
-			# Install
-			G_EXEC mv filebrowser /opt/
+			# Create install dir
+			G_EXEC mkdir -p /opt/filebrowser
+
+			# Download, install, and make binary executable
+			local fallback_url="https://github.com/gtsteffaniak/filebrowser/releases/download/v2.0.6-beta/linux-$arch-filebrowser"
+			#Download_Install "$(curl -sSfL 'https://api.github.com/repos/gtsteffaniak/filebrowser/releases/latest' | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/linux-$arch-filebrowser(?=\")")" /opt/filebrowser/filebrowser
+			# While v2 is in beta, we have to manually search for v2 releases
+			# TODO: remove grep for "v2" once v2 is marked as latest
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/gtsteffaniak/filebrowser/releases' | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/linux-$arch-filebrowser(?=\")" | grep -m 1 'v2')" /opt/filebrowser/filebrowser
+			G_EXEC chmod +x /opt/filebrowser/filebrowser
 
 			# User
-			G_EXEC mkdir -p /mnt/dietpi_userdata/filebrowser
-			Create_User -g dietpi -d /mnt/dietpi_userdata/filebrowser filebrowser
+			Create_User -G dietpi -d /mnt/dietpi_userdata/filebrowser filebrowser
+			G_EXEC mkdir -p /mnt/dietpi_userdata/filebrowser/files
 
-			# Config if not exist
-			if [[ ! -f '/mnt/dietpi_userdata/filebrowser/filebrowser.db' ]]
+			# Migrate from legacy File Browser, checking for current database is a failsafe in case the user names a file filebrowser.db
+			if [[ -f '/mnt/dietpi_userdata/filebrowser/filebrowser.db' && ! -f '/mnt/dietpi_userdata/filebrowser/filebrowser.sqlite' ]]
 			then
-				G_EXEC cd /mnt/dietpi_userdata/filebrowser
-				G_EXEC /opt/filebrowser/filebrowser config init
-				# Reduce minimum password length to match default software password if it is shorter
-				local extra_args=()
-				(( ${#GLOBAL_PW} < 12 )) && extra_args+=('--minimum-password-length' "${#GLOBAL_PW}")
-				G_EXEC /opt/filebrowser/filebrowser config set -a 0.0.0.0 -p 8084 -r /mnt "${extra_args[@]}"
-				G_EXEC_DESC='Setting up File Browser login user "dietpi"' G_EXEC /opt/filebrowser/filebrowser users add dietpi "$GLOBAL_PW" --perm.admin
+				# Copy legacy database to new location
+				G_EXEC mv /mnt/dietpi_userdata/filebrowser/filebrowser.db /mnt/dietpi_userdata/filebrowser/filebrowser.db.old
+
+				cat << _EOF_ > /mnt/dietpi_userdata/filebrowser/config.yaml || exit 1
+http:
+  port: 8084
+server:
+  sources:
+    - path: "/mnt/dietpi_userdata/filebrowser/files"
+  database:
+    path: "/mnt/dietpi_userdata/filebrowser/filebrowser.sqlite"
+    migrateFrom: "/mnt/dietpi_userdata/filebrowser/filebrowser.db.old"
+  cacheDir: "/tmp/dietpi-filebrowser"
+  cacheDirCleanup: true
+_EOF_
+
+				# Migrate database
+				G_EXEC /opt/filebrowser/filebrowser -c /mnt/dietpi_userdata/filebrowser/config.yaml init
+
+				# Delete old database
+				G_EXEC rm /mnt/dietpi_userdata/filebrowser/filebrowser.db.old
+
+				cat << _EOF_ > /mnt/dietpi_userdata/filebrowser/config.yaml || exit 1
+http:
+  port: 8084
+server:
+  sources:
+    - path: "/mnt/dietpi_userdata/filebrowser/files"
+  database:
+    path: "/mnt/dietpi_userdata/filebrowser/filebrowser.sqlite"
+  cacheDir: "/tmp/dietpi-filebrowser"
+  cacheDirCleanup: true
+_EOF_
+
+				# Promote dietpi user to admin
+				G_EXEC_NOHALT=1 G_EXEC /opt/filebrowser/filebrowser -c /mnt/dietpi_userdata/filebrowser/config.yaml user promote dietpi || {
+					# If error, make new admin user
+					G_EXEC_PRE_FUNC(){ acommand[4]="--password=$GLOBAL_PW"; } # Mask password in console output
+					G_EXEC /opt/filebrowser/filebrowser -c /mnt/dietpi_userdata/filebrowser/config.yaml user set admin --password="${GLOBAL_PW//?/X}" --admin
+				}
+			else
+				# Create config if it doesn't exist
+				if [[ ! -f '/mnt/dietpi_userdata/filebrowser/config.yaml' ]]
+				then
+					cat << _EOF_ > /mnt/dietpi_userdata/filebrowser/config.yaml || exit 1
+http:
+  port: 8084
+server:
+  sources:
+    - path: "/mnt/dietpi_userdata/filebrowser/files"
+  database:
+    path: "/mnt/dietpi_userdata/filebrowser/filebrowser.sqlite"
+  cacheDir: "/tmp/dietpi-filebrowser"
+  cacheDirCleanup: true
+_EOF_
+				fi
+
+				# Create database with default admin password if it doesn't exist
+				if [[ ! -f '/mnt/dietpi_userdata/filebrowser/filebrowser.sqlite' ]]
+				then
+					# Create admin user
+					G_EXEC_PRE_FUNC(){ acommand[4]="--password=$GLOBAL_PW"; } # Mask password in console output
+					G_EXEC /opt/filebrowser/filebrowser -c /mnt/dietpi_userdata/filebrowser/config.yaml user set admin --password="${GLOBAL_PW//?/X}" --admin
+				fi
 			fi
 
 			# Permissions
-			G_EXEC chown -R filebrowser:root /mnt/dietpi_userdata/filebrowser /opt/filebrowser
+			G_EXEC chown -R 'filebrowser:filebrowser' /mnt/dietpi_userdata/filebrowser
+
+			# Create env file if it doesn't exist
+			if [[ ! -f '/mnt/dietpi_userdata/filebrowser/filebrowser.env' ]]
+			then
+				cat << _EOF_ > /mnt/dietpi_userdata/filebrowser/filebrowser.env || exit 1
+# FileBrowser Quantum environment variables
+# https://filebrowserquantum.com/en/docs/reference/environment-variables/
+
+# OnlyOffice JWT secret
+#FILEBROWSER_ONLYOFFICE_SECRET=
+# OIDC client ID
+#FILEBROWSER_OIDC_CLIENT_ID=
+# OIDC client secret
+#FILEBROWSER_OIDC_CLIENT_SECRET=
+# JWT signing key
+#FILEBROWSER_JWT_TOKEN_SECRET=
+# TOTP encryption secret
+#FILEBROWSER_TOTP_SECRET=
+# reCAPTCHA secret key
+#FILEBROWSER_RECAPTCHA_SECRET=
+_EOF_
+			fi
 
 			# Service
-			cat << '_EOF_' > /etc/systemd/system/filebrowser.service
+			cat << '_EOF_' > /etc/systemd/system/filebrowser.service || exit 1
 [Unit]
-Description=File Browser (DietPi)
-Documentation=https://filebrowser.org/
+Description=FileBrowser Quantum (DietPi)
 Wants=network-online.target
 After=network-online.target remote-fs.target
 
 [Service]
+SyslogIdentifier=FileBrowser Quantum
 User=filebrowser
-UMask=002
-ExecStart=/opt/filebrowser/filebrowser -d /mnt/dietpi_userdata/filebrowser/filebrowser.db
+WorkingDirectory=/mnt/dietpi_userdata/filebrowser
+# Workaround for failing systemd.automount: https://dietpi.com/forum/t/17463/22
+EnvironmentFile=-/mnt/dietpi_userdata/filebrowser/filebrowser.env
+ExecStartPre=/bin/test -e /mnt/dietpi_userdata/filebrowser/filebrowser.env
+ExecStart=/opt/filebrowser/filebrowser -c /mnt/dietpi_userdata/filebrowser/config.yaml
+Restart=on-failure
+RestartSec=2
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=1
+PrivateUsers=1
+PrivateTmp=1
+PrivateDevices=1
+ProtectKernelTunables=1
+ProtectKernelModules=1
+ProtectControlGroups=1
+ProtectKernelLogs=1
+ProtectClock=1
+NoNewPrivileges=1
+ReadWritePaths=-/mnt -/media
 
 [Install]
 WantedBy=multi-user.target
@@ -14851,11 +14955,11 @@ _EOF_
 			G_EXEC rm -Rf /mnt/dietpi_userdata/scrypted
 		fi
 
-		if To_Uninstall 198 # File Browser
+		if To_Uninstall 198 # FileBrowser Quantum
 		then
-			Remove_Service filebrowser 1
-			[[ -d '/opt/filebrowser' ]] && G_EXEC rm -R /opt/filebrowser
-			[[ -d '/mnt/dietpi_userdata/filebrowser' ]] && G_EXEC rm -R /mnt/dietpi_userdata/filebrowser
+			Remove_Service filebrowser 1 1
+			G_EXEC rm -Rf /opt/filebrowser
+			G_EXEC rm -Rf /mnt/dietpi_userdata/filebrowser
 		fi
 
 		if To_Uninstall 219 # HomeBox

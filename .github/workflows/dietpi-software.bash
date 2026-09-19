@@ -296,7 +296,7 @@ Process_Software()
 			195) aCOMMANDS[i]='yt-dlp --version';;
 			196) aCOMMANDS[i]='java -version';;
 			197) aCOMMANDS[i]='box64 -v';;
-			198) aSERVICES[i]='filebrowser' aTCP[i]='8084';;
+			198) aSERVICES[i]='filebrowser-quantum' aTCP[i]='8084' aCOMMANDS[i]='curl -sSf '\''http://127.0.0.1:8084/health'\'' | grep '\''"message":"ok"'\';;
 			199) aSERVICES[i]='spotifyd' aUDP[i]='5353';; # + random high TCP port
 			200) aSERVICES[i]='dietpi-dashboard-frontend dietpi-dashboard-backend' aTCP[i]='5252 5253';;
 			201) aSERVICES[i]='zerotier-one' aTCP[i]='9993';;
