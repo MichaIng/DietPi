@@ -58,7 +58,7 @@ G_EXEC curl -sSfLO "https://github.com/$ORGA/SDL/releases/download/release-$vers
 G_EXEC tar xf "$NAME-$version.tar.gz"
 G_EXEC rm "$NAME-$version.tar.gz"
 G_EXEC cd "$NAME-$version"
-G_EXEC_OUTPUT=1 G_EXEC ./configure --{,exec-}prefix='/tmp/deps' C{,XX}FLAGS='-g0 -O3' --enable-{alsa,video-kmsdrm,libudev,joystick,hidapi,hidapi-joystick} "${sdl_flags[@]}" --disable-{video-{rpi,x11,wayland,opengles1,vulkan,offscreen,dummy},pipewire,jack,diskaudio,sndio,dummyaudio,oss,dbus,ime,sdl2-config}
+G_EXEC_OUTPUT=1 G_EXEC ./configure --{,exec-}prefix='/tmp/deps' C{,XX}FLAGS='-g0 -O3' --enable-{alsa,video-kmsdrm,libudev,joystick,hidapi,hidapi-joystick,sdl2-config} "${sdl_flags[@]}" --disable-{video-{rpi,x11,wayland,opengles1,vulkan,offscreen,dummy},pipewire,jack,diskaudio,sndio,dummyaudio,oss,dbus,ime}
 G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
 find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
 [[ -d '/tmp/deps' ]] && G_EXEC rm -R /tmp/deps
