@@ -117,6 +117,8 @@ G_EXEC cd "$NAME-$version"
 # - Add SDL2 to rpath
 # shellcheck disable=SC2015
 grep -q '^include(GNUInstallDirs)$' CMakeLists.txt && G_EXEC sed --follow-symlinks -i "/^include(GNUInstallDirs)$/a\set(CMAKE_INSTALL_RPATH \"\${CMAKE_INSTALL_FULL_LIBDIR}/$NAME\")" CMakeLists.txt || Error_Exit 'CMakeLists.txt does not contain "include(GNUInstallDirs)" line anymore'
+# - Patch SDL2 include
+grep -q '^#include <SDL2/SDL\.h>$' src/archivers/chd/osdlib_unix.cpp && G_EXEC sed --follow-symlinks -i 's|^#include <SDL2/SDL\.h>$|#include <SDL.h>|' src/archivers/chd/osdlib_unix.cpp || Error_Exit 'osdlib_unix.cpp does not contain "SDL2/SDL.h" include anymore'
 export CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3'
 G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH='/tmp/deps' -DCMAKE_INSTALL_PREFIX='/usr' -DUSE_IPC_SOCKET=0
 G_EXEC_OUTPUT=1 G_EXEC cmake --build build
