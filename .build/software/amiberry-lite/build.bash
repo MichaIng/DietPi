@@ -62,6 +62,7 @@ G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
 find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
 [[ -d '/tmp/deps' ]] && G_EXEC rm -R /tmp/deps
 G_EXEC_OUTPUT=1 G_EXEC make install
+export PKG_CONFIG_PATH='/tmp/deps/lib/pkgconfig'
 
 # Build SDL2_image
 NAME='SDL2_image'
@@ -114,6 +115,7 @@ G_EXEC cd "$NAME-$version"
 # - Add SDL2 to rpath
 # shellcheck disable=SC2015
 grep -q '^include(GNUInstallDirs)$' CMakeLists.txt && G_EXEC sed --follow-symlinks -i "/^include(GNUInstallDirs)$/a\set(CMAKE_INSTALL_RPATH \"\${CMAKE_INSTALL_FULL_LIBDIR}/$NAME\")" CMakeLists.txt || Error_Exit 'CMakeLists.txt does not contain "include(GNUInstallDirs)" line anymore'
+export CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3'
 G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH='/tmp/deps' -DCMAKE_INSTALL_PREFIX='/usr' -DUSE_IPC_SOCKET=0
 G_EXEC_OUTPUT=1 G_EXEC cmake --build build
 G_EXEC strip --remove-section=.comment --remove-section=.note "build/$NAME"
