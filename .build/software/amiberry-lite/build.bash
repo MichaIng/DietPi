@@ -66,7 +66,7 @@ G_EXEC_OUTPUT=1 G_EXEC make install
 # Build SDL2_image
 NAME='SDL2_image'
 PRETTY=$NAME
-version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_image/releases' | grep -Po '"name": *"\K2\.[^"]+(?=")')
+version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_image/releases' | grep -Po '"name": *"\K2\.[^"]+(?=")' | head -1)
 [[ $version ]] || Error_Exit "No latest $PRETTY version found"
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
@@ -83,7 +83,7 @@ G_EXEC_OUTPUT=1 G_EXEC make install
 # Build SDL2_ttf
 NAME='SDL2_ttf'
 PRETTY=$NAME
-version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases' | grep -Po '"name": *"\K2\.[^"]+(?=")')
+version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases' | grep -Po '"name": *"\K2\.[^"]+(?=")' | head -1)
 [[ $version ]] || Error_Exit "No latest $PRETTY version found"
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
