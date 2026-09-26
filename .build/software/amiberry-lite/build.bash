@@ -9,7 +9,7 @@ header=()
 
 # APT dependencies
 # - SDL2
-adeps_build=('make' 'gcc' 'pkg-config' 'libc6-dev' 'libdrm-dev' 'libgbm-dev' 'libasound2-dev' 'libudev-dev')
+adeps_build=('make' 'gcc' 'pkg-config' 'libc6-dev' 'libdrm-dev' 'libgbm-dev' 'libegl-dev' 'libasound2-dev' 'libudev-dev')
 adeps=('libc6' 'libdrm2' 'libgbm1' 'libegl1' 'libgl1-mesa-dri' 'libudev1')
 # - GL or GLES
 if (( $G_HW_ARCH == 10 ))
