@@ -121,7 +121,7 @@ grep -q '^include(GNUInstallDirs)$' CMakeLists.txt && G_EXEC sed --follow-symlin
 # shellcheck disable=SC2015
 grep -q '^#include <SDL2/SDL\.h>$' src/archivers/chd/osdlib_unix.cpp && G_EXEC sed --follow-symlinks -i 's|^#include <SDL2/SDL\.h>$|#include <SDL.h>|' src/archivers/chd/osdlib_unix.cpp || Error_Exit 'osdlib_unix.cpp does not contain "SDL2/SDL.h" include anymore'
 # shellcheck disable=SC2015
-grep -q ' SDL2 SDL2_ttf SDL2_image' external/libguisan/CMakeLists.txt && G_EXEC sed --follow-symlinks -i 's| SDL2 SDL2_ttf SDL2_image| SDL2::SDL2 SDL2_ttf SDL2_image|' external/libguisan/CMakeLists.txt || Error_Exit 'libguisan'\'' CMakeLists.txt does not contain the bare SDL2 target anymore'
+grep -q ' SDL2 SDL2_ttf SDL2_image' external/libguisan/CMakeLists.txt && G_EXEC sed --follow-symlinks -i 's| SDL2 SDL2_ttf SDL2_image| SDL2::SDL2 SDL2_ttf SDL2_image|' external/libguisan/CMakeLists.txt || Error_Exit 'libguisan'\''s CMakeLists.txt does not contain the bare SDL2 target anymore'
 export CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3'
 G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH='/tmp/deps' -DCMAKE_INSTALL_PREFIX='/usr' -DUSE_IPC_SOCKET=0
 G_EXEC_OUTPUT=1 G_EXEC cmake --build build
@@ -138,7 +138,7 @@ G_EXEC mkdir -p "$DIR/"{DEBIAN,"mnt/dietpi_userdata/$NAME",lib/systemd/system}
 G_EXEC_OUTPUT=1 G_EXEC cmake --install "$NAME-$version/build" --prefix "$DIR/usr"
 # - Obtain library dir
 LIB_DIR=$(find "$DIR/usr/lib/"*"/$NAME" -maxdepth 0)
-G_EXEC cp -aL /tmp/deps/lib/libSDL2{,_image,_ttf}.so.0 "$LIB_DIR/"
+G_EXEC cp -aL /tmp/deps/lib/libSDL2{,_image,_ttf}-2.0.so.0 "$LIB_DIR/"
 
 # - systemd service
 cat << _EOF_ > "$DIR/lib/systemd/system/$NAME.service" || exit 1
