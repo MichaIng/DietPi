@@ -48,11 +48,12 @@ done
 # Build SDL2
 NAME='SDL2'
 PRETTY=$NAME
-version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL/releases' | grep -Po '"name": *"\K2\.[^"]+(?=")' | head -1)
+ORGA='libsdl-org'
+version=$(curl -sSf "${header[@]}" "https://api.github.com/repos/$ORGA/SDL/releases" | grep -Po '"name": *"\K2\.[^"]+(?=")' | head -1)
 [[ $version ]] || Error_Exit "No latest $PRETTY version found"
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
-G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL/releases/download/release-$version/$NAME-$version.tar.gz"
+G_EXEC curl -sSfLO "https://github.com/$ORGA/SDL/releases/download/release-$version/$NAME-$version.tar.gz"
 [[ -d $NAME-$version ]] && G_EXEC rm -R "$NAME-$version"
 G_EXEC tar xf "$NAME-$version.tar.gz"
 G_EXEC rm "$NAME-$version.tar.gz"
@@ -67,11 +68,11 @@ export PKG_CONFIG_PATH='/tmp/deps/lib/pkgconfig'
 # Build SDL2_image
 NAME='SDL2_image'
 PRETTY=$NAME
-version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_image/releases' | grep -Po '"name": *"\K2\.[^"]+(?=")' | head -1)
+version=$(curl -sSf "${header[@]}" "https://api.github.com/repos/$ORGA/SDL_image/releases" | grep -Po '"name": *"\K2\.[^"]+(?=")' | head -1)
 [[ $version ]] || Error_Exit "No latest $PRETTY version found"
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
-G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_image/releases/download/release-$version/$NAME-$version.tar.gz"
+G_EXEC curl -sSfLO "https://github.com/$ORGA/SDL_image/releases/download/release-$version/$NAME-$version.tar.gz"
 [[ -d $NAME-$version ]] && G_EXEC rm -R "$NAME-$version"
 G_EXEC tar xf "$NAME-$version.tar.gz"
 G_EXEC rm "$NAME-$version.tar.gz"
@@ -84,11 +85,11 @@ G_EXEC_OUTPUT=1 G_EXEC make install
 # Build SDL2_ttf
 NAME='SDL2_ttf'
 PRETTY=$NAME
-version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases' | grep -Po '"name": *"\K2\.[^"]+(?=")' | head -1)
+version=$(curl -sSf "${header[@]}" "https://api.github.com/repos/$ORGA/SDL_ttf/releases" | grep -Po '"name": *"\K2\.[^"]+(?=")' | head -1)
 [[ $version ]] || Error_Exit "No latest $PRETTY version found"
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
-G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_ttf/releases/download/release-$version/$NAME-$version.tar.gz"
+G_EXEC curl -sSfLO "https://github.com/$ORGA/SDL_ttf/releases/download/release-$version/$NAME-$version.tar.gz"
 [[ -d $NAME-$version ]] && G_EXEC rm -R "$NAME-$version"
 G_EXEC tar xf "$NAME-$version.tar.gz"
 G_EXEC rm "$NAME-$version.tar.gz"
@@ -99,8 +100,9 @@ find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded
 G_EXEC_OUTPUT=1 G_EXEC make install
 
 # Build Amiberry
-ORGA='BlitterStudio'
+NAME='amiberry-lite'
 PRETTY='Amiberry-Lite'
+ORGA='BlitterStudio'
 DESC='Optimised Amiga emulator for older/slower ARM SBCs'
 version=$(curl -sSf "${header[@]}" "https://api.github.com/repos/$ORGA/$NAME/releases/latest" | grep -Po '"tag_name": *"\K[^"]+(?=")')
 [[ $version ]] || Error_Exit "No latest $PRETTY version found"
