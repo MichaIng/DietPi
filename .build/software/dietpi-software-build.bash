@@ -56,7 +56,7 @@ do
 	esac
 	shift
 done
-[[ $NAME =~ ^('amiberry'|'amiberry'[-+]'lite'|'domoticz'|'gzdoom'|'gmediarender'|'gogs'|'haproxy'|'shairport-sync'|'squeezelite'|'unbound'|'vaultwarden'|'ympd')$ ]] || Error_Exit "Invalid software title \"$NAME\" passed"
+[[ $NAME =~ ^('amiberry'|'amiberry-lite'|'domoticz'|'gzdoom'|'gmediarender'|'gogs'|'haproxy'|'shairport-sync'|'squeezelite'|'unbound'|'vaultwarden'|'ympd')$ ]] || Error_Exit "Invalid software title \"$NAME\" passed"
 [[ $NAME == 'gogs' ]] && EXT='7z' || EXT='deb'
 case $DISTRO in
 	'bookworm') dist=7;;
@@ -75,22 +75,8 @@ esac
 image="DietPi_Container-$image.img"
 
 SCRIPT=$NAME
-ARGS=()
-if [[ $NAME == 'amiberry'* ]]
-then
-	# ARMv6: Use dedicated Amiberry v5.7.1 build script
-	if (( $arch == 1 ))
-	then
-		SCRIPT='amiberry-v5'
-		NAME='amiberry'
-
-	# Else: Use merged build script and pass variant as argument
-	else
-		SCRIPT='amiberry'
-		ARGS+=("$NAME")
-		NAME=${NAME%+lite} # Check for amiberry_*.deb if both were built
-	fi
-fi
+# Amiberry ARMv6: Use dedicated Amiberry v5.7.1 build script
+[[ $NAME == 'amiberry' && $arch == 1 ]] && SCRIPT='amiberry-v5'
 
 ##########################################
 # Dependencies
@@ -192,7 +178,7 @@ cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || Error_Exit 'Failed to 
 #!/bin/dash
 echo '[ INFO ] Running $SCRIPT build script ...'
 [ '$GH_TOKEN' ] && export GH_TOKEN='$GH_TOKEN'
-bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/$SCRIPT/build.bash')"${ARGS[0]:+ -- "${ARGS[@]}"}
+bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/$SCRIPT/build.bash')"
 mkdir -v /output && mv -v /tmp/*.$EXT /output
 systemctl start poweroff.target
 _EOF_

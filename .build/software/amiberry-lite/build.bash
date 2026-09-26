@@ -8,30 +8,30 @@ header=()
 [[ $GH_TOKEN ]] && header=('-H' "Authorization: token $GH_TOKEN")
 
 # APT dependencies
-# - SDL3
-adeps_build=('cmake' 'make' 'gcc' 'pkg-config' 'libc6-dev' 'libasound2-dev' 'libusb-1.0-0-dev' 'libdrm-dev' 'libgbm-dev' 'libegl-dev' 'libudev-dev')
-adeps=('libc6' 'libusb-1.0-0' 'libdrm2' 'libgbm1' 'libegl1' 'libgl1-mesa-dri' 'libudev1')
+# - SDL2
+adeps_build=('make' 'gcc' 'pkg-config' 'libc6-dev' 'libdrm-dev' 'libgbm-dev' 'libasound2-dev' 'libudev-dev')
+adeps=('libc6' 'libdrm2' 'libgbm1' 'libegl1' 'libgl1-mesa-dri' 'libudev1')
 # - GL or GLES
 if (( $G_HW_ARCH == 10 ))
 then
-	sdl_flags=('-DSDL_OPENGLES=0' '-DSDL_OPENGL=1') amiberry_flags=('-DUSE_GLES=0')
+	sdl_flags=('--disable-video-opengles2' '--enable-video-opengl')
 	adeps_build+=('libgl-dev') adeps+=('libgl1')
 else
-	sdl_flags=('-DSDL_OPENGLES=1' '-DSDL_OPENGL=0') amiberry_flags=('-DUSE_GLES=1')
+	sdl_flags=('--enable-video-opengles2' '--disable-video-opengl')
 	adeps_build+=('libgles-dev') adeps+=('libgles2')
 fi
-# - SDL3_image
+# - SDL2_image
 adeps_build+=('libpng-dev') adeps+=()
-# - SDL3_ttf
+# - SDL2_ttf
 adeps_build+=('libfreetype-dev') adeps+=('libfreetype6')
 # - Amiberry
-adeps_build+=('g++' 'libflac-dev' 'libmpg123-dev' 'libcurl4-openssl-dev' 'nlohmann-json3-dev' 'libpcap0.8-dev' 'libserialport-dev' 'libportmidi-dev' 'libmpeg2-4-dev' 'libenet-dev' 'libzstd-dev')
+adeps_build+=('cmake' 'g++' 'libflac-dev' 'libmpg123-dev' 'libpcap0.8-dev' 'libserialport-dev' 'libportmidi-dev' 'libmpeg2-4-dev' 'libenet-dev' 'libzstd-dev')
 adeps+=('libserialport0' 'libmpeg2-4' 'libenet7' 'libzstd1')
 # - Distro-specific package names
 case $G_DISTRO in
-	7) adeps+=('libasound2' 'libpng16-16' 'libflac12' 'libmpg123-0' 'libcurl4' 'libpcap0.8' 'libportmidi0');;
-	8) adeps+=('libasound2t64' 'libpng16-16t64' 'libflac14' 'libmpg123-0t64' 'libcurl4t64' 'libpcap0.8t64' 'libportmidi0');;
-	9) adeps+=('libasound2t64' 'libpng16-16t64' 'libflac14' 'libmpg123-0t64' 'libcurl4t64' 'libpcap0.8t64' 'libportmidi2');;
+	7) adeps+=('libasound2' 'libpng16-16' 'libflac12' 'libmpg123-0' 'libpcap0.8' 'libportmidi0');;
+	8) adeps+=('libasound2t64' 'libpng16-16t64' 'libflac14' 'libmpg123-0t64' 'libpcap0.8t64' 'libportmidi0');;
+	9) adeps+=('libasound2t64' 'libpng16-16t64' 'libflac14' 'libmpg123-0t64' 'libpcap0.8t64' 'libportmidi2');;
 	*) Error_Exit "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)";;
 esac
 # - kbd: For "chvt" used in systemd service
@@ -45,10 +45,10 @@ do
 	Error_Exit "Expected dependency package was not installed: $i"
 done
 
-# Build SDL3
-NAME='SDL3'
+# Build SDL2
+NAME='SDL2'
 PRETTY=$NAME
-version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL/releases/latest' | grep -Po '"name": *"\K[0-9.]+(?=")')
+version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL/releases' | grep -Po '"name": *"\K2\.[^"]+(?=")' | head -1)
 [[ $version ]] || Error_Exit "No latest $PRETTY version found"
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
@@ -57,19 +57,16 @@ G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL/releases/download/release-
 G_EXEC tar xf "$NAME-$version.tar.gz"
 G_EXEC rm "$NAME-$version.tar.gz"
 G_EXEC cd "$NAME-$version"
-export CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3'
-G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX='/tmp/deps' "${sdl_flags[@]}" \
-	-DSDL_{UNIX_CONSOLE_BUILD,PTHREADS,PTHREADS_SEM,ALSA,KMSDRM,HIDAPI,HIDAPI_LIBUSB,HIDAPI_JOYSTICK,LIBUDEV,DEPS_SHARED,SHARED}=1 \
-	-DSDL_{CAMERA,DLOPEN_NOTES,DBUS,LIBURING,DISKAUDIO,DUMMYAUDIO,DUMMYVIDEO,IBUS,OSS,JACK,PIPEWIRE,PULSEAUDIO,SNDIO,X11,WAYLAND,RPI,ROCKCHIP,VULKAN,OPENVR,OFFSCREEN,DUMMYCAMERA,VIRTUAL_JOYSTICK,TEST_LIBRARY,STATIC}=0
-G_EXEC_OUTPUT=1 G_EXEC cmake --build build --config Release
-find build -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
+G_EXEC_OUTPUT=1 G_EXEC ./configure --{,exec-}prefix='/tmp/deps' C{,XX}FLAGS='-g0 -O3' --enable-{alsa,video-kmsdrm,libudev,joystick,hidapi,hidapi-joystick} "${sdl_flags[@]}" --disable-{video-{rpi,x11,wayland,opengles1,vulkan,offscreen,dummy},pipewire,jack,diskaudio,sndio,dummyaudio,oss,dbus,ime,sdl2-config}
+G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
+find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
 [[ -d '/tmp/deps' ]] && G_EXEC rm -R /tmp/deps
-G_EXEC_OUTPUT=1 G_EXEC cmake --install build
+G_EXEC_OUTPUT=1 G_EXEC make install
 
-# Build SDL3_image
-NAME='SDL3_image'
+# Build SDL2_image
+NAME='SDL2_image'
 PRETTY=$NAME
-version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_image/releases/latest' | grep -Po '"name": *"\K[0-9.]+(?=")')
+version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_image/releases' | grep -Po '"name": *"\K2\.[^"]+(?=")')
 [[ $version ]] || Error_Exit "No latest $PRETTY version found"
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
@@ -78,15 +75,15 @@ G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_image/releases/download/re
 G_EXEC tar xf "$NAME-$version.tar.gz"
 G_EXEC rm "$NAME-$version.tar.gz"
 G_EXEC cd "$NAME-$version"
-G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX='/tmp/deps'
-G_EXEC_OUTPUT=1 G_EXEC cmake --build build --config Release
-find build -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
-G_EXEC_OUTPUT=1 G_EXEC cmake --install build
+G_EXEC_OUTPUT=1 G_EXEC ./configure --{,exec-}prefix='/tmp/deps' C{,XX}FLAGS='-g0 -O3'
+G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
+find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
+G_EXEC_OUTPUT=1 G_EXEC make install
 
-# Build SDL3_ttf
-NAME='SDL3_ttf'
+# Build SDL2_ttf
+NAME='SDL2_ttf'
 PRETTY=$NAME
-version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases/latest' | grep -Po '"name": *"\K[0-9.]+(?=")')
+version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases' | grep -Po '"name": *"\K2\.[^"]+(?=")')
 [[ $version ]] || Error_Exit "No latest $PRETTY version found"
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
@@ -95,15 +92,15 @@ G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_ttf/releases/download/rele
 G_EXEC tar xf "$NAME-$version.tar.gz"
 G_EXEC rm "$NAME-$version.tar.gz"
 G_EXEC cd "$NAME-$version"
-G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX='/tmp/deps'
-G_EXEC_OUTPUT=1 G_EXEC cmake --build build --config Release
-find build -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
-G_EXEC_OUTPUT=1 G_EXEC cmake --install build
+G_EXEC_OUTPUT=1 G_EXEC ./configure --{,exec-}prefix='/tmp/deps' C{,XX}FLAGS='-g0 -O3'
+G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
+find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
+G_EXEC_OUTPUT=1 G_EXEC make install
 
 # Build Amiberry
 ORGA='BlitterStudio'
-PRETTY='Amiberry'
-DESC='Optimised Amiga emulator'
+PRETTY='Amiberry-Lite'
+DESC='Optimised Amiga emulator for older/slower ARM SBCs'
 version=$(curl -sSf "${header[@]}" "https://api.github.com/repos/$ORGA/$NAME/releases/latest" | grep -Po '"tag_name": *"\K[^"]+(?=")')
 [[ $version ]] || Error_Exit "No latest $PRETTY version found"
 version=${version#v}
@@ -114,10 +111,10 @@ G_EXEC curl -sSfLO "https://github.com/$ORGA/$NAME/archive/v$version.tar.gz"
 G_EXEC tar xf "v$version.tar.gz"
 G_EXEC rm "v$version.tar.gz"
 G_EXEC cd "$NAME-$version"
-# - Add SDL3 to rpath
+# - Add SDL2 to rpath
 # shellcheck disable=SC2015
 grep -q '^include(GNUInstallDirs)$' CMakeLists.txt && G_EXEC sed --follow-symlinks -i "/^include(GNUInstallDirs)$/a\set(CMAKE_INSTALL_RPATH \"\${CMAKE_INSTALL_FULL_LIBDIR}/$NAME\")" CMakeLists.txt || Error_Exit 'CMakeLists.txt does not contain "include(GNUInstallDirs)" line anymore'
-G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH='/tmp/deps' -DCMAKE_INSTALL_PREFIX='/usr' "${amiberry_flags[@]}" -DUSE_IPC_SOCKET=0
+G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH='/tmp/deps' -DCMAKE_INSTALL_PREFIX='/usr' -DUSE_IPC_SOCKET=0
 G_EXEC_OUTPUT=1 G_EXEC cmake --build build
 G_EXEC strip --remove-section=.comment --remove-section=.note "build/$NAME"
 
@@ -132,7 +129,7 @@ G_EXEC mkdir -p "$DIR/"{DEBIAN,"mnt/dietpi_userdata/$NAME",lib/systemd/system}
 G_EXEC_OUTPUT=1 G_EXEC cmake --install "$NAME-$version/build" --prefix "$DIR/usr"
 # - Obtain library dir
 LIB_DIR=$(find "$DIR/usr/lib/"*"/$NAME" -maxdepth 0)
-G_EXEC cp -aL /tmp/deps/lib/libSDL3{,_image,_ttf}.so.0 "$LIB_DIR/"
+G_EXEC cp -aL /tmp/deps/lib/libSDL2{,_image,_ttf}.so.0 "$LIB_DIR/"
 
 # - systemd service
 cat << _EOF_ > "$DIR/lib/systemd/system/$NAME.service" || exit 1
@@ -160,16 +157,16 @@ _EOF_
 # - preinst
 cat << '_EOF_' > "$DIR/DEBIAN/preinst" || exit 1
 #!/bin/dash -e
-if [ -d '/mnt/dietpi_userdata/amiberry' ] && [ ! -d '/mnt/dietpi_userdata/amiberry_v5_bak' ] && dpkg --compare-versions "$2" lt-nl '5.7.5'
+if [ -d '/mnt/dietpi_userdata/amiberry_v5_bak' ] && [ ! -d '/mnt/dietpi_userdata/amiberry-lite' ]
 then
-	echo 'Backing up Amiberry v5 config/data dir to /mnt/dietpi_userdata/amiberry_v5_bak ...'
-	rm -Rf /mnt/dietpi_userdata/amiberry/amiberry /mnt/dietpi_userdata/amiberry/data /mnt/dietpi_userdata/amiberry/lib
-	cp -a /mnt/dietpi_userdata/amiberry /mnt/dietpi_userdata/amiberry_v5_bak
+	echo 'Using Amiberry v5 config/data backup for Amiberry-Lite ...'
+	mv /mnt/dietpi_userdata/amiberry_v5_bak /mnt/dietpi_userdata/amiberry-lite
 	echo 'Migrating Amiberry v5 config/data directory ...'
-	[ -f '/mnt/dietpi_userdata/amiberry/conf/amiberry.conf' ] && mv -v /mnt/dietpi_userdata/amiberry/conf/amiberry.conf /mnt/dietpi_userdata/amiberry/amiberry.conf
-	rm -fv /mnt/dietpi_userdata/amiberry/conf/amiberry.conf.dpkg-*
-	[ -d '/mnt/dietpi_userdata/amiberry/kickstarts' ] && [ ! -d '/mnt/dietpi_userdata/amiberry/roms' ] && mv -v /mnt/dietpi_userdata/amiberry/kickstarts /mnt/dietpi_userdata/amiberry/roms
-	sed --follow-symlinks -Ei '/^(rom_path|floppy_sounds_dir|saveimage_dir|data_dir|plugins_dir|saveimage_dir)=/d' /mnt/dietpi_userdata/amiberry/amiberry.conf
+	[ -f '/mnt/dietpi_userdata/amiberry-lite/conf/amiberry.conf' ] && mv -v /mnt/dietpi_userdata/amiberry-lite/conf/amiberry.conf /mnt/dietpi_userdata/amiberry-lite/amiberry.conf
+	rm -fv /mnt/dietpi_userdata/amiberry-lite/conf/amiberry.conf.dpkg-*
+	[ -d '/mnt/dietpi_userdata/amiberry-lite/kickstarts' ] && [ ! -d '/mnt/dietpi_userdata/amiberry-lite/roms' ] && mv -v /mnt/dietpi_userdata/amiberry-lite/kickstarts /mnt/dietpi_userdata/amiberry-lite/roms
+	sed --follow-symlinks -Ei '/^(rom_path|floppy_sounds_dir|saveimage_dir|data_dir|plugins_dir|saveimage_dir)=/d' /mnt/dietpi_userdata/amiberry-lite/amiberry.conf
+	sed --follow-symlinks -Ei 's#dietpi_userdata/amiberry(/|$)#dietpi_userdata/amiberry-lite\1#' /mnt/dietpi_userdata/amiberry-lite/amiberry.conf
 fi
 _EOF_
 
@@ -227,7 +224,7 @@ Section: games
 Priority: optional
 Homepage: https://amiberry.com/
 Description: $DESC
- This package ships with optimised SDL3 builds.
+ This package ships with optimised SDL2 builds.
 _EOF_
 G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')" "$DIR/DEBIAN/control"
 
