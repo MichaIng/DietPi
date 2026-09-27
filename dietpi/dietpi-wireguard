@@ -1258,6 +1258,21 @@ Input_Keepalive()
 	return 0
 }
 
+# Server port and address input, for new and existing servers: $1 = check function, or the function which applies the input, $2 = default, $3 = interface
+Input_Port()
+{
+	G_WHIP_DEFAULT_ITEM=$2
+	G_WHIP_INPUTBOX_REGEX='^[1-9][0-9]{0,4}$' G_WHIP_INPUTBOX_REGEX_TEXT='be a valid port number'
+	Input_Checked "$1" "Please enter the UDP port the server $3 listens on:\n\nThis port needs to be forwarded by your router and/or opened in your firewall."
+}
+
+Input_Server_Address()
+{
+	G_WHIP_DEFAULT_ITEM=$2
+	G_WHIP_INPUTBOX_REGEX='^[0-9A-Fa-f.:/, ]+$' G_WHIP_INPUTBOX_REGEX_TEXT='be a comma-separated list of addresses with prefix length'
+	Input_Checked "$1" "Please enter the VPN address(es) of the server $3 with prefix length, comma-separated, e.g.: 10.9.0.1/24, fd42::1/64\n\nThe prefix length defines the subnet of the clients."
+}
+
 # Client name input: $1 = default, $2 = check function
 Input_Name()
 {
@@ -1476,16 +1491,8 @@ Menu_Create()
 				G_WHIP_DEFAULT_ITEM=$iface
 				Input_Checked Check_Iface "Please enter the name of the server interface, e.g. wg0:\n\nIts config is stored as $WG_DIR/<interface>.conf." && iface=$RESULT
 			;;
-			'Listen port')
-				G_WHIP_DEFAULT_ITEM=$port
-				G_WHIP_INPUTBOX_REGEX='^[1-9][0-9]{0,4}$' G_WHIP_INPUTBOX_REGEX_TEXT='be a valid port number'
-				Input_Checked Check_Port 'Please enter the UDP port the server listens on:\n\nThis port needs to be forwarded by your router and/or opened in your firewall.' && port=$RESULT
-			;;
-			'Server address')
-				G_WHIP_DEFAULT_ITEM=$address
-				G_WHIP_INPUTBOX_REGEX='^[0-9A-Fa-f.:/, ]+$' G_WHIP_INPUTBOX_REGEX_TEXT='be a comma-separated list of addresses with prefix length'
-				Input_Checked Check_Server_Address 'Please enter the VPN address(es) of the server with prefix length, comma-separated, e.g.: 10.9.0.1/24, fd42::1/64\n\nThe prefix length defines the subnet of the clients.' && address=$RESULT
-			;;
+			'Listen port') Input_Port Check_Port "$port" "$iface" && port=$RESULT;;
+			'Server address') Input_Server_Address Check_Server_Address "$address" "$iface" && address=$RESULT;;
 			'Create')
 				Server_Create "$iface" "$port" "$address"
 				(( $? == 1 )) && continue
@@ -1565,16 +1572,8 @@ Menu_Main()
 	case $G_WHIP_RETURNED_VALUE in
 		'Server interface') Menu_Interface;;
 		'Service state') Menu_Service;;
-		'Listen port')
-			G_WHIP_DEFAULT_ITEM=${SRV_PORT[$IFACE]}
-			G_WHIP_INPUTBOX_REGEX='^[1-9][0-9]{0,4}$' G_WHIP_INPUTBOX_REGEX_TEXT='be a valid port number'
-			Input_Checked Server_Set_Port "Please enter the UDP port the server $IFACE listens on:\n\nThis port needs to be forwarded by your router and/or opened in your firewall."
-		;;
-		'Server address')
-			G_WHIP_DEFAULT_ITEM=${SRV_ADDR[$IFACE]}
-			G_WHIP_INPUTBOX_REGEX='^[0-9A-Fa-f.:/, ]+$' G_WHIP_INPUTBOX_REGEX_TEXT='be a comma-separated list of addresses with prefix length'
-			Input_Checked Server_Set_Address "Please enter the VPN address(es) of the server $IFACE with prefix length, comma-separated, e.g.: 10.9.0.1/24, fd42::1/64\n\nThe prefix length defines the subnet of the clients."
-		;;
+		'Listen port') Input_Port Server_Set_Port "${SRV_PORT[$IFACE]}" "$IFACE";;
+		'Server address') Input_Server_Address Server_Set_Address "${SRV_ADDR[$IFACE]}" "$IFACE";;
 		'Edit config') Edit_Config;;
 		'Add client') Menu_Add;;
 		'Old key files')
@@ -1745,49 +1744,41 @@ Cmd_Set()
 	done
 }
 
-Cmd_Init()
+# "init" creates a new server config, "server" changes an existing one only, both with the same settings
+Cmd_Server()
 {
-	# Do nothing if a server config exists already, e.g. on dietpi-software reinstalls
-	if [[ $ARG1 && ${SRV_PORT[$ARG1]} ]]
-	then
-		G_DIETPI-NOTIFY 0 "Server config $WG_DIR/$ARG1.conf exists already"
-		return 0
-
-	elif [[ ! $ARG1 ]] && (( ${#SERVERS[@]} ))
-	then
-		G_DIETPI-NOTIFY 0 "Server config exists already: ${SERVERS[*]}"
-		return 0
-	fi
-	Server_Defaults
-	local iface=${ARG1:-$NEW_IFACE} port=$NEW_PORT address=$NEW_ADDR kv key value
+	# Settings which are not given remain unset, so that "port=" is rejected as invalid port
+	local kv key port address
 	for kv in "${KV[@]}"
 	do
-		key=${kv%%=*} value=${kv#*=}
+		key=${kv%%=*}
 		case ${key,,} in
-			'port') port=$value;;
-			'address') address=$value;;
+			'port') port=${kv#*=};;
+			'address') address=${kv#*=};;
 			*) Error "Invalid key ($key). Aborting ...$USAGE";;
 		esac
 	done
-	Server_Create "$iface" "$port" "$address"
-}
 
-Cmd_Server()
-{
+	if [[ $COMMAND == 'init' ]]
+	then
+		# Do nothing if a server config exists already, e.g. on dietpi-software reinstalls
+		if [[ $ARG1 && ${SRV_PORT[$ARG1]} ]] || { [[ ! $ARG1 ]] && (( ${#SERVERS[@]} )); }
+		then
+			G_DIETPI-NOTIFY 0 "Server config exists already: ${ARG1:-${SERVERS[*]}}"
+			return 0
+		fi
+		Server_Defaults
+		Server_Create "${ARG1:-$NEW_IFACE}" "${port-$NEW_PORT}" "${address-$NEW_ADDR}"
+		return
+	fi
+
 	# Optional interface as first argument
 	[[ $ARG1 ]] && IFACE_OPT=$ARG1
 	Select_Iface
 	(( ${#KV[@]} )) || Error "Missing <key>=<value>. Aborting ...$USAGE"
-	local kv key value
-	for kv in "${KV[@]}"
-	do
-		key=${kv%%=*} value=${kv#*=}
-		case ${key,,} in
-			'port') Server_Set_Port "$value";;
-			'address') Server_Set_Address "$value";;
-			*) Error "Invalid key ($key). Aborting ...$USAGE";;
-		esac || exit 1
-	done
+	[[ ${port+set} ]] && { Server_Set_Port "$port" || exit 1; }
+	[[ ${address+set} ]] && { Server_Set_Address "$address" || exit 1; }
+	return 0
 }
 
 Cmd_Cleanup()
@@ -1823,7 +1814,6 @@ fi
 
 Load_State || [[ $COMMAND == 'init' ]] || Error "No WireGuard server config was found in $WG_DIR. A server config is a file $WG_DIR/<interface>.conf with a \"ListenPort\" setting. Use \"dietpi-wireguard init\" to create one."
 case $COMMAND in
-	'init') Cmd_Init;;
 	'list') Cmd_List;;
 	'add') Cmd_Add;;
 	'remove')
@@ -1860,7 +1850,7 @@ case $COMMAND in
 		Client_Rename "$CLIENT" "$ARG2"
 	;;
 	'set') Cmd_Set;;
-	'server') Cmd_Server;;
+	'init'|'server') Cmd_Server;;
 	'cleanup') Cmd_Cleanup;;
 	*) :;;
 esac || exit 1
