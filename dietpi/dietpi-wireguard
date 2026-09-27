@@ -51,11 +51,8 @@ G_CHECK_ROOT_USER "$@"
 G_CHECK_ROOTFS_RW
 G_INIT
 
-# Private keys are stored in all configs we create or change
-umask 0077
-
 readonly WG_DIR='/etc/wireguard'
-readonly CLIENT_DIR='/etc/wireguard/clients'
+readonly CLIENT_DIR="$WG_DIR/clients"
 
 COMMAND=
 ARG1=
@@ -64,6 +61,10 @@ KV=()
 IFACE_OPT=
 YES=0
 MENU=0
+# Error of the last action in menu mode, shown once in the next menu or input box
+MENU_ERROR=
+# Current client name while renaming it in the menu
+RENAME_FROM=
 OPT_IP=
 OPT_ENDPOINT=
 OPT_PSK=0
@@ -90,15 +91,40 @@ declare -A PUB_CACHE
 
 Error(){ G_DIETPI-NOTIFY 1 "$1"; exit 1; }
 
+# Print an error, or in menu mode store it to be shown inline in the next menu or input box
 Fail()
 {
 	if (( $MENU ))
 	then
-		G_WHIP_MSG "[FAILED] $1"
+		MENU_ERROR="[FAILED] $1\n\n"
 	else
 		G_DIETPI-NOTIFY 1 "$1"
 	fi
 	return 1
+}
+
+# G_WHIP_MENU with the error of the last action prepended once
+Whip_Menu()
+{
+	local error=$MENU_ERROR
+	MENU_ERROR=
+	G_WHIP_MENU "$error$1"
+}
+
+# G_WHIP_INPUTBOX, shown again with the error prepended until function $1 accepts the input, or the user cancels
+# - G_WHIP_DEFAULT_ITEM, G_WHIP_INPUTBOX_REGEX and G_WHIP_INPUTBOX_REGEX_TEXT are applied to every attempt.
+Input_Checked()
+{
+	local check=$1 message=$2 default=$G_WHIP_DEFAULT_ITEM regex=$G_WHIP_INPUTBOX_REGEX regex_text=$G_WHIP_INPUTBOX_REGEX_TEXT error
+	while :
+	do
+		error=$MENU_ERROR
+		MENU_ERROR=
+		G_WHIP_DEFAULT_ITEM=$default G_WHIP_INPUTBOX_REGEX=$regex G_WHIP_INPUTBOX_REGEX_TEXT=$regex_text G_WHIP_INPUTBOX "$error$message" || return 1
+		RESULT=$G_WHIP_RETURNED_VALUE
+		"$check" "$RESULT" && return 0
+		default=$RESULT
+	done
 }
 
 Confirm(){ (( $YES )) || G_WHIP_YESNO "$1"; }
@@ -151,7 +177,7 @@ Input()
 # Derive public key from private key into $PUBKEY
 Pubkey()
 {
-	[[ ${PUB_CACHE[$1]} ]] || PUB_CACHE[$1]=$(wg pubkey <<< "$1" 2> /dev/null)
+	[[ ${PUB_CACHE[$1]} ]] || PUB_CACHE[$1]=$(wg pubkey <<< "$1")
 	PUBKEY=${PUB_CACHE[$1]}
 }
 
@@ -293,7 +319,7 @@ Load_Runtime()
 	while read -r pub psk endpoint ips hs rx tx keepalive
 	do
 		HS[$pub]=$hs RX[$pub]=$rx TX[$pub]=$tx
-	done < <(wg show "$IFACE" dump 2> /dev/null | tail -n +2)
+	done < <(wg show "$IFACE" dump | tail -n +2)
 }
 
 Ip2Int(){ local IFS=. a b c d; read -r a b c d <<< "$1"; INT=$(( ($a << 24) + ($b << 16) + ($c << 8) + $d )); }
@@ -410,10 +436,10 @@ Load_Defaults()
 	else
 		DEF_ALLOWED='0.0.0.0/0, ::/0'
 		# Local DNS resolvers are reachable via the server VPN IP: https://github.com/MichaIng/DietPi/issues/2482
-		DEF_DNS=$(mawk '/^[[:blank:]]*nameserver[[:blank:]]/{print $2;exit}' /etc/resolv.conf 2> /dev/null)
+		DEF_DNS=$(mawk '/^[[:blank:]]*nameserver[[:blank:]]/{print $2;exit}' /etc/resolv.conf)
 		[[ $DEF_DNS =~ ^(127\.|::1$|localhost$) ]] && DEF_DNS=$SRV4_IP
 	fi
-	[[ $host ]] || host=$(sed -n '/^[[:blank:]]*SOFTWARE_PUBLIC_DOMAIN_NAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt 2> /dev/null)
+	[[ $host ]] || host=$(sed -n '/^[[:blank:]]*SOFTWARE_PUBLIC_DOMAIN_NAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 	[[ $host ]] || host=$(hostname -f)
 	DEF_ENDPOINT="$host:${SRV_PORT[$IFACE]}"
 }
@@ -433,6 +459,10 @@ Check_Name()
 	[[ $1 =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || { Fail "\"$1\" is not a valid client name. Allowed are letters, digits, and _ . -"; return 1; }
 	! Name_Exists "$1" || { Fail "A client with the name \"$1\" exists already for $IFACE."; return 1; }
 }
+
+# Like Check_Name, but keeping the current name $RENAME_FROM is accepted as well, called via Input_Checked
+# shellcheck disable=SC2329
+Check_Rename(){ [[ $1 == "$RENAME_FROM" ]] || Check_Name "$1"; }
 
 #/////////////////////////////////////////////////////////////////////////////////////
 # Changing configs
@@ -516,9 +546,9 @@ Iface_Down()
 {
 	if (( $SERVICE ))
 	then
-		G_EXEC_NOHALT=1 G_EXEC systemctl stop "wg-quick@$IFACE"
+		G_EXEC_NOEXIT=1 G_EXEC systemctl stop "wg-quick@$IFACE"
 	else
-		G_EXEC_NOHALT=1 G_EXEC wg-quick down "$IFACE"
+		G_EXEC_NOEXIT=1 G_EXEC wg-quick down "$IFACE"
 	fi
 }
 
@@ -526,9 +556,9 @@ Iface_Up()
 {
 	if (( $SERVICE ))
 	then
-		G_EXEC_NOHALT=1 G_EXEC systemctl start "wg-quick@$IFACE"
+		G_EXEC_NOEXIT=1 G_EXEC systemctl start "wg-quick@$IFACE"
 	else
-		G_EXEC_NOHALT=1 G_EXEC wg-quick up "$IFACE"
+		G_EXEC_NOEXIT=1 G_EXEC wg-quick up "$IFACE"
 	fi
 }
 
@@ -536,9 +566,9 @@ Iface_Up()
 Iface_Sync()
 {
 	local tmp result
-	tmp=$(mktemp) || return 1
+	tmp=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
 	wg-quick strip "$IFACE" > "$tmp" || { rm -f "$tmp"; return 1; }
-	G_EXEC_NOHALT=1 G_EXEC wg syncconf "$IFACE" "$tmp"
+	G_EXEC_NOEXIT=1 G_EXEC wg syncconf "$IFACE" "$tmp"
 	result=$?
 	rm -f "$tmp"
 	return "$result"
@@ -596,7 +626,7 @@ File_Replace()
 Peer_Add()
 {
 	local conf="$WG_DIR/$IFACE.conf" new
-	new=$(mktemp) || return 1
+	new=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
 	{
 		cat "$conf"
 		Block_Separator "$conf"
@@ -613,7 +643,7 @@ Peer_Set()
 {
 	local f="$WG_DIR/$IFACE.conf" tmp
 	[[ ${P_STATE[$1]} == 'disabled' ]] && f="$WG_DIR/$IFACE.disabled"
-	tmp=$(mktemp) || return 1
+	tmp=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
 	Conf_Set "$f" 'Peer' "${P_PUB[$1]}" "$2" "$3" > "$tmp" || { rm -f "$tmp"; Fail "Peer ${P_PUB[$1]} was not found in $f."; return 1; }
 	if [[ ${P_STATE[$1]} == 'active' ]]
 	then
@@ -628,7 +658,7 @@ Peer_Move()
 {
 	local from="$WG_DIR/$IFACE.conf" to="$WG_DIR/$IFACE.disabled" rest block new
 	[[ $2 == 'active' ]] && from="$WG_DIR/$IFACE.disabled" to="$WG_DIR/$IFACE.conf"
-	rest=$(mktemp) && block=$(mktemp) && new=$(mktemp) || return 1
+	rest=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") && block=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") && new=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
 	Conf_Cut "$from" "${P_PUB[$1]}" "$block" > "$rest" || { rm -f "$rest" "$block" "$new"; Fail "Peer ${P_PUB[$1]} was not found in $from."; return 1; }
 	{ [[ -f $to ]] && cat "$to" && Block_Separator "$to"; cat "$block"; } > "$new"
 	rm -f "$block"
@@ -647,7 +677,7 @@ Peer_Remove()
 {
 	local f="$WG_DIR/$IFACE.conf" rest block
 	[[ ${P_STATE[$1]} == 'disabled' ]] && f="$WG_DIR/$IFACE.disabled"
-	rest=$(mktemp) && block=$(mktemp) || return 1
+	rest=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") && block=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
 	Conf_Cut "$f" "${P_PUB[$1]}" "$block" > "$rest" || { rm -f "$rest" "$block"; Fail "Peer ${P_PUB[$1]} was not found in $f."; return 1; }
 	rm -f "$block"
 	if [[ ${P_STATE[$1]} == 'active' ]]
@@ -676,7 +706,7 @@ Client_Set()
 {
 	local tmp
 	Client_Migrate "$1" || return 1
-	tmp=$(mktemp) || return 1
+	tmp=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
 	Conf_Set "${C_FILE[$1]}" "$2" '' "$3" "$4" > "$tmp" || { rm -f "$tmp"; Fail "Section [$2] was not found in ${C_FILE[$1]}."; return 1; }
 	File_Replace "$tmp" "${C_FILE[$1]}"
 }
@@ -762,7 +792,7 @@ Server_Set_Port()
 		return 1
 	fi
 	[[ $port == "$old" ]] && return 0
-	tmp=$(mktemp) || return 1
+	tmp=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
 	Conf_Set "$WG_DIR/$IFACE.conf" 'Interface' '' 'ListenPort' "$port" > "$tmp" || { rm -f "$tmp"; return 1; }
 	Server_Commit "$tmp" || return 1
 	SRV_PORT[$IFACE]=$port
@@ -845,7 +875,7 @@ Server_Set_Address()
 	fi
 
 	# Server config: Address, active peers and subnet in hook commands
-	tmp=$(mktemp) && tmp2=$(mktemp) || return 1
+	tmp=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") && tmp2=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
 	Conf_Set "$WG_DIR/$IFACE.conf" 'Interface' '' 'Address' "$new" > "$tmp" || { rm -f "$tmp" "$tmp2"; return 1; }
 	(( $renumber )) && sed -Ei "/^[[:blank:]]*(Pre|Post)(Up|Down)[[:blank:]]*=/s#${old_net//./\\.}#$new_net#g" "$tmp"
 	for i in "${!P_IPS[@]}"
@@ -941,13 +971,6 @@ Redundant_Key_Files()
 # Print client config $1 as QR code, without comments and empty lines
 Show_QR()
 {
-	if ! command -v qrencode > /dev/null
-	then
-		Confirm 'The "qrencode" package is required to show QR codes. Install it now?' || return 1
-		umask 0022
-		G_AGI qrencode
-		umask 0077
-	fi
 	local qr lines
 	qr=$(sed -E 's/[[:blank:]]*#.*$//; /^[[:blank:]]*$/d' "$1" | qrencode -t ansiutf8) || { Fail 'Generating the QR code failed.'; return 1; }
 	(( $MENU )) && G_TERM_CLEAR
@@ -1024,9 +1047,9 @@ Reload_Peer()
 
 Input_AllowedIPs()
 {
-	local lan_ip lan_if lan_net
+	local lan_ip lan_if lan_net=''
 	lan_ip=$(G_GET_NET -q ip) lan_if=$(G_GET_NET -q iface)
-	lan_net=$(ip -o -4 a s dev "$lan_if" 2> /dev/null | mawk '{print $4;exit}')
+	[[ $lan_if ]] && lan_net=$(ip -o -4 a s dev "$lan_if" | mawk '{print $4;exit}')
 	if [[ $lan_net ]]
 	then
 		Parse_Net "$lan_net"
@@ -1044,7 +1067,7 @@ Input_AllowedIPs()
 		*) G_WHIP_DEFAULT_ITEM='Custom';;
 	esac
 	G_WHIP_BUTTON_CANCEL_TEXT='Back'
-	G_WHIP_MENU "Please select which traffic the client routes through the VPN (AllowedIPs):\n\nCurrent: $1" || return 1
+	Whip_Menu "Please select which traffic the client routes through the VPN (AllowedIPs):\n\nCurrent: $1" || return 1
 	case $G_WHIP_RETURNED_VALUE in
 		'Full tunnel') RESULT='0.0.0.0/0, ::/0';;
 		'Server LAN') RESULT=$lan_net;;
@@ -1084,12 +1107,12 @@ Input_Keepalive()
 	return 0
 }
 
+# Client name input: $1 = default, $2 = check function
 Input_Name()
 {
 	G_WHIP_DEFAULT_ITEM=$1
 	G_WHIP_INPUTBOX_REGEX='^[A-Za-z0-9_][A-Za-z0-9_.-]*$' G_WHIP_INPUTBOX_REGEX_TEXT='contain letters, digits, and _ . - only'
-	G_WHIP_INPUTBOX "Please enter a name for the client, e.g. the device it is used on.\n\nIts config is stored as $CLIENT_DIR/$IFACE-<name>.conf." || return 1
-	RESULT=$G_WHIP_RETURNED_VALUE
+	Input_Checked "$2" "Please enter a name for the client, e.g. the device it is used on.\n\nIts config is stored as $CLIENT_DIR/$IFACE-<name>.conf."
 }
 
 Menu_Add()
@@ -1098,9 +1121,8 @@ Menu_Add()
 	[[ $SRV4_IP ]] || { Fail "Server $IFACE has no IPv4 address. Please add one via \"Server address\" first."; return 0; }
 	Load_Defaults
 	Next_Free_IP || { Fail "There is no free IP address left in the subnet $SRV4_IP/$SRV4_PREFIX."; return 0; }
-	Input_Name '' || return 0
+	Input_Name '' Check_Name || return 0
 	local name=$RESULT ip=$NEXT_IP endpoint=$DEF_ENDPOINT dns=$DEF_DNS allowed=$DEF_ALLOWED keepalive=$DEF_KEEPALIVE psk=0 last='Create' psk_text
-	Check_Name "$name" || return 0
 	while :
 	do
 		psk_text='Off'
@@ -1119,13 +1141,13 @@ Menu_Add()
 		)
 		G_WHIP_DEFAULT_ITEM=$last
 		G_WHIP_BUTTON_CANCEL_TEXT='Back'
-		G_WHIP_MENU "New client of server $IFACE. The settings are taken from the newest client config of this server, if one exists." || return 0
+		Whip_Menu "New client of server $IFACE. The settings are taken from the newest client config of this server, if one exists." || return 0
 		last=$G_WHIP_RETURNED_VALUE
 		case $G_WHIP_RETURNED_VALUE in
-			'Name') Input_Name "$name" && Check_Name "$RESULT" && name=$RESULT;;
+			'Name') Input_Name "$name" Check_Name && name=$RESULT;;
 			'Address')
 				G_WHIP_DEFAULT_ITEM=$ip
-				G_WHIP_INPUTBOX "Please enter the VPN IPv4 address of the client inside the server subnet $SRV4_IP/$SRV4_PREFIX:" && Check_Client_IP "$G_WHIP_RETURNED_VALUE" && ip=$G_WHIP_RETURNED_VALUE
+				Input_Checked Check_Client_IP "Please enter the VPN IPv4 address of the client inside the server subnet $SRV4_IP/$SRV4_PREFIX:" && ip=$RESULT
 			;;
 			'Endpoint') Input_Endpoint "$endpoint" && endpoint=$RESULT;;
 			'DNS') Input_DNS "$dns" && dns=$RESULT;;
@@ -1182,12 +1204,12 @@ Menu_Peer()
 		G_WHIP_MENU_ARRAY+=('Remove' ': Remove the peer and its client config')
 		G_WHIP_DEFAULT_ITEM=$last
 		G_WHIP_BUTTON_CANCEL_TEXT='Back'
-		G_WHIP_MENU "$text" || return 0
+		Whip_Menu "$text" || return 0
 		last=$G_WHIP_RETURNED_VALUE
 		case $G_WHIP_RETURNED_VALUE in
 			'QR code') Show_QR "${C_FILE[c]}" "${C_NAME[c]}";;
 			'Show config') G_WHIP_VIEWFILE "${C_FILE[c]}";;
-			'Rename') Input_Name "${C_NAME[c]}" && [[ $RESULT != "${C_NAME[c]}" ]] && Client_Rename "$c" "$RESULT";;
+			'Rename') RENAME_FROM=${C_NAME[c]} Input_Name "${C_NAME[c]}" Check_Rename && [[ $RESULT != "${C_NAME[c]}" ]] && Client_Rename "$c" "$RESULT";;
 			'AllowedIPs') Input_AllowedIPs "${CONF_P[1,allowedips]}" && Client_Set "$c" 'Peer' 'AllowedIPs' "$RESULT";;
 			'Endpoint') Input_Endpoint "${CONF_P[1,endpoint]}" && Client_Set "$c" 'Peer' 'Endpoint' "$RESULT";;
 			'DNS') Input_DNS "${CONF_I[dns]}" && Client_Set "$c" 'Interface' 'DNS' "$RESULT";;
@@ -1214,7 +1236,7 @@ Menu_Unused()
 		'Remove' ': Delete the client config'
 	)
 	G_WHIP_BUTTON_CANCEL_TEXT='Back'
-	G_WHIP_MENU "Unused client config: ${C_FILE[c]}\n\nThis config belongs to server $IFACE, but its public key is not a peer of this server." || return 0
+	Whip_Menu "Unused client config: ${C_FILE[c]}\n\nThis config belongs to server $IFACE, but its public key is not a peer of this server." || return 0
 	case $G_WHIP_RETURNED_VALUE in
 		'Re-add') Client_Readd "$c";;
 		'Show config') G_WHIP_VIEWFILE "${C_FILE[c]}";;
@@ -1227,7 +1249,7 @@ Menu_Service()
 {
 	local active=0 enabled=0
 	systemctl -q is-active "wg-quick@$IFACE" && active=1
-	systemctl -q is-enabled "wg-quick@$IFACE" 2> /dev/null && enabled=1
+	systemctl -q is-enabled "wg-quick@$IFACE" && enabled=1
 	if (( $active ))
 	then
 		G_WHIP_MENU_ARRAY=('Restart' ': Restart the interface' 'Stop' ': Stop the interface')
@@ -1241,8 +1263,8 @@ Menu_Service()
 		G_WHIP_MENU_ARRAY+=('Enable' ': Start the interface at boot')
 	fi
 	G_WHIP_BUTTON_CANCEL_TEXT='Back'
-	G_WHIP_MENU "Service: wg-quick@$IFACE" || return 0
-	G_EXEC_NOHALT=1 G_EXEC systemctl "${G_WHIP_RETURNED_VALUE,,}" "wg-quick@$IFACE"
+	Whip_Menu "Service: wg-quick@$IFACE" || return 0
+	G_EXEC_NOEXIT=1 G_EXEC systemctl "${G_WHIP_RETURNED_VALUE,,}" "wg-quick@$IFACE"
 }
 
 Menu_Interface()
@@ -1255,14 +1277,14 @@ Menu_Interface()
 	done
 	G_WHIP_DEFAULT_ITEM=$IFACE
 	G_WHIP_BUTTON_CANCEL_TEXT='Back'
-	G_WHIP_MENU 'Please select the server interface to manage:' && IFACE=$G_WHIP_RETURNED_VALUE
+	Whip_Menu 'Please select the server interface to manage:' && IFACE=$G_WHIP_RETURNED_VALUE
 }
 
 # Edit a copy of the server config, then apply it like any other change, restoring the previous config on failure
 Edit_Config()
 {
 	local conf="$WG_DIR/$IFACE.conf" dir copy error restart=0
-	dir=$(mktemp -d) || return 1
+	dir=$(mktemp -d "$G_WORKING_DIR/tmp.XXXXXX") || return 1
 	# wg-quick requires the file name to be <interface>.conf
 	copy="$dir/$IFACE.conf"
 	G_EXEC cp -a "$conf" "$copy"
@@ -1284,8 +1306,9 @@ Menu_Main()
 {
 	if ! Load_State
 	then
-		G_WHIP_MSG "No WireGuard server config was found in $WG_DIR.\n\nA server config is a file $WG_DIR/<interface>.conf with a \"ListenPort\" setting. Please install WireGuard as server via dietpi-software, or create such a config manually."
-		return 1
+		G_WHIP_YESNO "No WireGuard server config was found in $WG_DIR. A server config is a file $WG_DIR/<interface>.conf with a \"ListenPort\" setting.\n\nWould you like to install the WireGuard server via dietpi-software now?" || return 1
+		/boot/dietpi/dietpi-software install 172
+		Load_State || return 1
 	fi
 	[[ $IFACE && ${SRV_PORT[$IFACE]} ]] || IFACE=${SERVERS[0]}
 	Load_Peers
@@ -1295,7 +1318,7 @@ Menu_Main()
 	local state='inactive' boot='disabled at boot' i c tag unused=()
 	declare -A tags=()
 	systemctl -q is-active "wg-quick@$IFACE" && state='active'
-	systemctl -q is-enabled "wg-quick@$IFACE" 2> /dev/null && boot='enabled at boot'
+	systemctl -q is-enabled "wg-quick@$IFACE" && boot='enabled at boot'
 
 	G_WHIP_MENU_ARRAY=()
 	(( ${#SERVERS[@]} > 1 )) && G_WHIP_MENU_ARRAY+=('Server interface' ": [$IFACE]")
@@ -1335,7 +1358,7 @@ Menu_Main()
 
 	G_WHIP_DEFAULT_ITEM=$MAIN_LAST
 	G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-	G_WHIP_MENU "Manage WireGuard server $IFACE and its clients.\n\nPublic key: ${SRV_PUB[$IFACE]}" || return 1
+	Whip_Menu "Manage WireGuard server $IFACE and its clients.\n\nPublic key: ${SRV_PUB[$IFACE]}" || return 1
 	MAIN_LAST=$G_WHIP_RETURNED_VALUE
 	case $G_WHIP_RETURNED_VALUE in
 		'Server interface') Menu_Interface;;
@@ -1343,13 +1366,12 @@ Menu_Main()
 		'Listen port')
 			G_WHIP_DEFAULT_ITEM=${SRV_PORT[$IFACE]}
 			G_WHIP_INPUTBOX_REGEX='^[1-9][0-9]{0,4}$' G_WHIP_INPUTBOX_REGEX_TEXT='be a valid port number'
-			G_WHIP_INPUTBOX "Please enter the UDP port the server $IFACE listens on:\n\nThis port needs to be forwarded by your router and/or opened in your firewall." && Server_Set_Port "$G_WHIP_RETURNED_VALUE"
+			Input_Checked Server_Set_Port "Please enter the UDP port the server $IFACE listens on:\n\nThis port needs to be forwarded by your router and/or opened in your firewall."
 		;;
 		'Server address')
-			Load_Server_Net
 			G_WHIP_DEFAULT_ITEM=${SRV_ADDR[$IFACE]}
 			G_WHIP_INPUTBOX_REGEX='^[0-9A-Fa-f.:/, ]+$' G_WHIP_INPUTBOX_REGEX_TEXT='be a comma-separated list of addresses with prefix length'
-			G_WHIP_INPUTBOX "Please enter the VPN address(es) of the server $IFACE with prefix length, comma-separated, e.g.: 10.9.0.1/24, fd42::1/64\n\nThe prefix length defines the subnet of the clients." && Server_Set_Address "$G_WHIP_RETURNED_VALUE"
+			Input_Checked Server_Set_Address "Please enter the VPN address(es) of the server $IFACE with prefix length, comma-separated, e.g.: 10.9.0.1/24, fd42::1/64\n\nThe prefix length defines the subnet of the clients."
 		;;
 		'Edit config') Edit_Config;;
 		'Add client') Menu_Add;;
@@ -1557,7 +1579,10 @@ Cmd_Cleanup()
 # Main
 #/////////////////////////////////////////////////////////////////////////////////////
 Input "$@"
-command -v wg > /dev/null || Error 'WireGuard tools are not installed. Please install WireGuard via "dietpi-software install 172", or the "wireguard-tools" APT package.'
+G_AG_CHECK_INSTALL_PREREQ wireguard-tools qrencode
+
+# Private keys are stored in all configs we create or change. Set this after APT installs to not affect package files.
+umask 0077
 
 if [[ ! $COMMAND ]]
 then
