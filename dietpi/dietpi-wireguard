@@ -16,10 +16,14 @@
 # - New and changed client configs are stored in /etc/wireguard/clients/, configs found in /etc/wireguard/ are moved there on change.
 # - Disabled peers are moved from /etc/wireguard/<interface>.conf to /etc/wireguard/<interface>.disabled.
 # - Runtime state is shown in the menu only. On the command line, use "wg show" for it.
+# - If no server config exists, a new one with defaults can be created via menu or "dietpi-wireguard init", which is used by dietpi-software as well.
 readonly USAGE='
 Usage: dietpi-wireguard [<command>] [<options>]
 Available commands:
   <empty>                         Open the interactive menu
+  init [<interface>] [<key>=<value>...]
+                                  Create a server config with defaults and start it, if no server config exists yet: port, address
+                                  The interface defaults to the first free wg0, wg1, ...
   list [<interface>]              List clients with address, state and config file
   add <name> [<options>]          Create a new client and add it as peer to the server
   remove <name>                   Remove a client: its server peer and its client config, after confirmation
@@ -149,11 +153,11 @@ Input()
 			*)
 				if [[ ! $COMMAND ]]
 				then
-					[[ $1 =~ ^(list|add|remove|disable|enable|qr|rename|set|server|cleanup)$ ]] || Error "Invalid command ($1). Aborting ...$USAGE"
+					[[ $1 =~ ^(init|list|add|remove|disable|enable|qr|rename|set|server|cleanup)$ ]] || Error "Invalid command ($1). Aborting ...$USAGE"
 					COMMAND=$1
 
 				# Public keys end with "=", hence for "set" the client name comes first
-				elif [[ $1 =~ ^[A-Za-z]+= && ( $COMMAND == 'server' || ( $COMMAND == 'set' && $ARG1 ) ) ]]
+				elif [[ $1 =~ ^[A-Za-z]+= && ( $COMMAND =~ ^(init|server)$ || ( $COMMAND == 'set' && $ARG1 ) ) ]]
 				then
 					KV+=("$1")
 
@@ -446,6 +450,43 @@ Check_Keepalive()
 	[[ $1 =~ ^[0-9]{0,5}$ ]] && (( 10#${1:-0} <= 65535 )) && return 0
 	Fail "\"$1\" is not a valid keepalive interval. Allowed are 0 to 65535 seconds, or empty to disable it."
 	return 1
+}
+
+# Check server settings, also called via Input_Checked. The port must not be used by another server than $IFACE.
+Check_Port()
+{
+	if [[ ! $1 =~ ^[1-9][0-9]{0,4}$ ]] || (( $1 > 65535 ))
+	then
+		Fail "\"$1\" is not a valid port."
+		return 1
+	fi
+	local i
+	for i in "${SERVERS[@]}"
+	do
+		[[ $i != "$IFACE" && ${SRV_PORT[$i]} == "$1" ]] && { Fail "Port $1 is used by server $i already."; return 1; }
+	done
+	return 0
+}
+
+Check_Server_Address()
+{
+	local a
+	[[ ${1//[ ,]/} ]] || { Fail 'The server address must not be empty.'; return 1; }
+	for a in ${1//,/ }
+	do
+		[[ $a =~ ^[0-9.]+/[0-9]{1,2}$ ]] && Valid_IPv4 "${a%/*}" && (( ${a#*/} <= 30 )) && continue
+		[[ $a =~ ^[0-9A-Fa-f:]+/[0-9]{1,3}$ ]] && continue
+		Fail "\"$a\" is not a valid address with prefix length, e.g. 10.9.0.1/24 or fd42::1/64."
+		return 1
+	done
+}
+
+# Interface name for a new server, as allowed by wg-quick
+Check_Iface()
+{
+	[[ $1 =~ ^[A-Za-z0-9_=+.-]{1,15}$ ]] || { Fail "\"$1\" is not a valid interface name. Allowed are up to 15 letters, digits, and _ = + . -"; return 1; }
+	[[ ! -e $WG_DIR/$1.conf ]] || { Fail "$WG_DIR/$1.conf exists already."; return 1; }
+	[[ ! -e /sys/class/net/$1 ]] || { Fail "A network interface $1 exists already."; return 1; }
 }
 
 # IPv6 address for a client, with the same host part as its IPv4 address, if the server has an IPv6 address and it is not used already
@@ -838,14 +879,68 @@ Client_PSK()
 	(( ${P_CLIENT[$1]} < 0 )) || Client_Set "${P_CLIENT[$1]}" 'Peer' 'PresharedKey' "$psk"
 }
 
+# Defaults for a new server into $NEW_IFACE, $NEW_PORT and $NEW_ADDR, which are not used by other servers
+Server_Defaults()
+{
+	local n=0
+	while [[ -e $WG_DIR/wg$n.conf || -e /sys/class/net/wg$n ]]; do ((n++)); done
+	NEW_IFACE="wg$n"
+	NEW_PORT=$(sed -n '/^[[:blank:]]*SOFTWARE_WIREGUARD_PORT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+	[[ $NEW_PORT =~ ^[1-9][0-9]{0,4}$ ]] && (( $NEW_PORT <= 65535 )) || NEW_PORT=51820
+	while [[ " ${SRV_PORT[*]} " == *" $NEW_PORT "* ]]; do ((NEW_PORT++)); done
+	n=9
+	while [[ " ${SRV_ADDR[*]//,/ } " == *" 10.$n."* ]]; do ((n++)); done
+	NEW_ADDR="10.$n.0.1/24"
+}
+
+# Create a new server config with hooks to forward and masquerade client traffic, then enable and start it: $1 = interface, $2 = listen port, $3 = address(es)
+Server_Create()
+{
+	local conf="$WG_DIR/$1.conf" key net
+	Check_Iface "$1" && Check_Port "$2" && Check_Server_Address "$3" || return 1
+	Parse_Net "$3"
+	[[ $NET4_IP ]] || { Fail 'The server needs an IPv4 address, whose subnet is used for the clients.'; return 1; }
+	Int2Ip "$NET4_NET"
+	net="$IP/$NET4_PREFIX"
+
+	# The hooks use iptables. Install it with the default umask, like the packages in the main part.
+	umask 0022
+	G_AG_CHECK_INSTALL_PREREQ iptables
+	umask 0077
+	[[ -d $WG_DIR ]] || G_EXEC mkdir -m 0700 "$WG_DIR"
+
+	# Re-use the server key of old dietpi-software installs, so that existing clients keep working
+	if [[ $1 == 'wg0' && -f $WG_DIR/server_private.key ]] && key=$(<"$WG_DIR/server_private.key") && Pubkey "$key" && [[ $PUBKEY ]]
+	then
+		G_DIETPI-NOTIFY 2 "Re-using the server key from $WG_DIR/server_private.key"
+	else
+		key=$(wg genkey) || { Fail 'Generating the server key failed.'; return 1; }
+	fi
+	cat << _EOF_ > "$conf" || { rm -f "$conf"; Fail "Writing $conf failed."; return 1; }
+[Interface]
+Address = $3
+PrivateKey = $key
+ListenPort = $2
+
+PostUp = sysctl net.ipv4.conf.%i.forwarding=1 net.ipv4.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').forwarding=1
+PostUp = sysctl net.ipv6.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').accept_ra=2
+PostUp = sysctl net.ipv6.conf.%i.forwarding=1 net.ipv6.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').forwarding=1
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -s $net -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
+PostUp = ip6tables -A FORWARD -i %i -j ACCEPT; ip6tables -t nat -A POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -s $net -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
+PostDown = ip6tables -D FORWARD -i %i -j ACCEPT; ip6tables -t nat -D POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
+_EOF_
+	wg-quick strip "$conf" > /dev/null || { G_EXEC rm "$conf"; Fail "The created config $conf is invalid."; return 1; }
+	G_DIETPI-NOTIFY 0 "Created server $1: $conf"
+	# The config exists now, hence report a failed start with return code 2, so that it is shown in the main menu
+	G_EXEC_NOEXIT=1 G_EXEC systemctl enable --now "wg-quick@$1" || { Fail "Server $1 has been created, but starting it failed."; return 2; }
+	G_DIETPI-NOTIFY 0 "Server $1 listens on port $2. Please forward this UDP port from your router to this server, if it is behind NAT."
+}
+
 Server_Set_Port()
 {
 	local port=$1 old=${SRV_PORT[$IFACE]} tmp c update=()
-	if [[ ! $port =~ ^[1-9][0-9]{0,4}$ ]] || (( $port > 65535 ))
-	then
-		Fail "\"$port\" is not a valid port."
-		return 1
-	fi
+	Check_Port "$port" || return 1
 	[[ $port == "$old" ]] && return 0
 	tmp=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
 	Conf_Set "$WG_DIR/$IFACE.conf" 'Interface' '' 'ListenPort' "$port" > "$tmp" || { rm -f "$tmp"; return 1; }
@@ -877,13 +972,7 @@ Server_Set_Port()
 Server_Set_Address()
 {
 	local new=$1 a tmp tmp2 i c ips entry old_net='' new_net='' renumber=0 moved=0 o_mask
-	for a in ${new//,/ }
-	do
-		[[ $a =~ ^[0-9.]+/[0-9]{1,2}$ ]] && Valid_IPv4 "${a%/*}" && (( ${a#*/} <= 30 )) && continue
-		[[ $a =~ ^[0-9A-Fa-f:]+/[0-9]{1,3}$ ]] && continue
-		Fail "\"$a\" is not a valid address with prefix length, e.g. 10.9.0.1/24 or fd42::1/64."
-		return 1
-	done
+	Check_Server_Address "$new" || return 1
 	[[ ${new// /} == "${SRV_ADDR[$IFACE]// /}" ]] && return 0
 	Load_Server_Net
 	local o_ip=$SRV4_IP o_prefix=$SRV4_PREFIX o_net=$SRV4_NET
@@ -1114,7 +1203,7 @@ Input_AllowedIPs()
 {
 	local lan_ip lan_if lan_net=''
 	lan_ip=$(G_GET_NET -q ip) lan_if=$(G_GET_NET -q iface)
-	[[ $lan_if ]] && lan_net=$(ip -o -4 a s dev "$lan_if" | mawk '{print $4;exit}')
+	[[ $lan_if ]] && lan_net=$(ip -br -4 a s dev "$lan_if" | mawk '{print $3;exit}')
 	if [[ $lan_net ]]
 	then
 		Parse_Net "$lan_net"
@@ -1365,13 +1454,63 @@ Edit_Config()
 	G_EXEC rm -R "$dir"
 }
 
+Menu_Create()
+{
+	Server_Defaults
+	local iface=$NEW_IFACE port=$NEW_PORT address=$NEW_ADDR last='Create'
+	while :
+	do
+		G_WHIP_MENU_ARRAY=(
+			'Interface' ": [$iface]"
+			'Listen port' ": [$port]"
+			'Server address' ": [$address]"
+			'' '●─ Apply '
+			'Create' ': Create and start the server with above settings'
+		)
+		G_WHIP_DEFAULT_ITEM=$last
+		G_WHIP_BUTTON_CANCEL_TEXT='Back'
+		Whip_Menu "New server config: $WG_DIR/$iface.conf\n\nClient traffic is forwarded and masqueraded, so that clients can access the local network and the internet through this server." || return 0
+		last=$G_WHIP_RETURNED_VALUE
+		case $G_WHIP_RETURNED_VALUE in
+			'Interface')
+				G_WHIP_DEFAULT_ITEM=$iface
+				Input_Checked Check_Iface "Please enter the name of the server interface, e.g. wg0:\n\nIts config is stored as $WG_DIR/<interface>.conf." && iface=$RESULT
+			;;
+			'Listen port')
+				G_WHIP_DEFAULT_ITEM=$port
+				G_WHIP_INPUTBOX_REGEX='^[1-9][0-9]{0,4}$' G_WHIP_INPUTBOX_REGEX_TEXT='be a valid port number'
+				Input_Checked Check_Port 'Please enter the UDP port the server listens on:\n\nThis port needs to be forwarded by your router and/or opened in your firewall.' && port=$RESULT
+			;;
+			'Server address')
+				G_WHIP_DEFAULT_ITEM=$address
+				G_WHIP_INPUTBOX_REGEX='^[0-9A-Fa-f.:/, ]+$' G_WHIP_INPUTBOX_REGEX_TEXT='be a comma-separated list of addresses with prefix length'
+				Input_Checked Check_Server_Address 'Please enter the VPN address(es) of the server with prefix length, comma-separated, e.g.: 10.9.0.1/24, fd42::1/64\n\nThe prefix length defines the subnet of the clients.' && address=$RESULT
+			;;
+			'Create')
+				Server_Create "$iface" "$port" "$address"
+				(( $? == 1 )) && continue
+				IFACE=$iface
+				return 0
+			;;
+			*) :;;
+		esac
+	done
+}
+
 Menu_Main()
 {
+	# Without server config, show an empty server section with the option to create one
 	if ! Load_State
 	then
-		G_WHIP_YESNO "No WireGuard server config was found in $WG_DIR. A server config is a file $WG_DIR/<interface>.conf with a \"ListenPort\" setting.\n\nWould you like to install the WireGuard server via dietpi-software now?" || return 1
-		/boot/dietpi/dietpi-software install 172
-		Load_State || return 1
+		G_WHIP_MENU_ARRAY=(
+			'' '●─ Server '
+			'Create server' ': Create a new server config and start it'
+		)
+		G_WHIP_DEFAULT_ITEM='Create server'
+		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+		Whip_Menu "No WireGuard server config was found in $WG_DIR. A server config is a file $WG_DIR/<interface>.conf with a \"ListenPort\" setting.\n\nCreate a server first, to add clients to it." || return 1
+		[[ $G_WHIP_RETURNED_VALUE == 'Create server' ]] && Menu_Create
+		return 0
 	fi
 	[[ $IFACE && ${SRV_PORT[$IFACE]} ]] || IFACE=${SERVERS[0]}
 	Load_Peers
@@ -1606,6 +1745,33 @@ Cmd_Set()
 	done
 }
 
+Cmd_Init()
+{
+	# Do nothing if a server config exists already, e.g. on dietpi-software reinstalls
+	if [[ $ARG1 && ${SRV_PORT[$ARG1]} ]]
+	then
+		G_DIETPI-NOTIFY 0 "Server config $WG_DIR/$ARG1.conf exists already"
+		return 0
+
+	elif [[ ! $ARG1 ]] && (( ${#SERVERS[@]} ))
+	then
+		G_DIETPI-NOTIFY 0 "Server config exists already: ${SERVERS[*]}"
+		return 0
+	fi
+	Server_Defaults
+	local iface=${ARG1:-$NEW_IFACE} port=$NEW_PORT address=$NEW_ADDR kv key value
+	for kv in "${KV[@]}"
+	do
+		key=${kv%%=*} value=${kv#*=}
+		case ${key,,} in
+			'port') port=$value;;
+			'address') address=$value;;
+			*) Error "Invalid key ($key). Aborting ...$USAGE";;
+		esac
+	done
+	Server_Create "$iface" "$port" "$address"
+}
+
 Cmd_Server()
 {
 	# Optional interface as first argument
@@ -1655,8 +1821,9 @@ then
 	exit 0
 fi
 
-Load_State || Error "No WireGuard server config was found in $WG_DIR. A server config is a file $WG_DIR/<interface>.conf with a \"ListenPort\" setting."
+Load_State || [[ $COMMAND == 'init' ]] || Error "No WireGuard server config was found in $WG_DIR. A server config is a file $WG_DIR/<interface>.conf with a \"ListenPort\" setting. Use \"dietpi-wireguard init\" to create one."
 case $COMMAND in
+	'init') Cmd_Init;;
 	'list') Cmd_List;;
 	'add') Cmd_Add;;
 	'remove')
