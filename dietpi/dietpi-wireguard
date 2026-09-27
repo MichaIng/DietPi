@@ -415,6 +415,39 @@ Check_Client_IP()
 	[[ ! ${USED4[$INT]} ]] || { Fail "$1 is used already."; return 1; }
 }
 
+# Check client settings, which are not validated by WireGuard until the config is imported on the client device
+Check_AllowedIPs()
+{
+	local a ip prefix max
+	[[ ${1//[ ,]/} ]] || { Fail 'AllowedIPs must not be empty.'; return 1; }
+	for a in ${1//,/ }
+	do
+		# The prefix length is optional, like for WireGuard
+		ip=${a%/*} prefix=${a#"${a%/*}"} prefix=${prefix#/} max=32
+		[[ $ip == *':'* ]] && max=128
+		if [[ $a != *'/' && $prefix =~ ^(0|[1-9][0-9]{0,2})?$ ]] && (( ${prefix:-0} <= $max )) && { [[ $max == 128 && $ip =~ ^[0-9A-Fa-f:.]+$ ]] || Valid_IPv4 "$ip"; }
+		then
+			continue
+		fi
+		Fail "\"$a\" is not a valid network, e.g. 192.168.1.0/24 or fd42::/64."
+		return 1
+	done
+}
+
+Check_Endpoint()
+{
+	[[ $1 =~ ^[^[:blank:]]+:([1-9][0-9]{0,4})$ ]] && (( ${BASH_REMATCH[1]} <= 65535 )) && return 0
+	Fail "\"$1\" is not a valid endpoint. Please use <host>:<port>, e.g. myserver.example.com:51820."
+	return 1
+}
+
+Check_Keepalive()
+{
+	[[ $1 =~ ^[0-9]{0,5}$ ]] && (( 10#${1:-0} <= 65535 )) && return 0
+	Fail "\"$1\" is not a valid keepalive interval. Allowed are 0 to 65535 seconds, or empty to disable it."
+	return 1
+}
+
 # IPv6 address for a client, with the same host part as its IPv4 address, if the server has an IPv6 address and it is not used already
 V6_For()
 {
@@ -734,8 +767,7 @@ Client_Rename()
 Client_Create()
 {
 	local file="$CLIENT_DIR/$IFACE-$1.conf" priv pub psk='' address server_ips
-	Check_Name "$1" && Check_Client_IP "$2" || return 1
-	[[ $5 ]] || { Fail 'AllowedIPs must not be empty.'; return 1; }
+	Check_Name "$1" && Check_Client_IP "$2" && Check_Endpoint "$3" && Check_AllowedIPs "$5" && Check_Keepalive "$6" || return 1
 	[[ ${SRV_PUB[$IFACE]} ]] || { Fail "The public key of server $IFACE is unknown, as its config has no PrivateKey and the interface is not running."; return 1; }
 	if ! priv=$(wg genkey) || ! pub=$(wg pubkey <<< "$priv")
 	then
@@ -809,7 +841,7 @@ Client_PSK()
 Server_Set_Port()
 {
 	local port=$1 old=${SRV_PORT[$IFACE]} tmp c update=()
-	if [[ ! $port =~ ^[0-9]+$ ]] || (( $port < 1 || $port > 65535 ))
+	if [[ ! $port =~ ^[1-9][0-9]{0,4}$ ]] || (( $port > 65535 ))
 	then
 		Fail "\"$port\" is not a valid port."
 		return 1
@@ -821,9 +853,10 @@ Server_Set_Port()
 	SRV_PORT[$IFACE]=$port
 	G_DIETPI-NOTIFY 0 "Server $IFACE listens on port $port now. Please adjust port forwarding and firewall rules, if required."
 
+	# Unused client configs as well, so that they work when being re-added
 	for c in "${!C_FILE[@]}"
 	do
-		[[ ${C_IF[c]} == "$IFACE" && ${C_STATE[c]} != 'unused' ]] || continue
+		[[ ${C_IF[c]} == "$IFACE" ]] || continue
 		Parse_Conf "${C_FILE[c]}"
 		[[ ${CONF_P[1,endpoint]} == *":$old" ]] && update+=("$c")
 	done
@@ -1107,8 +1140,7 @@ Input_AllowedIPs()
 		*)
 			G_WHIP_DEFAULT_ITEM=$1
 			G_WHIP_INPUTBOX_REGEX='^[0-9A-Fa-f.:/, ]+$' G_WHIP_INPUTBOX_REGEX_TEXT='be a comma-separated list of networks'
-			G_WHIP_INPUTBOX 'Please enter the AllowedIPs for the client, comma-separated, e.g.: 192.168.1.0/24, 10.9.0.0/24' || return 1
-			RESULT=$G_WHIP_RETURNED_VALUE
+			Input_Checked Check_AllowedIPs 'Please enter the AllowedIPs for the client, comma-separated, e.g.: 192.168.1.0/24, 10.9.0.0/24'
 		;;
 	esac
 }
@@ -1125,16 +1157,14 @@ Input_Endpoint()
 {
 	G_WHIP_DEFAULT_ITEM=$1
 	G_WHIP_INPUTBOX_REGEX='^[^ ]+:[0-9]+$' G_WHIP_INPUTBOX_REGEX_TEXT='be <host>:<port>'
-	G_WHIP_INPUTBOX 'Please enter the public domain or IP address and port, where the client can reach this server, e.g.: myserver.example.com:51820\n\nThe port needs to be forwarded by your router, if the server is behind NAT.' || return 1
-	RESULT=$G_WHIP_RETURNED_VALUE
+	Input_Checked Check_Endpoint 'Please enter the public domain or IP address and port, where the client can reach this server, e.g.: myserver.example.com:51820\n\nThe port needs to be forwarded by your router, if the server is behind NAT.'
 }
 
 Input_Keepalive()
 {
 	G_WHIP_DEFAULT_ITEM=$1
 	G_WHIP_INPUTBOX_REGEX='^([0-9]{1,5})?$' G_WHIP_INPUTBOX_REGEX_TEXT='be a number of seconds or empty'
-	G_WHIP_INPUTBOX 'Please enter the interval in seconds, in which the client sends keepalive packets, e.g. 25.\n\nThis keeps the connection open, if the client is behind NAT. Leave it empty or enter 0 to disable it.' || return 1
-	RESULT=$G_WHIP_RETURNED_VALUE
+	Input_Checked Check_Keepalive 'Please enter the interval in seconds, in which the client sends keepalive packets, e.g. 25.\n\nThis keeps the connection open, if the client is behind NAT. Leave it empty or enter 0 to disable it.' || return 1
 	[[ $RESULT == 0 ]] && RESULT=
 	return 0
 }
@@ -1539,7 +1569,6 @@ Cmd_Add()
 	local ip=$OPT_IP endpoint=${OPT_ENDPOINT:-$DEF_ENDPOINT} keepalive=${OPT_KEEPALIVE-$DEF_KEEPALIVE}
 	[[ $ip ]] || { Next_Free_IP || Error "There is no free IP address left in the subnet $SRV4_IP/$SRV4_PREFIX."; ip=$NEXT_IP; }
 	[[ $endpoint =~ :[0-9]+$ ]] || endpoint+=":${SRV_PORT[$IFACE]}"
-	[[ $keepalive =~ ^[0-9]*$ ]] || Error "\"$keepalive\" is not a valid keepalive interval."
 	Client_Create "$ARG1" "$ip" "$endpoint" "${OPT_DNS-$DEF_DNS}" "${OPT_ALLOWED-$DEF_ALLOWED}" "$keepalive" "$OPT_PSK"
 }
 
@@ -1555,15 +1584,15 @@ Cmd_Set()
 		case ${key,,} in
 			'dns') Client_Set "$CLIENT" 'Interface' 'DNS' "$value";;
 			'allowedips')
-				[[ $value ]] || Error 'AllowedIPs must not be empty.'
+				Check_AllowedIPs "$value" || exit 1
 				Client_Set "$CLIENT" 'Peer' 'AllowedIPs' "$value"
 			;;
 			'endpoint')
-				[[ $value =~ :[0-9]+$ ]] || Error 'The endpoint must be <host>:<port>.'
+				Check_Endpoint "$value" || exit 1
 				Client_Set "$CLIENT" 'Peer' 'Endpoint' "$value"
 			;;
 			'keepalive')
-				[[ $value =~ ^[0-9]*$ ]] || Error "\"$value\" is not a valid keepalive interval."
+				Check_Keepalive "$value" || exit 1
 				[[ $value == 0 ]] && value=
 				Client_Set "$CLIENT" 'Peer' 'PersistentKeepalive' "$value"
 			;;
