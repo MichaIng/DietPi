@@ -22,7 +22,7 @@ Available commands:
   <empty>                         Open the interactive menu
   list [<interface>]              List clients with address, state and config file
   add <name> [<options>]          Create a new client and add it as peer to the server
-  remove <name>                   Remove a client: its server peer and its client config
+  remove <name>                   Remove a client: its server peer and its client config, after confirmation
   disable <name>                  Disable a client: remove its server peer, but keep it for re-enabling
   enable <name>                   Enable a disabled client again
   qr <name>                       Print the client config as QR code, without comments
@@ -31,7 +31,7 @@ Available commands:
                                   An empty dns or keepalive value removes the setting.
   server [<interface>] <key>=<value>...
                                   Change server settings: port, address
-  cleanup                         Remove unused client configs and key files which are not needed anymore
+  cleanup                         Remove unused client configs and key files which are not needed anymore, after confirmation
 Available options:
   -i <interface>                  Server interface, required only if more than one server config exists
   -y                              Do not ask for confirmation
@@ -113,16 +113,19 @@ Whip_Menu()
 
 # G_WHIP_INPUTBOX, shown again with the error prepended until function $1 accepts the input, or the user cancels
 # - G_WHIP_DEFAULT_ITEM, G_WHIP_INPUTBOX_REGEX and G_WHIP_INPUTBOX_REGEX_TEXT are applied to every attempt.
+# - Return code 1 of $1 means invalid input. Any other error code means the input was applied, but something failed afterwards, hence it is not asked again, and the error is shown in the next menu.
 Input_Checked()
 {
-	local check=$1 message=$2 default=$G_WHIP_DEFAULT_ITEM regex=$G_WHIP_INPUTBOX_REGEX regex_text=$G_WHIP_INPUTBOX_REGEX_TEXT error
+	local check=$1 message=$2 default=$G_WHIP_DEFAULT_ITEM regex=$G_WHIP_INPUTBOX_REGEX regex_text=$G_WHIP_INPUTBOX_REGEX_TEXT error result
 	while :
 	do
 		error=$MENU_ERROR
 		MENU_ERROR=
 		G_WHIP_DEFAULT_ITEM=$default G_WHIP_INPUTBOX_REGEX=$regex G_WHIP_INPUTBOX_REGEX_TEXT=$regex_text G_WHIP_INPUTBOX "$error$message" || return 1
 		RESULT=$G_WHIP_RETURNED_VALUE
-		"$check" "$RESULT" && return 0
+		"$check" "$RESULT"
+		result=$?
+		(( $result == 1 )) || return "$result"
 		default=$RESULT
 	done
 }
@@ -177,6 +180,8 @@ Input()
 # Derive public key from private key into $PUBKEY
 Pubkey()
 {
+	PUBKEY=
+	[[ $1 ]] || return 1
 	[[ ${PUB_CACHE[$1]} ]] || PUB_CACHE[$1]=$(wg pubkey <<< "$1")
 	PUBKEY=${PUB_CACHE[$1]}
 }
@@ -225,9 +230,16 @@ Load_State()
 		SERVERS+=("$iface")
 		SRV_PORT[$iface]=${CONF_I[listenport]}
 		SRV_ADDR[$iface]=${CONF_I[address]}
-		Pubkey "${CONF_I[privatekey]}"
-		SRV_PUB[$iface]=$PUBKEY
-		Known "${CONF_I[privatekey]}" "$PUBKEY"
+		# The private key might be set via hook command instead, e.g. "PostUp = wg set %i private-key <file>", then get the public key from the running interface
+		if Pubkey "${CONF_I[privatekey]}"
+		then
+			SRV_PUB[$iface]=$PUBKEY
+
+		elif [[ -e /sys/class/net/$iface ]]
+		then
+			SRV_PUB[$iface]=$(wg show "$iface" public-key)
+		fi
+		Known "${CONF_I[privatekey]}" "${SRV_PUB[$iface]}"
 		SRV_PEERS[$iface]=' '
 		for (( i=1; i<=$CONF_PEERS; i++ ))
 		do
@@ -541,33 +553,31 @@ Block_Separator()
 	echo
 }
 
-# Stop or start $IFACE, via wg-quick@.service if $SERVICE = 1
-Iface_Down()
+# Bring $IFACE up or down: $1 = up|down, via wg-quick@.service if $SERVICE = 1
+Iface_Ctl()
 {
 	if (( $SERVICE ))
 	then
-		G_EXEC_NOEXIT=1 G_EXEC systemctl stop "wg-quick@$IFACE"
+		local action='start'
+		[[ $1 == 'down' ]] && action='stop'
+		G_EXEC_NOEXIT=1 G_EXEC systemctl "$action" "wg-quick@$IFACE"
 	else
-		G_EXEC_NOEXIT=1 G_EXEC wg-quick down "$IFACE"
-	fi
-}
-
-Iface_Up()
-{
-	if (( $SERVICE ))
-	then
-		G_EXEC_NOEXIT=1 G_EXEC systemctl start "wg-quick@$IFACE"
-	else
-		G_EXEC_NOEXIT=1 G_EXEC wg-quick up "$IFACE"
+		G_EXEC_NOEXIT=1 G_EXEC wg-quick "$1" "$IFACE"
 	fi
 }
 
 # Sync the running $IFACE with its config, without disconnecting unchanged peers
 Iface_Sync()
 {
-	local tmp result
+	local tmp key result
 	tmp=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
 	wg-quick strip "$IFACE" > "$tmp" || { rm -f "$tmp"; return 1; }
+	# "wg syncconf" removes the private key if the config has none, e.g. when it is set via "PostUp = wg set %i private-key <file>", hence keep the current one
+	if ! grep -qi '^[[:blank:]]*PrivateKey[[:blank:]]*=' "$tmp"
+	then
+		key=$(wg show "$IFACE" private-key)
+		[[ $key && $key != '(none)' ]] && sed -i "/^[[:blank:]]*\[interface\]/I a PrivateKey = $key" "$tmp"
+	fi
 	G_EXEC_NOEXIT=1 G_EXEC wg syncconf "$IFACE" "$tmp"
 	result=$?
 	rm -f "$tmp"
@@ -583,7 +593,7 @@ Server_Commit()
 	systemctl -q is-active "wg-quick@$IFACE" && SERVICE=1
 	G_EXEC cp -a "$conf" "$backup"
 	# Stop before writing the config, as with "SaveConfig = true", wg-quick down overwrites it with the runtime state
-	(( $restart && $up )) && Iface_Down
+	(( $restart && $up )) && Iface_Ctl down
 	if cat "$new" > "$conf" && wg-quick strip "$IFACE" > /dev/null
 	then
 		if (( ! $up ))
@@ -592,7 +602,7 @@ Server_Commit()
 
 		elif (( $restart ))
 		then
-			Iface_Up && result=0
+			Iface_Ctl up && result=0
 		else
 			Iface_Sync && result=0
 		fi
@@ -604,7 +614,7 @@ Server_Commit()
 	G_EXEC mv "$backup" "$conf"
 	if (( $up && $restart ))
 	then
-		Iface_Up
+		Iface_Ctl up
 
 	elif (( $up ))
 	then
@@ -725,6 +735,8 @@ Client_Create()
 {
 	local file="$CLIENT_DIR/$IFACE-$1.conf" priv pub psk='' address server_ips
 	Check_Name "$1" && Check_Client_IP "$2" || return 1
+	[[ $5 ]] || { Fail 'AllowedIPs must not be empty.'; return 1; }
+	[[ ${SRV_PUB[$IFACE]} ]] || { Fail "The public key of server $IFACE is unknown, as its config has no PrivateKey and the interface is not running."; return 1; }
 	if ! priv=$(wg genkey) || ! pub=$(wg pubkey <<< "$priv")
 	then
 		Fail 'Generating the client keys failed.'
@@ -734,7 +746,7 @@ Client_Create()
 	address="$2/$SRV4_PREFIX" server_ips="$2/32"
 	V6_For "$2" && address+=", $V6/$SRV6_PREFIX" server_ips+=", $V6/128"
 
-	Peer_Add "$pub" "$server_ips" "$psk" || return 1
+	# Write the client config first, so that no peer without client config and private key remains if this fails
 	[[ -d $CLIENT_DIR ]] || G_EXEC mkdir -m 0700 "$CLIENT_DIR"
 	{
 		echo '[Interface]'
@@ -749,7 +761,8 @@ Client_Create()
 		echo "Endpoint = $3"
 		[[ $6 && $6 != 0 ]] && echo "PersistentKeepalive = $6"
 		:
-	} > "$file" || { Fail "Writing $file failed."; return 1; }
+	} > "$file" || { rm -f "$file"; Fail "Writing $file failed."; return 1; }
+	Peer_Add "$pub" "$server_ips" "$psk" || { G_EXEC rm "$file"; return 1; }
 	G_DIETPI-NOTIFY 0 "Created client $1: $file"
 }
 
@@ -757,10 +770,20 @@ Client_Create()
 Client_Readd()
 {
 	local a ips='' i
+	Load_Server_Net
 	Parse_Conf "${C_FILE[$1]}"
 	for a in ${CONF_I[address]//,/ }
 	do
 		a=${a%/*}
+		if Valid_IPv4 "$a"
+		then
+			Ip2Int "$a"
+			if [[ ! $SRV4_IP || $a == "$SRV4_IP" ]] || (( $INT <= $SRV4_NET || $INT >= $SRV4_BCAST ))
+			then
+				Fail "Address $a of ${C_FILE[$1]} is not a client address inside the server subnet $SRV4_IP/$SRV4_PREFIX."
+				return 1
+			fi
+		fi
 		[[ $a == *':'* ]] && a+='/128' || a+='/32'
 		for i in "${!P_IPS[@]}"
 		do
@@ -806,11 +829,15 @@ Server_Set_Port()
 	done
 	(( ${#update[@]} )) || return 0
 	Confirm "Update the endpoint port from $old to $port in ${#update[@]} client config(s)?\n\nClient devices need to import their config again afterwards, e.g. by scanning the QR code." || return 0
+	# The server has been changed already: report failures with return code 2, so that the input is not asked again
+	local failed=0
 	for c in "${update[@]}"
 	do
 		Parse_Conf "${C_FILE[c]}"
-		Client_Set "$c" 'Peer' 'Endpoint' "${CONF_P[1,endpoint]%:*}:$port" || return 1
+		Client_Set "$c" 'Peer' 'Endpoint' "${CONF_P[1,endpoint]%:*}:$port" || failed=1
 	done
+	(( $failed )) && { Fail "Server $IFACE listens on port $port now, but not all client configs could be updated."; return 2; }
+	return 0
 }
 
 # Change the server address. If the IPv4 subnet changes, peers and client configs are moved to the new subnet, keeping their host part.
@@ -830,30 +857,41 @@ Server_Set_Address()
 	Parse_Net "$new"
 	local n_ip=$NET4_IP n_prefix=$NET4_PREFIX n_net=$NET4_NET n_bcast=$NET4_BCAST
 
-	# Map peer IPv4 host addresses of the old subnet to the new one, and check that the new server IP is not used by a client
+	# Map IPv4 host addresses of peers and unused client configs from the old subnet to the new one, and check that the new server IP is not used by a client
 	local -A map=() clients=()
+	local addresses=()
+	for i in "${!P_IPS[@]}"
+	do
+		for a in ${P_IPS[i]//,/ }
+		do
+			[[ $a == *'/32' ]] && addresses+=("${a%/32}")
+		done
+	done
+	for c in "${!C_FILE[@]}"
+	do
+		[[ ${C_IF[c]} == "$IFACE" && ${C_STATE[c]} == 'unused' ]] || continue
+		for a in ${C_ADDR[c]//,/ }
+		do
+			addresses+=("${a%/*}")
+		done
+	done
 	if [[ $o_ip && $n_ip ]]
 	then
 		(( $o_net != $n_net || $o_prefix != $n_prefix )) && renumber=1
 		o_mask=$(( (0xFFFFFFFF << (32 - $o_prefix)) & 0xFFFFFFFF ))
-		for i in "${!P_IPS[@]}"
+		for a in "${addresses[@]}"
 		do
-			for a in ${P_IPS[i]//,/ }
-			do
-				[[ $a == *'/32' ]] || continue
-				a=${a%/32}
-				Valid_IPv4 "$a" || continue
-				Ip2Int "$a"
-				if (( $renumber && ($INT & $o_mask) == $o_net ))
-				then
-					(( $INT - $o_net < $n_bcast - $n_net )) || { Fail "Client address $a does not fit into the new subnet $n_ip/$n_prefix."; return 1; }
-					Int2Ip "$(( $n_net + $INT - $o_net ))"
-					map[$a]=$IP
-					((moved++))
-					a=$IP
-				fi
-				clients[$a]=1
-			done
+			Valid_IPv4 "$a" || continue
+			Ip2Int "$a"
+			if (( $renumber && ($INT & $o_mask) == $o_net ))
+			then
+				(( $INT - $o_net < $n_bcast - $n_net )) || { Fail "Client address $a does not fit into the new subnet $n_ip/$n_prefix."; return 1; }
+				Int2Ip "$(( $n_net + $INT - $o_net ))"
+				map[$a]=$IP
+				((moved++))
+				a=$IP
+			fi
+			clients[$a]=1
 		done
 		[[ ${clients[$n_ip]} ]] && { Fail "$n_ip is used by a client already."; return 1; }
 		Int2Ip "$o_net"
@@ -889,18 +927,21 @@ Server_Set_Address()
 	Server_Commit "$tmp" 1 || return 1
 	SRV_ADDR[$IFACE]=$new
 
+	# The server has been changed now: update everything else, and report failures with return code 2, so that the input is not asked again
+	local failed=0
+
 	# Disabled peers
 	for i in "${!P_IPS[@]}"
 	do
 		[[ ${P_STATE[i]} == 'disabled' ]] || continue
 		Map_IPs "${P_IPS[i]}"
-		[[ $IPS == "${P_IPS[i]}" ]] || Peer_Set "$i" 'AllowedIPs' "$IPS" || return 1
+		[[ $IPS == "${P_IPS[i]}" ]] || Peer_Set "$i" 'AllowedIPs' "$IPS" || failed=1
 	done
 
-	# Client configs: Address and DNS
+	# Client configs, including unused ones: Address, AllowedIPs and DNS
 	for c in "${!C_FILE[@]}"
 	do
-		[[ ${C_IF[c]} == "$IFACE" && ${C_STATE[c]} != 'unused' ]] || continue
+		[[ ${C_IF[c]} == "$IFACE" ]] || continue
 		Parse_Conf "${C_FILE[c]}"
 		ips=
 		for a in ${CONF_I[address]//,/ }
@@ -909,20 +950,21 @@ Server_Set_Address()
 			[[ ${map[${a%/*}]} ]] && entry="${map[${a%/*}]}/$n_prefix"
 			ips+=${ips:+, }$entry
 		done
-		[[ $ips == "${CONF_I[address]}" ]] || Client_Set "$c" 'Interface' 'Address' "$ips" || return 1
+		[[ $ips == "${CONF_I[address]}" ]] || Client_Set "$c" 'Interface' 'Address' "$ips" || { failed=1; continue; }
 		if (( $renumber )) && [[ ", ${CONF_P[1,allowedips]}, " == *", $old_net, "* ]]
 		then
 			entry=", ${CONF_P[1,allowedips]}, "
 			entry=${entry//, $old_net, /, $new_net, }
 			entry=${entry#, } entry=${entry%, }
-			Client_Set "$c" 'Peer' 'AllowedIPs' "$entry" || return 1
+			Client_Set "$c" 'Peer' 'AllowedIPs' "$entry" || { failed=1; continue; }
 		fi
 		[[ $o_ip && $o_ip != "$n_ip" && ", ${CONF_I[dns]}, " == *", $o_ip, "* ]] || continue
 		entry=", ${CONF_I[dns]}, "
 		entry=${entry//, $o_ip, /${n_ip:+, $n_ip}, }
 		entry=${entry#, } entry=${entry%, }
-		Client_Set "$c" 'Interface' 'DNS' "$entry" || return 1
+		Client_Set "$c" 'Interface' 'DNS' "$entry" || failed=1
 	done
+	(( $failed )) && { Fail "Server $IFACE uses address $new now, but not all client configs could be updated."; return 2; }
 	G_DIETPI-NOTIFY 0 "Server $IFACE uses address $new now"
 }
 
@@ -938,33 +980,23 @@ Map_IPs()
 	done
 }
 
-# Unused client configs of all servers and key files, which contain keys that are stored in configs already
+# Files not needed anymore: key files which contain keys that are stored in configs already into KEY_FILES, plus unused client configs of all servers into CLEANUP_FILES
 Load_Cleanup()
 {
-	CLEANUP_FILES=()
+	KEY_FILES=()
 	local c f key
-	for c in "${!C_FILE[@]}"
-	do
-		[[ ${C_STATE[c]} == 'unused' ]] && CLEANUP_FILES+=("${C_FILE[c]}")
-	done
 	shopt -s nullglob
 	for f in "$WG_DIR"/*.key
 	do
 		key=$(<"$f")
 		key=${key//[[:space:]]/}
-		[[ $key && ${KNOWN_KEYS[$key]} ]] && CLEANUP_FILES+=("$f")
+		[[ $key && ${KNOWN_KEYS[$key]} ]] && KEY_FILES+=("$f")
 	done
 	shopt -u nullglob
-}
-
-Redundant_Key_Files()
-{
-	KEY_FILES=()
-	local f
-	Load_Cleanup
-	for f in "${CLEANUP_FILES[@]}"
+	CLEANUP_FILES=("${KEY_FILES[@]}")
+	for c in "${!C_FILE[@]}"
 	do
-		[[ $f == *'.key' ]] && KEY_FILES+=("$f")
+		[[ ${C_STATE[c]} == 'unused' ]] && CLEANUP_FILES+=("${C_FILE[c]}")
 	done
 }
 
@@ -1119,6 +1151,7 @@ Menu_Add()
 {
 	Load_Server_Net
 	[[ $SRV4_IP ]] || { Fail "Server $IFACE has no IPv4 address. Please add one via \"Server address\" first."; return 0; }
+	[[ ${SRV_PUB[$IFACE]} ]] || { Fail "The public key of server $IFACE is unknown, as its config has no PrivateKey and the interface is not running."; return 0; }
 	Load_Defaults
 	Next_Free_IP || { Fail "There is no free IP address left in the subnet $SRV4_IP/$SRV4_PREFIX."; return 0; }
 	Input_Name '' Check_Name || return 0
@@ -1313,7 +1346,7 @@ Menu_Main()
 	[[ $IFACE && ${SRV_PORT[$IFACE]} ]] || IFACE=${SERVERS[0]}
 	Load_Peers
 	Load_Runtime
-	Redundant_Key_Files
+	Load_Cleanup
 
 	local state='inactive' boot='disabled at boot' i c tag unused=()
 	declare -A tags=()
@@ -1358,7 +1391,7 @@ Menu_Main()
 
 	G_WHIP_DEFAULT_ITEM=$MAIN_LAST
 	G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-	Whip_Menu "Manage WireGuard server $IFACE and its clients.\n\nPublic key: ${SRV_PUB[$IFACE]}" || return 1
+	Whip_Menu "Manage WireGuard server $IFACE and its clients.\n\nPublic key: ${SRV_PUB[$IFACE]:-unknown, as the config has no PrivateKey and the interface is not running}" || return 1
 	MAIN_LAST=$G_WHIP_RETURNED_VALUE
 	case $G_WHIP_RETURNED_VALUE in
 		'Server interface') Menu_Interface;;
@@ -1599,6 +1632,7 @@ case $COMMAND in
 	'add') Cmd_Add;;
 	'remove')
 		Find_Target "$ARG1"
+		Confirm "Remove client $ARG1 of server $IFACE? Its client config is deleted, which cannot be undone." || { G_DIETPI-NOTIFY 2 'Nothing has been removed. Use "-y" to remove the client without confirmation.'; exit 0; }
 		if [[ $TARGET_TYPE == 'peer' ]]
 		then
 			Peer_Remove "$TARGET"
