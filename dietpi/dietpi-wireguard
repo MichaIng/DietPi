@@ -36,6 +36,10 @@ Available commands:
   server [<interface>] <key>=<value>...
                                   Change server settings: port, address
   cleanup                         Remove unused client configs and key files which are not needed anymore, after confirmation
+Server address:
+  An IPv4 and an IPv6 address with prefix length are expected, e.g. address=10.9.0.1/24,fd10:9::1/64
+  The IPv4 subnet is used for the clients, and it is required. The IPv6 address is highly advised: without it, clients cannot use IPv6 through the VPN,
+  so that connections to IPv6 hosts hang until they fall back to IPv4, or fail. New servers get both, unless IPv6 is disabled.
 Available options:
   -i <interface>                  Server interface, required only if more than one server config exists
   -y                              Do not ask for confirmation
@@ -476,7 +480,7 @@ Check_Server_Address()
 	do
 		[[ $a =~ ^[0-9.]+/[0-9]{1,2}$ ]] && Valid_IPv4 "${a%/*}" && (( ${a#*/} <= 30 )) && continue
 		[[ $a =~ ^[0-9A-Fa-f:]+/[0-9]{1,3}$ ]] && continue
-		Fail "\"$a\" is not a valid address with prefix length, e.g. 10.9.0.1/24 or fd42::1/64."
+		Fail "\"$a\" is not a valid address with prefix length, e.g. 10.9.0.1/24 or fd10:9::1/64."
 		return 1
 	done
 }
@@ -500,6 +504,30 @@ V6_For()
 	[[ $USED6 != *" ${V6,,} "* ]] && return 0
 	V6=
 	return 1
+}
+
+# IPv6 is disabled by dietpi-config via "disable_ipv6", which new interfaces inherit from "default"
+IPv6_Enabled(){ [[ -f '/proc/sys/net/ipv6/conf/default/disable_ipv6' && $(< /proc/sys/net/ipv6/conf/default/disable_ipv6) == 0 ]]; }
+
+# Hint into $HINT, if clients of server $1 with address(es) $2 cannot use IPv6 through the VPN, which they expect with "::/0" in AllowedIPs
+IPv6_Hint()
+{
+	HINT=
+	Parse_Net "$2"
+	if [[ ! $NET6_IP ]]
+	then
+		# If IPv6 is disabled, this is intended by the admin, and cannot be solved via the server address
+		IPv6_Enabled && HINT="Server $1 has no IPv6 address, hence clients cannot use IPv6 through the VPN: connections to IPv6 hosts hang until they fall back to IPv4, or fail. Please add an IPv6 address, e.g. fd10:9::1/64."
+
+	elif ! IPv6_Enabled
+	then
+		HINT="IPv6 is disabled on this system, hence server $1 cannot start with an IPv6 address. Please enable IPv6 via dietpi-config, or remove the IPv6 address from the server."
+
+	elif [[ -e /sys/class/net/$1 && $(< /proc/sys/net/ipv6/conf/all/forwarding) == 0 ]]
+	then
+		HINT="IPv6 forwarding is disabled, hence clients cannot use IPv6 through the VPN. Please add \"PostUp = sysctl net.ipv6.conf.all.forwarding=1\" to $WG_DIR/$1.conf, below an \"accept_ra=2\" line if present, and restart the server."
+	fi
+	[[ $HINT ]]
 }
 
 # Defaults for new clients from the newest client config of $IFACE
@@ -889,8 +917,10 @@ Server_Defaults()
 	[[ $NEW_PORT =~ ^[1-9][0-9]{0,4}$ ]] && (( $NEW_PORT <= 65535 )) || NEW_PORT=51820
 	while [[ " ${SRV_PORT[*]} " == *" $NEW_PORT "* ]]; do ((NEW_PORT++)); done
 	n=9
-	while [[ " ${SRV_ADDR[*]//,/ } " == *" 10.$n."* ]]; do ((n++)); done
+	while [[ " ${SRV_ADDR[*]//,/ } " == *" 10.$n."* || " ${SRV_ADDR[*],,} " == *"fd10:$n::"* ]]; do ((n++)); done
 	NEW_ADDR="10.$n.0.1/24"
+	# IPv6 via NAT66 from a unique local subnet, so that clients with "::/0" in AllowedIPs can use IPv6. An interface with IPv6 address cannot start if IPv6 is disabled.
+	IPv6_Enabled && NEW_ADDR+=", fd10:$n::1/64"
 }
 
 # Create a new server config with hooks to forward and masquerade client traffic, then enable and start it: $1 = interface, $2 = listen port, $3 = address(es)
@@ -916,6 +946,8 @@ Server_Create()
 	else
 		key=$(wg genkey) || { Fail 'Generating the server key failed.'; return 1; }
 	fi
+	# IPv6 forwarding can only be enabled for all interfaces: the per-interface "forwarding" setting only switches between host and router behaviour, e.g. whether router advertisements are accepted.
+	# "accept_ra=2" needs to be set before, else enabling forwarding removes the default route of the LAN interface, which it got from router advertisements.
 	cat << _EOF_ > "$conf" || { rm -f "$conf"; Fail "Writing $conf failed."; return 1; }
 [Interface]
 Address = $3
@@ -924,7 +956,7 @@ ListenPort = $2
 
 PostUp = sysctl net.ipv4.conf.%i.forwarding=1 net.ipv4.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').forwarding=1
 PostUp = sysctl net.ipv6.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').accept_ra=2
-PostUp = sysctl net.ipv6.conf.%i.forwarding=1 net.ipv6.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').forwarding=1
+PostUp = sysctl net.ipv6.conf.all.forwarding=1
 PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -s $net -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
 PostUp = ip6tables -A FORWARD -i %i -j ACCEPT; ip6tables -t nat -A POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
 PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -s $net -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
@@ -1270,7 +1302,7 @@ Input_Server_Address()
 {
 	G_WHIP_DEFAULT_ITEM=$2
 	G_WHIP_INPUTBOX_REGEX='^[0-9A-Fa-f.:/, ]+$' G_WHIP_INPUTBOX_REGEX_TEXT='be a comma-separated list of addresses with prefix length'
-	Input_Checked "$1" "Please enter the VPN address(es) of the server $3 with prefix length, comma-separated, e.g.: 10.9.0.1/24, fd42::1/64\n\nThe prefix length defines the subnet of the clients."
+	Input_Checked "$1" "Please enter an IPv4 and an IPv6 VPN address of the server $3 with prefix length, comma-separated, e.g.: 10.9.0.1/24, fd10:9::1/64\n\nThe prefix length defines the subnet of the clients. The IPv4 address is required. The IPv6 address is highly advised: without it, clients cannot use IPv6 through the VPN, so that connections to IPv6 hosts hang until they fall back to IPv4, or fail."
 }
 
 # Client name input: $1 = default, $2 = check function
@@ -1484,7 +1516,7 @@ Menu_Create()
 		)
 		G_WHIP_DEFAULT_ITEM=$last
 		G_WHIP_BUTTON_CANCEL_TEXT='Back'
-		Whip_Menu "New server config: $WG_DIR/$iface.conf\n\nClient traffic is forwarded and masqueraded, so that clients can access the local network and the internet through this server." || return 0
+		Whip_Menu "New server config: $WG_DIR/$iface.conf\n\nClient traffic is forwarded and masqueraded via IPv4 and IPv6, so that clients can access the local network and the internet through this server." || return 0
 		last=$G_WHIP_RETURNED_VALUE
 		case $G_WHIP_RETURNED_VALUE in
 			'Interface')
@@ -1524,10 +1556,11 @@ Menu_Main()
 	Load_Runtime
 	Load_Cleanup
 
-	local state='inactive' boot='disabled at boot' i c tag unused=()
+	local state='inactive' boot='disabled at boot' i c tag unused=() hint=''
 	declare -A tags=()
 	systemctl -q is-active "wg-quick@$IFACE" && state='active'
 	systemctl -q is-enabled "wg-quick@$IFACE" && boot='enabled at boot'
+	IPv6_Hint "$IFACE" "${SRV_ADDR[$IFACE]}" && hint="\n\n[WARNING] $HINT"
 
 	G_WHIP_MENU_ARRAY=()
 	(( ${#SERVERS[@]} > 1 )) && G_WHIP_MENU_ARRAY+=('Server interface' ": [$IFACE]")
@@ -1567,7 +1600,7 @@ Menu_Main()
 
 	G_WHIP_DEFAULT_ITEM=$MAIN_LAST
 	G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-	Whip_Menu "Manage WireGuard server $IFACE and its clients.\n\nPublic key: ${SRV_PUB[$IFACE]:-unknown, as the config has no PrivateKey and the interface is not running}" || return 1
+	Whip_Menu "Manage WireGuard server $IFACE and its clients.\n\nPublic key: ${SRV_PUB[$IFACE]:-unknown, as the config has no PrivateKey and the interface is not running}$hint" || return 1
 	MAIN_LAST=$G_WHIP_RETURNED_VALUE
 	case $G_WHIP_RETURNED_VALUE in
 		'Server interface') Menu_Interface;;
@@ -1768,8 +1801,12 @@ Cmd_Server()
 			return 0
 		fi
 		Server_Defaults
-		Server_Create "${ARG1:-$NEW_IFACE}" "${port-$NEW_PORT}" "${address-$NEW_ADDR}"
-		return
+		local iface=${ARG1:-$NEW_IFACE} result
+		address=${address-$NEW_ADDR}
+		Server_Create "$iface" "${port-$NEW_PORT}" "$address"
+		result=$?
+		(( $result != 1 )) && IPv6_Hint "$iface" "$address" && G_DIETPI-NOTIFY 2 "$HINT"
+		return "$result"
 	fi
 
 	# Optional interface as first argument
@@ -1778,6 +1815,7 @@ Cmd_Server()
 	(( ${#KV[@]} )) || Error "Missing <key>=<value>. Aborting ...$USAGE"
 	[[ ${port+set} ]] && { Server_Set_Port "$port" || exit 1; }
 	[[ ${address+set} ]] && { Server_Set_Address "$address" || exit 1; }
+	IPv6_Hint "$IFACE" "${SRV_ADDR[$IFACE]}" && G_DIETPI-NOTIFY 2 "$HINT"
 	return 0
 }
 
