@@ -126,7 +126,7 @@ Process_Software()
 			gzdoom) aCOMMANDS[$i]='gzdoom -norun | grep '\''^GZDoom version '\';;
 			rustdeskserver) aSERVICES[$i]='rustdesksignal rustdeskrelay' aTCP[$i]='21115 21116 21117 21118 21119' aUDP[$i]='21116';;
 			rustdeskclient) aCOMMANDS[$i]='rustdesk --version';;
-			microblogpub) :;; # Service enters a CPU-intense internal error loop until it has been configured interactively via "microblog-pub configure", hence it is not enabled and started anymore after install but instead as part of "microblog-pub configure"
+			microblogpub) :;; # aSERVICES[i]='microblog-pub' aTCP[i]='8007' Service enters a CPU-intense internal error loop until it has been configured interactively via "microblog-pub configure", hence it is not enabled and started anymore after install but instead as part of "microblog-pub configure"
 			git) aCOMMANDS[$i]='git -v';;
 			lxde) aCOMMANDS[$i]='lxsession -h';;
 			mate) aCOMMANDS[$i]='mate-session -h';;
@@ -199,7 +199,7 @@ Process_Software()
 			openvpn) aCOMMANDS[$i]='openvpn --version';; # aSERVICES[$i]='openvpn' aUDP[$i]='1194' GitHub Actions runners do not support the TUN module
 			haproxy) aSERVICES[$i]='haproxy' aTCP[$i]='80 1338';;
 			prometheusnodeexporter) aSERVICES[$i]='node_exporter' aTCP[$i]='9100';;
-			pijuice) :;; # Service does not start without I2C device, not present in container and CLI command always puts you in interactive console
+			pijuice) :;; # (( $arch < 3 )) && aCOMMANDS[i]='/usr/bin/pijuice_cli32 -V' || aCOMMANDS[i]='/usr/bin/pijuice_cli64 -V'; aSERVICES[i]='pijuice' aTCP[i]='????' Service does not start without I2C device, not present in container and CLI command always puts you in interactive console
 			logrotate) aCOMMANDS[$i]='logrotate -v /etc/logrotate.conf';;
 			rsyslog) aSERVICES[$i]='rsyslog';;
 			dietpiramlog) aSERVICES[$i]='dietpi-ramlog' aCOMMANDS[$i]='/boot/dietpi/func/dietpi-ramlog 1 && /boot/dietpi/func/dietpi-ramlog 0 && findmnt -t tmpfs /var/log';;
@@ -265,14 +265,14 @@ Process_Software()
 			gmediarender) aSERVICES[$i]='gmediarender';; # DLNA => UPnP high range of ports
 			nukkit) aSERVICES[$i]='nukkit' aUDP[$i]='19132'; (( $emulation )) && aDELAY[$i]=60;;
 			gitea) aSERVICES[$i]='gitea' aTCP[$i]='3000';;
-			audiophonicspispc) :;; # Service cannot reasonably start in container as WirinPi's gpio command fails reading /proc/cpuinfo
+			audiophonicspispc) :;; # aSERVICES[i]='pi-spc' Service cannot reasonably start in container as WirinPi's gpio command fails reading /proc/cpuinfo
 			raspotify) aSERVICES[$i]='raspotify';;
 			nextcloudtalk) aSERVICES[$i]='coturn' aTCP[$i]=3478 aUDP[$i]=3478;;
 			lazylibrarian) aSERVICES[$i]='lazylibrarian' aTCP[$i]=5299; (( $emulation )) && aDELAY[$i]=60;;
 			unrar) aCOMMANDS[$i]='unrar -V';;
 			frp) aSERVICES[$i]='frps frpc' aTCP[$i]='7000 7400 7500';;
 			wireguard) aCOMMANDS[$i]='wg' aSERVICES[$i]='wg-quick@wg0' aUDP[$i]='51820' CAPABILITIES+=',CAP_NET_ADMIN';;
-			lxqt) :;; # LXQt: all executables strictly require a Qt session, no help or version output possible
+			lxqt) :;; # All executables strictly require a Qt session, no help or version output possible
 			gimp) aCOMMANDS[$i]='gimp -v';;
 			xfcepowermanager) aCOMMANDS[$i]='xfce4-power-manager -V';;
 			uptimekuma) aSERVICES[$i]='uptime-kuma' aTCP[$i]='3002';;
@@ -306,7 +306,7 @@ Process_Software()
 			navidrome) aSERVICES[$i]='navidrome' aTCP[$i]='4533';;
 			homer) :;;
 			openhab) aSERVICES[$i]='openhab' aTCP[$i]='8444'; (( $emulation )) && aDELAY[$i]=600;;
-			moonlightcli|moonlightgui) :;; # Moonlight (CLI/GUI), "moonlight"/"moonlight-qt" command
+			moonlightcli|moonlightgui) :;; # aCOMMANDS[$i]='moonlight'|'moonlight-qt' command
 			restic) aCOMMANDS[$i]='restic version';;
 			mediawiki) :;;
 			homebridge) aCOMMANDS[$i]='hb-service status' aSERVICES[$i]='homebridge' aTCP[$i]='8581';;
