@@ -80,6 +80,7 @@ image="DietPi_Container-$image.img"
 software=
 for i in $SOFTWARE
 do
+	i=${i//[ïÏ]/i}
 	i=${i,,}
 	software+=" ${i//[^[:alnum:]]/}"
 done
@@ -232,7 +233,7 @@ Process_Software()
 			mosquitto) aSERVICES[$i]='mosquitto' aTCP[$i]='1883';;
 			naadaemon) aSERVICES[$i]='networkaudiod' aTCP[$i]='43210' aUDP[$i]='43210';;
 			synapse) aSERVICES[$i]='synapse' aTCP[$i]='8008';;
-			adguardhome) aSERVICES[$i]='adguardhome' aUDP[$i]='53' aTCP[$i]='8083'; [[ ${aSERVICES[182]} ]] && aUDP[182]='5335' aTCP[182]='5335';; # Unbound uses port 5335 if AdGuard Home is installed
+			adguardhome) aSERVICES[$i]='adguardhome' aUDP[$i]='53' aTCP[$i]='8083'; [[ ${aSERVICES[unbound]} ]] && aUDP[unbound]='5335' aTCP[unbound]='5335';; # Unbound uses port 5335 if AdGuard Home is installed
 			birdnetgo) aSERVICES[$i]='birdnet' aTCP[$i]='8127';;
 			mpd) aSERVICES[$i]='mpd' aTCP[$i]='6600';;
 			#ompd)
@@ -430,9 +431,9 @@ fi
 if [[ $RPI == 'true' ]] && (( $arch < 10 ))
 then
 	case $arch in
-		sambaclient) model=1;;
-		foldinghome) model=2;;
-		mc) model=4;;
+		1) model=1;;
+		2) model=2;;
+		3) model=4;;
 		*) Error_Exit "Invalid architecture $ARCH ($arch). This is a bug in this script!";;
 	esac
 	G_EXEC rm rootfs/etc/.dietpi_hw_model_identifier
