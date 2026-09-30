@@ -75,7 +75,6 @@ case $ARCH in
 	*) Error_Exit "Invalid architecture \"$ARCH\" passed";;
 esac
 image="DietPi_Container-$image.img"
-[[ $SOFTWARE =~ ^[[:alnum:]\ ._-]+$ ]] || Error_Exit "Invalid software list \"$SOFTWARE\" passed"
 # Normalise software IDs like DietPi-Software does: Lower case, remove all non-alphanumeric characters
 software=
 for i in $SOFTWARE
@@ -127,13 +126,13 @@ Process_Software()
 			gzdoom) aCOMMANDS[$i]='gzdoom -norun | grep '\''^GZDoom version '\';;
 			rustdeskserver) aSERVICES[$i]='rustdesksignal rustdeskrelay' aTCP[$i]='21115 21116 21117 21118 21119' aUDP[$i]='21116';;
 			rustdeskclient) aCOMMANDS[$i]='rustdesk --version';;
-			#microblogpub) aSERVICES[$i]='microblog-pub' aTCP[$i]='8007';; Service enters a CPU-intense internal error loop until it has been configured interactively via "microblog-pub configure", hence it is not enabled and started anymore after install but instead as part of "microblog-pub configure"
+			microblogpub) :;; # Service enters a CPU-intense internal error loop until it has been configured interactively via "microblog-pub configure", hence it is not enabled and started anymore after install but instead as part of "microblog-pub configure"
 			git) aCOMMANDS[$i]='git -v';;
 			lxde) aCOMMANDS[$i]='lxsession -h';;
 			mate) aCOMMANDS[$i]='mate-session -h';;
 			xfce) aCOMMANDS[$i]='xfce4-session -h';;
 			gnustep) aCOMMANDS[$i]='gnustep-tests';;
-			#tasmoadmin)
+			tasmoadmin) :;;
 			tigervncserver) aSERVICES[$i]='vncserver' aTCP[$i]='5901';;
 			xrdp) aSERVICES[$i]='xrdp' aTCP[$i]='3389';;
 			nomachine) aSERVICES[$i]='nxserver' aTCP[$i]='4000';;
@@ -146,7 +145,7 @@ Process_Software()
 			shairportsync) aSERVICES[$i]='shairport-sync' aTCP[$i]='5000';; # AirPlay 2 would be TCP port 7000
 			freshrss) aCOMMANDS[$i]='/opt/FreshRSS/cli/user-info.php';;
 			readymedia) aSERVICES[$i]='minidlna' aTCP[$i]='8200';;
-			#ampache)
+			ampache) :;;
 			emby) aSERVICES[$i]='emby-server' aTCP[$i]='8096';;
 			plexmediaserver) aSERVICES[$i]='plexmediaserver' aTCP[$i]='32400';;
 			mumbleserver) aSERVICES[$i]='mumble-server' aTCP[$i]='64738';;
@@ -159,34 +158,27 @@ Process_Software()
 			opentyrian) aCOMMANDS[$i]='/usr/games/opentyrian/opentyrian -h';;
 			cuberite) aSERVICES[$i]='cuberite' aTCP[$i]='1339' aDELAY[$i]=60;;
 			mineos) aSERVICES[$i]='mineos' aTCP[$i]='8443';;
-			#phpbb)
-			#wordpress)
-			#singlefilephpgallery)
-			#baikal) Baïkal
+			phpbb|wordpress|singlefilephpgallery|baikal) :;; # Baïkal
 			tailscale) aCOMMANDS[$i]='tailscale version';; # aSERVICES[$i]='tailscaled' aUDP[$i]='41641' GitHub Actions runners do not support the TUN module
 			wifihotspot) aCOMMANDS[$i]='iptables -V' aSERVICES[$i]='isc-dhcp-server' aUDP[$i]='67';; # aSERVICES[$i]='hostapd' fails without actual WiFi interface
 			torhotspot) aSERVICES[$i]='tor' aTCP[$i]='9040' aUDP[$i]='53';;
 			box86) aCOMMANDS[$i]='box86 -v';;
-			#linuxdash)
-			#phpsysinfo)
+			linuxdash|phpsysinfo) :;;
 			netdata) aSERVICES[$i]='netdata' aTCP[$i]='19999';;
 			rpimonitor) aSERVICES[$i]='rpimonitor' aTCP[$i]='8888';;
 			firefox) aCOMMANDS[$i]='firefox-esr -v';;
 			remoteit) aSERVICES[$i]='schannel' aUDP[$i]='5980';; # remoteit@.service service listens on random high UDP port
-			#python3rpigpio)
+			python3rpigpio) :;;
 			wiringpi) aCOMMANDS[$i]='gpio -v | grep '\''gpio version'\';;
 			webiopi) aSERVICES[$i]='webiopi' aTCP[$i]='8002';;
-			#i2c)
+			i2c) :;;
 			fail2ban) aSERVICES[$i]='fail2ban';;
 			influxdb) aSERVICES[$i]='influxdb' aTCP[$i]='8086 8088';;
-			#lasp)
-			#lamp)
+			lasp|lamp) :;;
 			grafana) aSERVICES[$i]='grafana-server' aTCP[$i]='3001' aDELAY[$i]=30;;
-			#lesp)
-			#lemp)
+			lesp|lemp) :;;
 			ubooquity) aSERVICES[$i]='ubooquity' aTCP[$i]='2038 2039'; (( $emulation )) && aDELAY[$i]=60;;
-			#llsp)
-			#llmp)
+			llsp|llmp) :;;
 			apache) aSERVICES[$i]='apache2' aTCP[$i]='80';;
 			lighttpd) aSERVICES[$i]='lighttpd' aTCP[$i]='80';;
 			nginx) aSERVICES[$i]='nginx' aTCP[$i]='80';;
@@ -197,7 +189,7 @@ Process_Software()
 				'bookworm') aSERVICES[$i]='php8.2-fpm';;
 				*) aSERVICES[$i]='php8.4-fpm';;
 			esac;;
-			#phpmyadmin)
+			phpmyadmin) :;;
 			redis) aSERVICES[$i]='redis-server' aTCP[$i]='6379';;
 			certbot) aCOMMANDS[$i]='certbot --version';;
 			pihole) aSERVICES[$i]='pihole-FTL' aUDP[$i]='53';;
@@ -207,7 +199,7 @@ Process_Software()
 			openvpn) aCOMMANDS[$i]='openvpn --version';; # aSERVICES[$i]='openvpn' aUDP[$i]='1194' GitHub Actions runners do not support the TUN module
 			haproxy) aSERVICES[$i]='haproxy' aTCP[$i]='80 1338';;
 			prometheusnodeexporter) aSERVICES[$i]='node_exporter' aTCP[$i]='9100';;
-			#pijuice) (( $arch < 3 )) && aCOMMANDS[$i]='/usr/bin/pijuice_cli32 -V' || aCOMMANDS[$i]='/usr/bin/pijuice_cli64 -V'; aSERVICES[$i]='pijuice' aTCP[$i]='????';; Service does not start without I2C device, not present in container and CLI command always puts you in interactive console
+			pijuice) :;; # Service does not start without I2C device, not present in container and CLI command always puts you in interactive console
 			logrotate) aCOMMANDS[$i]='logrotate -v /etc/logrotate.conf';;
 			rsyslog) aSERVICES[$i]='rsyslog';;
 			dietpiramlog) aSERVICES[$i]='dietpi-ramlog' aCOMMANDS[$i]='/boot/dietpi/func/dietpi-ramlog 1 && /boot/dietpi/func/dietpi-ramlog 0 && findmnt -t tmpfs /var/log';;
@@ -224,10 +216,10 @@ Process_Software()
 			nextcloud) aCOMMANDS[$i]='sudo -u www-data php /var/www/nextcloud/occ status';;
 			webmin) aSERVICES[$i]='webmin' aTCP[$i]='10000';;
 			medusa) aSERVICES[$i]='medusa' aTCP[$i]='8081'; (( $emulation )) && aDELAY[$i]=30;;
-			#pivpn) :;; # ToDo: Implement automated install via /boot/unattended_pivpn.conf
+			pivpn) :;; # ToDo: Implement automated install via /boot/unattended_pivpn.conf
 			mopidy) aSERVICES[$i]='mopidy' aTCP[$i]='6680';;
 			cava) aCOMMANDS[$i]='cava -v';;
-			#realvncserver)
+			realvncserver) :;;
 			roonbridge) aSERVICES[$i]='roonbridge' aUDP[$i]='9003';;
 			nodered) aSERVICES[$i]='node-red' aTCP[$i]='1880'; (( $emulation )) && aDELAY[$i]=30;;
 			mosquitto) aSERVICES[$i]='mosquitto' aTCP[$i]='1883';;
@@ -236,7 +228,7 @@ Process_Software()
 			adguardhome) aSERVICES[$i]='adguardhome' aUDP[$i]='53' aTCP[$i]='8083'; [[ ${aSERVICES[unbound]} ]] && aUDP[unbound]='5335' aTCP[unbound]='5335';; # Unbound uses port 5335 if AdGuard Home is installed
 			birdnetgo) aSERVICES[$i]='birdnet' aTCP[$i]='8127';;
 			mpd) aSERVICES[$i]='mpd' aTCP[$i]='6600';;
-			#ompd)
+			ompd) :;;
 			python3) aCOMMANDS[$i]='python3 -V';;
 			blynkserver) aSERVICES[$i]='blynkserver' aTCP[$i]='9443'; (( $emulation )) && aDELAY[$i]=120;;
 			aria2) aSERVICES[$i]='aria2' aTCP[$i]='6800';; # aTCP[$i]+=' 6881-6999';; # Listens on random port
@@ -264,24 +256,23 @@ Process_Software()
 			octoprint) aSERVICES[$i]='octoprint' aTCP[$i]='5001'; (( $emulation )) && aDELAY[$i]=60;;
 			roonserver) aSERVICES[$i]='roonserver';; # Listens on a variety of different port ranges
 			htpcmanager) aSERVICES[$i]='htpc-manager' aTCP[$i]='8085'; (( $emulation )) && aDELAY[$i]=30;;
-			#steam)
+			steam) :;;
 			homeassistant) aSERVICES[$i]='home-assistant' aTCP[$i]='8123'; (( $emulation )) && aDELAY[$i]=900 || aDELAY[$i]=60;;
 			minio) aSERVICES[$i]='minio' aTCP[$i]='9001 9004' aCOMMANDS[$i]='bash -ic '\''mc mb local/test'\';;
-			#alloguifull)
-			#allogui)
+			alloguifull|allogui) :;;
 			fuguhub) aSERVICES[$i]='bdd' aTCP[$i]='80 443';;
 			docker) aCOMMANDS[$i]='docker -v' aSERVICES[$i]='containerd' CAPABILITIES+=',CAP_NET_ADMIN'; (( $emulation )) || aSERVICES[$i]+=' docker';; # QEMU: Docker daemon fails with "iptables: Failed to initialize nft: Protocol not supported" and similar error with iptables-legacy
 			gmediarender) aSERVICES[$i]='gmediarender';; # DLNA => UPnP high range of ports
 			nukkit) aSERVICES[$i]='nukkit' aUDP[$i]='19132'; (( $emulation )) && aDELAY[$i]=60;;
 			gitea) aSERVICES[$i]='gitea' aTCP[$i]='3000';;
-			#audiophonicspispc) aSERVICES[$i]='pi-spc';; Service cannot reasonably start in container as WirinPi's gpio command fails reading /proc/cpuinfo
+			audiophonicspispc) :;; # Service cannot reasonably start in container as WirinPi's gpio command fails reading /proc/cpuinfo
 			raspotify) aSERVICES[$i]='raspotify';;
 			nextcloudtalk) aSERVICES[$i]='coturn' aTCP[$i]=3478 aUDP[$i]=3478;;
 			lazylibrarian) aSERVICES[$i]='lazylibrarian' aTCP[$i]=5299; (( $emulation )) && aDELAY[$i]=60;;
 			unrar) aCOMMANDS[$i]='unrar -V';;
 			frp) aSERVICES[$i]='frps frpc' aTCP[$i]='7000 7400 7500';;
 			wireguard) aCOMMANDS[$i]='wg' aSERVICES[$i]='wg-quick@wg0' aUDP[$i]='51820' CAPABILITIES+=',CAP_NET_ADMIN';;
-			#lxqt) LXQt: all executables strictly require a Qt session, no help or version output possible
+			lxqt) :;; # LXQt: all executables strictly require a Qt session, no help or version output possible
 			gimp) aCOMMANDS[$i]='gimp -v';;
 			xfcepowermanager) aCOMMANDS[$i]='xfce4-power-manager -V';;
 			uptimekuma) aSERVICES[$i]='uptime-kuma' aTCP[$i]='3002';;
@@ -290,7 +281,7 @@ Process_Software()
 			komga) aSERVICES[$i]='komga' aTCP[$i]='2037' aDELAY[$i]=30; (( $emulation )) && aDELAY[$i]=420;;
 			bazarr) aSERVICES[$i]='bazarr' aTCP[$i]='6767'; (( $emulation )) && aDELAY[$i]=120 || aDELAY[$i]=30;;
 			papermc) aSERVICES[$i]='papermc' aTCP[$i]='25565 25575' aDELAY[$i]=60; (( $emulation )) && aDELAY[$i]=900;;
-			unbound) aSERVICES[$i]='unbound' aUDP[$i]='53' aTCP[$i]='53'; [[ ${aSERVICES[126]} ]] && aUDP[$i]='5335' aTCP[$i]='5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed
+			unbound) aSERVICES[$i]='unbound' aUDP[$i]='53' aTCP[$i]='53'; [[ ${aSERVICES[adguardhome]} ]] && aUDP[$i]='5335' aTCP[$i]='5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed
 			vaultwarden) aSERVICES[$i]='vaultwarden' aTCP[$i]='8001';;
 			torrelay) aSERVICES[$i]='tor' aTCP[$i]='80 443 9051';;
 			portainer) aTCP[$i]='9002 9442' SYSCALLS+=' add_key keyctl bpf';;
@@ -313,12 +304,11 @@ Process_Software()
 			rclone) aCOMMANDS[$i]='rclone version';;
 			readarr) aSERVICES[$i]='readarr' aTCP[$i]='8787';;
 			navidrome) aSERVICES[$i]='navidrome' aTCP[$i]='4533';;
-			#homer)
+			homer) :;;
 			openhab) aSERVICES[$i]='openhab' aTCP[$i]='8444'; (( $emulation )) && aDELAY[$i]=600;;
-			#moonlightcli) Moonlight (CLI), "moonlight" command
-			#moonlightgui) Moonlight (GUI), "moonlight-qt" command
+			moonlightcli|moonlightgui) :;; # Moonlight (CLI/GUI), "moonlight"/"moonlight-qt" command
 			restic) aCOMMANDS[$i]='restic version';;
-			#mediawiki)
+			mediawiki) :;;
 			homebridge) aCOMMANDS[$i]='hb-service status' aSERVICES[$i]='homebridge' aTCP[$i]='8581';;
 			kavita) aSERVICES[$i]='kavita' aTCP[$i]='2036' aDELAY[$i]=30;;
 			soju) aSERVICES[$i]='soju' aTCP[$i]='6667';;
@@ -329,7 +319,7 @@ Process_Software()
 			prometheus) aSERVICES[$i]='prometheus' aTCP[$i]='9090' aCOMMANDS[$i]='curl -sSf '\''http://127.0.0.1:9090/api/v1/query?query=up'\'' | grep '\''"status":"success"'\';;
 			homebox) aSERVICES[$i]='homebox' aTCP[$i]='7745' aCOMMANDS[$i]='curl -sSf '\''http://127.0.0.1:7745/api/v1/status'\'' | grep '\''"health":true'\';;
 			scrypted) aSERVICES[$i]='scrypted' aTCP[$i]='10443 11080 10081';; # ports: https (secure), http (insecure), debug
-			*) :;;
+			*) Error_Exit "Unknown software ID \"$i\"";;
 		esac
 		aINSTALL[$i]=1
 	done
