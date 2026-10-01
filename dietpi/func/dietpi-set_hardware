@@ -1249,6 +1249,47 @@ _EOF_
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# enableipv6
 	#/////////////////////////////////////////////////////////////////////////////////////
+	# WireGuard servers with IPv6 addresses cannot start while IPv6 is disabled, hence turn off IPv6 for them first, or set $wireguard=1 to open dietpi-wireguard afterwards
+	# - Non-interactive, IPv6 is turned off for them, so that they remain functional.
+	# - Returns 1 if IPv6 shall not be disabled.
+	Disable_IPv6_WireGuard(){
+
+		local f servers=() i
+		for f in /etc/wireguard/*.conf
+		do
+			if [[ -f $f ]] && grep -qi '^[[:blank:]]*ListenPort[[:blank:]]*=' "$f" && grep -Eqi '^[[:blank:]]*(Address|AllowedIPs)[[:blank:]]*=[^#]*:' "$f"
+			then
+				f=${f##*/}
+				servers+=("${f%.conf}")
+			fi
+		done
+		(( ${#servers[@]} )) || return 0
+
+		G_WHIP_MENU_ARRAY=(
+			'Turn off IPv6' ': Turn off IPv6 for the WireGuard server(s), then disable IPv6'
+			'Open dietpi-wireguard' ': Disable IPv6, then adjust the WireGuard server(s) manually'
+			'Cancel' ': Keep IPv6 enabled'
+		)
+		G_WHIP_DEFAULT_ITEM='Turn off IPv6'
+		G_WHIP_MENU "[WARNING] WireGuard server(s) ${servers[*]} use IPv6 (NAT66). A WireGuard server with IPv6 addresses cannot start while IPv6 is disabled.
+
+Turning off IPv6 for them removes the IPv6 addresses from the server and client configs. The client configs then need to be imported on the client devices again."
+		case $G_WHIP_RETURNED_VALUE in
+			'Turn off IPv6')
+				for i in "${servers[@]}"
+				do
+					/boot/dietpi/dietpi-wireguard -y server "$i" ipv6=off && continue
+					G_DIETPI-NOTIFY 1 "Turning off IPv6 for WireGuard server $i failed, hence IPv6 has not been disabled."
+					EXIT_CODE=1
+					return 1
+				done
+			;;
+			'Open dietpi-wireguard') wireguard=1;;
+			*) G_DIETPI-NOTIFY 2 'IPv6 has not been disabled.'; return 1;;
+		esac
+
+	}
+
 	Enable_IPv6(){
 
 		if [[ ! -d '/proc/sys/net/ipv6' ]]; then
@@ -1274,6 +1315,10 @@ _EOF_
 
 		elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
 
+			# WireGuard servers with IPv6 addresses cannot start while IPv6 is disabled
+			local wireguard=0
+			Disable_IPv6_WireGuard || return 0
+
 			echo -e 'net.ipv6.conf.all.disable_ipv6=1\nnet.ipv6.conf.default.disable_ipv6=1' > /etc/sysctl.d/dietpi-disable_ipv6.conf
 			sysctl -qp /etc/sysctl.d/dietpi-disable_ipv6.conf
 			# - Comment IPv6 specific host entries
@@ -1282,6 +1327,7 @@ _EOF_
 			sed --follow-symlinks -i 's/^ff02::2[[:blank:]]/#ff02::2 /' /etc/hosts
 			# - dietpi.txt entry
 			G_CONFIG_INJECT 'CONFIG_ENABLE_IPV6=' 'CONFIG_ENABLE_IPV6=0' /boot/dietpi.txt
+			(( $wireguard )) && /boot/dietpi/dietpi-wireguard
 
 		else
 
