@@ -23,7 +23,7 @@ aREGEX[$software_id]='https://github.com/rustdesk/rustdesk-server/releases/downl
 # RustDesk Client
 software_id=13
 aURL[$software_id]='https://api.github.com/repos/rustdesk/rustdesk/releases/latest'
-aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/rustdesk-[^\"\/]*-$arch\.deb(?=\")"'
+aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/rustdesk-[0-9.]*-$arch\.deb(?=\")"'
 aARCH[$software_id]='armv7-sciter aarch64 x86_64'
 aARCH_CHECK[$software_id]='riscv64'
 aREGEX[$software_id]='https://github.com/rustdesk/rustdesk/releases/download/.*/rustdesk-.*-\$arch\.deb'
