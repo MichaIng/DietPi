@@ -37,11 +37,12 @@ Available commands:
                                   Change server settings: port, address, ipv6
   cleanup                         Remove unused client configs and key files which are not needed anymore, after confirmation
 Server address:
-  address=<IPv4 address>/<prefix> The IPv4 address of the server, e.g. 10.9.0.1/24, whose subnet is used for the clients
-  ipv6=on|off|<address>/<prefix>  IPv6 (NAT66), e.g. ipv6=fd10:9::1/64, "on" for the default fd10:<n>::1/64: all clients get an IPv6 address of this subnet,
-                                  with the same host part as their IPv4 address. Without it, clients cannot use IPv6 through the VPN,
-                                  so that connections to IPv6 hosts hang until they fall back to IPv4, or fail. New servers get it, unless IPv6 is disabled.
-                                  Turning it on or off changes the client configs, which need to be imported on the client devices again.
+  address=<IPv4 address>/<prefix> The IPv4 address of the server, e.g. "10.9.0.1/24", whose subnet is used for the clients
+  ipv6=on|off|<address>/<prefix>  The IPv6 (NAT66) address of this server, e.g. "fd10:9::1/64", "on" for the default fd10:<n>::1/64,
+                                  whose subnet is used for the clients, with the same host part as their IPv4 address.
+                                  Without it, clients cannot use IPv6 through the VPN, so that connections to IPv6 hosts hang until
+                                  they fall back to IPv4, or fail. Defaults to "on" for new servers.
+                                  Changing the subnet and toggling IPv6 requires clients to import their config again.
 Available options:
   -i <interface>                  Server interface, required only if more than one server config exists
   -y                              Do not ask for confirmation
@@ -363,7 +364,7 @@ Int2Ip(){ IP="$(( $1 >> 24 & 255 )).$(( $1 >> 16 & 255 )).$(( $1 >> 8 & 255 )).$
 # No leading zeros, which would be interpreted as octal numbers
 Valid_IPv4(){ [[ $1 =~ ^(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})$ ]] && (( ${BASH_REMATCH[1]} < 256 && ${BASH_REMATCH[2]} < 256 && ${BASH_REMATCH[3]} < 256 && ${BASH_REMATCH[4]} < 256 )); }
 
-# Parse an address list into first IPv4 and IPv6 address, prefix length and IPv4 network/broadcast as integer
+# Parse an address list into first IPv4 and IPv6 address, CIDR netmask and IPv4 network/broadcast as integer
 Parse_Net()
 {
 	NET4_IP='' NET4_PREFIX='' NET4_NET='' NET4_BCAST='' NET6_IP='' NET6_PREFIX=''
@@ -446,7 +447,7 @@ Check_AllowedIPs()
 	[[ ${1//[ ,]/} ]] || { Fail 'AllowedIPs must not be empty.'; return 1; }
 	for a in ${1//,/ }
 	do
-		# The prefix length is optional, like for WireGuard
+		# The CIDR netmask is optional, like for WireGuard
 		ip=${a%/*} prefix=${a#"${a%/*}"} prefix=${prefix#/} max=32
 		[[ $ip == *':'* ]] && max=128
 		if [[ $a != *'/' && $prefix =~ ^(0|[1-9][0-9]{0,2})?$ ]] && (( ${prefix:-0} <= $max )) && { [[ $max == 128 && $ip =~ ^[0-9A-Fa-f:.]+$ ]] || Valid_IPv4 "$ip"; }
@@ -488,12 +489,12 @@ Check_Port()
 	return 0
 }
 
-Check_Server_Address()
+Check_Server_IPv4_Address()
 {
 	[[ $1 =~ ^[0-9.]+/[0-9]{1,2}$ ]] && Valid_IPv4 "${1%/*}" && (( ${1#*/} <= 30 )) && return 0
 	local ipv6='"IPv6 (NAT66)"'
 	(( $MENU )) || ipv6='"ipv6=<address>"'
-	Fail "\"$1\" is not a valid IPv4 address with prefix length, e.g. 10.9.0.1/24. The IPv6 address is set separately via $ipv6."
+	Fail "\"$1\" is not a valid IPv4 address with CIDR network, e.g. \"10.9.0.1/24\". The IPv6 address is set separately via $ipv6."
 	return 1
 }
 
@@ -516,13 +517,13 @@ Valid_IPv6()
 	fi
 }
 
-# IPv6 address of a server with prefix length, or empty for none. Clients get the same host part as for IPv4 in the last group, hence the prefix length must be 112 or less.
-Check_Server_IPv6()
+# IPv6 address of a server with CIDR netmask, or empty for none. Clients get the same host part as for IPv4 in the last group, hence the CIDR netmask must be 112 or less.
+Check_Server_IPv6_Address()
 {
 	[[ $1 ]] || return 0
 	local ip=${1%/*} prefix=${1##*/}
 	[[ $1 == "$ip/$prefix" && $prefix =~ ^[0-9]{1,3}$ && $ip != *':' ]] && Valid_IPv6 "$ip" && (( $prefix <= 112 )) && return 0
-	Fail "\"$1\" is not a valid IPv6 address with prefix length of 112 or less, e.g. fd10:9::1/64."
+	Fail "\"$1\" is not a valid IPv6 address with CIDR netmask of 112 or less, e.g. \"fd10:9::1/64\"."
 	return 1
 }
 
@@ -557,7 +558,7 @@ V6_For()
 	return 1
 }
 
-# Address list $1 without IPv6 entries into $IPS, plus the V6_Map address of its first IPv4 address inside the server subnet with prefix length $2, if $2 is given
+# Address list $1 without IPv6 entries into $IPS, plus the V6_Map address of its first IPv4 address inside the server subnet with CIDR netmask $2, if $2 is given
 Swap_V6()
 {
 	local a v6=''
@@ -575,7 +576,7 @@ Swap_V6()
 # Compare address lists, ignoring spaces and case
 Same_IPs(){ local a=${1// /} b=${2// /}; [[ ${a,,} == "${b,,}" ]]; }
 
-# IPv6 is disabled by dietpi-config via "disable_ipv6", which new interfaces inherit from "default"
+# IPv6 is disabled by dietpi-network via "disable_ipv6", which new interfaces inherit from "default"
 IPv6_Enabled(){ [[ -f '/proc/sys/net/ipv6/conf/default/disable_ipv6' && $(< /proc/sys/net/ipv6/conf/default/disable_ipv6) == 0 ]]; }
 
 # Default IPv6 address into $ADDR6 for a server with IPv4 address $1: fd10:<n>::<host>/64 with <n> from 10.<n>.*, or the next one not used by another server than $2, and the same host part as the IPv4 address
@@ -612,12 +613,12 @@ IPv6_Hint()
 
 		elif (( ${3:-0} ))
 		then
-			HINT="IPv6 is disabled on this system, hence clients of server $1 cannot use IPv6 through the VPN: connections to IPv6 hosts hang until they fall back to IPv4, or fail. Please enable IPv6 via dietpi-config, then turn on IPv6 via $on."
+			HINT="IPv6 is disabled on this system, hence clients of server $1 cannot use IPv6 through the VPN: connections to IPv6 hosts hang until they fall back to IPv4, or fail. Please enable IPv6 via dietpi-network, then turn on IPv6 via $on."
 		fi
 
 	elif ! IPv6_Enabled
 	then
-		HINT="IPv6 is disabled on this system, hence server $1 cannot start with an IPv6 address. Please enable IPv6 via dietpi-config, or turn off IPv6 via $off."
+		HINT="IPv6 is disabled on this system, hence server $1 cannot start with an IPv6 address. Please enable IPv6 via dietpi-network, or turn off IPv6 via $off."
 
 	elif [[ -e /sys/class/net/$1 && $(< /proc/sys/net/ipv6/conf/all/forwarding) == 0 ]]
 	then
@@ -1043,8 +1044,8 @@ Add_Forwarding_Hook()
 Server_Create()
 {
 	local conf="$WG_DIR/$1.conf" key net
-	Check_Iface "$1" && Check_Port "$2" && Check_Server_Address "$3" && Check_Server_IPv6 "$4" || return 1
-	[[ ! $4 ]] || IPv6_Enabled || { Fail 'IPv6 is disabled on this system, hence the server cannot start with an IPv6 address. Please enable IPv6 via dietpi-config first, or turn off IPv6 for the server.'; return 1; }
+	Check_Iface "$1" && Check_Port "$2" && Check_Server_IPv4_Address "$3" && Check_Server_IPv6_Address "$4" || return 1
+	[[ ! $4 ]] || IPv6_Enabled || { Fail 'IPv6 is disabled on this system, hence the server cannot start with an IPv6 address. Please enable IPv6 via dietpi-network first, or turn off IPv6 for the server.'; return 1; }
 	Parse_Net "$3"
 	Int2Ip "$NET4_NET"
 	net="$IP/$NET4_PREFIX"
@@ -1117,10 +1118,10 @@ Server_Set_Port()
 }
 
 # Change the server IPv4 address, keeping its other addresses, e.g. the IPv6 address. If the IPv4 subnet changes, peers and client configs are moved to the new subnet, keeping their host part, hence their IPv6 addresses remain aligned.
-Server_Set_Address()
+Set_Server_IPv4_Address()
 {
 	local new=$1 a tmp tmp2 i c ips entry old_net='' new_net='' renumber=0 moved=0 o_mask
-	Check_Server_Address "$1" || return 1
+	Check_Server_IPv4_Address "$1" || return 1
 	Load_Server_Net
 	[[ $1 == "$SRV4_IP/$SRV4_PREFIX" ]] && return 0
 	local o_ip=$SRV4_IP o_prefix=$SRV4_PREFIX o_net=$SRV4_NET
@@ -1172,17 +1173,6 @@ Server_Set_Address()
 		old_net="$IP/$o_prefix"
 		Int2Ip "$n_net"
 		new_net="$IP/$n_prefix"
-	fi
-
-	if (( $renumber ))
-	then
-		Confirm "The IPv4 subnet changes from $old_net to $new_net:
-- $moved client(s) are moved to the new subnet, keeping their host part. Their server peer and client config Address are adjusted.
-- DNS entries in client configs pointing to $o_ip are changed to $n_ip.
-- \"$old_net\" in PreUp/PostUp/PreDown/PostDown lines and in client AllowedIPs is replaced with \"$new_net\".
-\nThe interface is restarted, and client devices need to import their config again, e.g. by scanning the QR code.\n\nContinue?" || return 0
-	else
-		Confirm "Change the server IPv4 address to $1?\n\nThe interface is restarted.${o_ip:+ DNS entries in client configs pointing to $o_ip are changed to $n_ip.}" || return 0
 	fi
 
 	# Server config: Address, active peers and subnet in hook commands
@@ -1263,7 +1253,7 @@ Replace_DNS()
 	DNS=${list%, }
 }
 
-# Apply the IPv4 address map of Server_Set_Address to an AllowedIPs list into $IPS
+# Apply the IPv4 address map of Set_Server_IPv4_Address to an AllowedIPs list into $IPS
 Map_IPs()
 {
 	local a
@@ -1278,10 +1268,10 @@ Map_IPs()
 # Turn on IPv6 (NAT66) for $IFACE with address $1, change its address, or turn it off if $1 is empty
 # - Server, peers and client configs are aligned: all IPv6 entries of the server Address, of the server side peer AllowedIPs and of the client Address are replaced with addresses of the new subnet, with the same host part as the IPv4 address, or removed.
 # - Client AllowedIPs are kept, so that IPv6 traffic of clients does not bypass the VPN.
-Server_Set_IPv6()
+Set_Server_IPv6_Address()
 {
 	local new=$1 old tmp tmp2 i c ips set failed=0 changed=0 unaligned=0
-	Check_Server_IPv6 "$new" || return 1
+	Check_Server_IPv6_Address "$new" || return 1
 	Load_Server_Net
 	old=${SRV6_IP:+$SRV6_IP/$SRV6_PREFIX}
 	# V6_Map derives the client addresses from the new server address
@@ -1304,23 +1294,8 @@ Server_Set_IPv6()
 
 	if [[ $new ]]
 	then
-		IPv6_Enabled || { Fail 'IPv6 is disabled on this system. Please enable it via dietpi-config first.'; return 1; }
+		IPv6_Enabled || { Fail 'IPv6 is disabled on this system. Please enable it via dietpi-network first.'; return 1; }
 		[[ $SRV4_IP ]] || { Fail "Server $IFACE has no IPv4 address, which the IPv6 addresses of the clients are derived from."; return 1; }
-	fi
-	if Same_IPs "$new" "$old"
-	then
-		Confirm "The IPv6 addresses of $unaligned peer(s) or client config(s) of server $IFACE do not match its IPv6 setting (${new:-off}). Align them?\n\nThe interface is restarted, and client devices need to import their config again, e.g. by scanning the QR code." || return 0
-
-	elif [[ $new ]]
-	then
-		if [[ $old ]]
-		then
-			Confirm "Change the IPv6 address of server $IFACE from $old to $new?\n\nThe IPv6 addresses of all its clients are moved to the new subnet, keeping their host part. Their server peer and client config Address are adjusted.\n\nThe interface is restarted, and client devices need to import their config again, e.g. by scanning the QR code.\n\nContinue?" || return 0
-		else
-			Confirm "Turn on IPv6 (NAT66) for server $IFACE with address $new?\n\nAll its clients get an IPv6 address of this subnet, with the same host part as their IPv4 address, in their server peer and client config. Their IPv6 traffic is masqueraded behind the IPv6 address of this server.\n\nThe interface is restarted, and client devices need to import their config again, e.g. by scanning the QR code.\n\nContinue?" || return 0
-		fi
-	else
-		Confirm "Turn off IPv6 for server $IFACE?\n\nThe IPv6 address of the server, and the IPv6 addresses of all its clients in their server peer and client config are removed. The AllowedIPs of the clients are kept, so that their IPv6 traffic does not bypass the VPN, but they cannot use IPv6 through the VPN anymore: connections to IPv6 hosts hang until they fall back to IPv4, or fail.\n\nThe interface is restarted, and client devices need to import their config again, e.g. by scanning the QR code.\n\nContinue?" || return 0
 	fi
 
 	# Server config: Address, active peers, and the IPv6 forwarding hook for servers created by older DietPi versions
@@ -1439,7 +1414,7 @@ Age_Text()
 	fi
 }
 
-# Address list without host prefix lengths /32 and /128, or without any prefix lengths if $2 = 1 (for client Address)
+# Address list without CIDR netmask /32 and /128, or without any netmask if $2 = 1 (for client Address)
 Short_IPs(){ local a out=''; for a in ${1//,/ }; do a=${a%/32} a=${a%/128}; (( ${2:-0} )) && a=${a%/*}; out+=${out:+, }$a; done; echo "$out"; }
 
 # The state starts with a 3 byte symbol, while printf pads by bytes, hence the state column width is 12 for 10 characters
@@ -1549,18 +1524,22 @@ Input_Port()
 	Input_Checked "$1" "Please enter the UDP port the server $3 listens on:\n\nThis port needs to be forwarded by your router and/or opened in your firewall."
 }
 
-Input_Server_Address()
+Input_Server_IPv4_Address()
 {
 	G_WHIP_DEFAULT_ITEM=$2
-	G_WHIP_INPUTBOX_REGEX='^[0-9.]+/[0-9]+$' G_WHIP_INPUTBOX_REGEX_TEXT='be an IPv4 address with prefix length'
-	Input_Checked "$1" "Please enter the VPN IPv4 address of the server $3 with prefix length, e.g.: 10.9.0.1/24\n\nThe prefix length defines the subnet of the clients. The IPv6 address is set separately via IPv6 (NAT66)."
+	G_WHIP_INPUTBOX_REGEX='^[0-9.]+/[0-9]+$' G_WHIP_INPUTBOX_REGEX_TEXT='be an IPv4 address with CIDR netmask'
+	Input_Checked "$1" "Please enter the VPN IPv4 address of the server $3 with CIDR netmask, e.g. \"10.9.0.1/24\".
+\nAll peers of this server and respective client configs are updated automatically, to match the new server address and subnet.
+\nThe interface is restarted, and client devices need to import their config again, e.g. by scanning the QR code."
 }
 
-Input_Server_IPv6()
+Input_Server_IPv6_Address()
 {
 	G_WHIP_DEFAULT_ITEM=$2
-	G_WHIP_INPUTBOX_REGEX='^[0-9A-Fa-f:/]*$' G_WHIP_INPUTBOX_REGEX_TEXT='be an IPv6 address with prefix length, or empty'
-	Input_Checked "$1" "Please enter the VPN IPv6 address of the server $3 with prefix length, e.g.: fd10:9::1/64\n\nClients get an IPv6 address of this subnet, with the same host part as their IPv4 address, and their IPv6 traffic is masqueraded behind this server (NAT66). Without it, clients cannot use IPv6 through the VPN, so that connections to IPv6 hosts hang until they fall back to IPv4, or fail.\n\nLeave it empty to turn off IPv6."
+	G_WHIP_INPUTBOX_REGEX='^[0-9A-Fa-f:/]*$' G_WHIP_INPUTBOX_REGEX_TEXT='be an IPv6 address with CIDR netmask, or empty'
+	Input_Checked "$1" "Please enter the VPN IPv6 address of the server $3 with CIDR netmask, e.g. \"fd10:9::1/64\". Leave it empty to turn off IPv6 support for this VPN.
+\nAll peers of this server and respective clients configs are updated automatically, to get an IPv6 address of this subnet, with the same host part as their IPv4 address. Their IPv6 traffic is masqueraded behind this server (NAT66). Without it, clients cannot use IPv6 through the VPN, so that connections to IPv6 hosts hang until they fall back to IPv4, or fail. IPv6 leaks however are prevented in any case.
+\nThe interface is restarted, and client devices need to import their config again, e.g. by scanning the QR code."
 }
 
 # Client name input: $1 = default, $2 = check function
@@ -1785,11 +1764,11 @@ Menu_Create()
 				Input_Checked Check_Iface "Please enter the name of the server interface, e.g. wg0:\n\nIts config is stored as $WG_DIR/<interface>.conf." && iface=$RESULT
 			;;
 			'Listen port') Input_Port Check_Port "$port" "$iface" && port=$RESULT;;
-			'Server address') Input_Server_Address Check_Server_Address "$address" "$iface" && address=$RESULT;;
+			'Server address') Input_Server_IPv4_Address Check_Server_IPv4_Address "$address" "$iface" && address=$RESULT;;
 			'IPv6 (NAT66)')
 				ADDR6=$address6
 				[[ $ADDR6 ]] || Default_IPv6 "$address"
-				Input_Server_IPv6 Check_Server_IPv6 "$ADDR6" "$iface" && address6=$RESULT
+				Input_Server_IPv6_Address Check_Server_IPv6_Address "$ADDR6" "$iface" && address6=$RESULT
 			;;
 			'Create')
 				Server_Create "$iface" "$port" "$address" "$address6"
@@ -1880,11 +1859,11 @@ Menu_Main()
 		'Server interface') Menu_Interface;;
 		'Service state') Menu_Service;;
 		'Listen port') Input_Port Server_Set_Port "${SRV_PORT[$IFACE]}" "$IFACE";;
-		'Server address') Input_Server_Address Server_Set_Address "$address4" "$IFACE";;
+		'Server address') Input_Server_IPv4_Address Set_Server_IPv4_Address "$address4" "$IFACE";;
 		'IPv6 (NAT66)')
 			ADDR6=$address6
 			[[ $ADDR6 ]] || Default_IPv6 "${SRV_ADDR[$IFACE]}" "$IFACE"
-			Input_Server_IPv6 Server_Set_IPv6 "$ADDR6" "$IFACE"
+			Input_Server_IPv6_Address Set_Server_IPv6_Address "$ADDR6" "$IFACE"
 		;;
 		'Edit config') Edit_Config;;
 		'Add client') Menu_Add;;
@@ -2070,7 +2049,7 @@ Cmd_Server()
 			'address') address=${kv#*=};;
 			'ipv6')
 				ipv6=${kv#*=}
-				[[ $ipv6 ]] || Error 'Valid values for ipv6 are "on", "off" or an IPv6 address with prefix length.'
+				[[ $ipv6 ]] || Error 'Valid values for ipv6 are "on", "off" or an IPv6 address with CIDR netmask.'
 			;;
 			*) Error "Invalid key ($key). Aborting ...$USAGE";;
 		esac
@@ -2107,7 +2086,7 @@ Cmd_Server()
 	[[ ${port+set} ]] && { Server_Set_Port "$port" || exit 1; }
 	if [[ ${address+set} ]]
 	then
-		Server_Set_Address "$address" || exit 1
+		Set_Server_IPv4_Address "$address" || exit 1
 		# Peers and client configs have been changed
 		Load_State
 		Load_Peers
@@ -2123,7 +2102,7 @@ Cmd_Server()
 			;;
 			*) :;;
 		esac
-		Server_Set_IPv6 "$ipv6" || exit 1
+		Set_Server_IPv6_Address "$ipv6" || exit 1
 	fi
 	IPv6_Hint "$IFACE" "${SRV_ADDR[$IFACE]}" "${address+1}" && G_DIETPI-NOTIFY 2 "$HINT"
 	return 0
