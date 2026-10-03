@@ -1,0 +1,2188 @@
+#!/bin/bash
+{
+# --------------------------------------------
+# dietpi-wireguard
+# Manage WireGuard server interfaces and their clients
+# --------------------------------------------
+# Created by Joulinar / https://github.com/Joulinar
+# License: GPLv2 / https://github.com/MichaIng/DietPi#license
+# --------------------------------------------
+# Location: /boot/dietpi/dietpi-wireguard
+# - Works with the existing configs in /etc/wireguard, without an own database: https://github.com/MichaIng/DietPi/issues/3100
+#	- Server: /etc/wireguard/<interface>.conf with "ListenPort"
+#	- Client: config whose peer public key is the one of a local server, matched to the server peer by its own public key
+#	- Unused client config: client config of a local server, whose public key is not (anymore) a peer of that server
+#	- Client names are taken from file names: <interface>-<name>.conf
+# - New and changed client configs are stored in /etc/wireguard/clients/, configs found in /etc/wireguard/ are moved there on change.
+# - Disabled peers are moved from /etc/wireguard/<interface>.conf to /etc/wireguard/<interface>.disabled.
+# - Runtime state is shown in the menu only. On the command line, use "wg show" for it.
+# - If no server config exists, a new one with defaults can be created via menu or "dietpi-wireguard init", which is used by dietpi-software as well.
+readonly USAGE='
+Usage: dietpi-wireguard [<command>] [<options>]
+Available commands:
+  <empty>                         Open the interactive menu
+  init [<interface>] [<key>=<value>...]
+                                  Create a server config with defaults and start it, if no server config exists yet: port, address, ipv6
+                                  The interface defaults to the first free wg0, wg1, ...
+  list [<interface>]              List clients with address, state and config file
+  add <name> [<options>]          Create a new client and add it as peer to the server
+  remove <name>                   Remove a client: its server peer and its client config, after confirmation
+  disable <name>                  Disable a client: remove its server peer, but keep it for re-enabling
+  enable <name>                   Enable a disabled client again
+  qr <name>                       Print the client config as QR code, without comments
+  rename <name> <new name>        Rename a client config
+  set <name> <key>=<value>...     Change client settings: dns, allowedips, endpoint, keepalive, psk=on|off
+                                  An empty dns or keepalive value removes the setting.
+  server [<interface>] <key>=<value>...
+                                  Change server settings: port, address, ipv6
+  cleanup                         Remove unused client configs and key files which are not needed anymore, after confirmation
+Server address:
+  address=<IPv4 address>/<prefix> The IPv4 address of the server, e.g. "10.9.0.1/24", whose subnet is used for the clients
+  ipv6=on|off|<address>/<prefix>  The IPv6 (NAT66) address of this server, e.g. "fd10:9::1/64", "on" for the default fd10:<n>::1/64,
+                                  whose subnet is used for the clients, with the same host part as their IPv4 address.
+                                  Without it, clients cannot use IPv6 through the VPN, so that connections to IPv6 hosts hang until
+                                  they fall back to IPv4, or fail. Defaults to "on" for new servers.
+                                  Changing the subnet and toggling IPv6 requires clients to import their config again.
+Available options:
+  -i <interface>                  Server interface, required only if more than one server config exists
+  -y                              Do not ask for confirmation
+  --ip <address>                  Client VPN IPv4 address, defaults to the next free one
+  --dns <servers>                 Client DNS servers, comma-separated, empty for none
+  --allowed-ips <networks>        Client AllowedIPs, comma-separated
+  --endpoint <host>[:<port>]      Server endpoint for the client, port defaults to the server ListenPort
+  --keepalive <seconds>           Client PersistentKeepalive, 0 for none
+  --psk                           Add a PresharedKey
+Defaults for "add" are taken from the newest client config of the same server.
+<name> can also be the public key of a peer without local client config.
+'
+
+. /boot/dietpi/func/dietpi-globals
+readonly G_PROGRAM_NAME='DietPi-WireGuard'
+G_CHECK_ROOT_USER "$@"
+G_CHECK_ROOTFS_RW
+G_INIT
+
+readonly WG_DIR='/etc/wireguard'
+readonly CLIENT_DIR="$WG_DIR/clients"
+
+COMMAND=
+ARG1=
+ARG2=
+KV=()
+IFACE_OPT=
+YES=0
+MENU=0
+# Error or note of the last action in menu mode, shown once in the next menu or input box
+MENU_MSG=
+# Current client name while renaming it in the menu
+RENAME_FROM=
+OPT_IP=
+OPT_ENDPOINT=
+OPT_PSK=0
+# Unset means "use default", empty means "none"
+unset -v OPT_DNS OPT_ALLOWED OPT_KEEPALIVE
+
+# Parsed config: [Interface] keys and [Peer] keys by "<peer number>,<key>", keys in lowercase, repeated keys joined with ", "
+declare -A CONF_I CONF_P
+CONF_PEERS=0
+# Servers by interface name
+SERVERS=()
+declare -A SRV_PUB SRV_PORT SRV_ADDR SRV_PEERS SRV_DISABLED
+# Client configs of local servers
+C_FILE=() C_NAME=() C_IF=() C_PUB=() C_ADDR=() C_STATE=()
+# Peers of the selected server interface, active and disabled
+IFACE=
+P_PUB=() P_IPS=() P_STATE=() P_CLIENT=() P_NAME=()
+# Runtime state of the selected server interface
+IFACE_UP=0
+declare -A HS RX TX
+# Keys found in any config, to detect key files which are not needed anymore
+declare -A KNOWN_KEYS
+declare -A PUB_CACHE
+
+Error(){ G_DIETPI-NOTIFY 1 "$1"; exit 1; }
+
+# Print an error, or in menu mode store it to be shown inline in the next menu or input box
+Fail()
+{
+	if (( $MENU ))
+	then
+		MENU_MSG="[FAILED] $1\n\n"
+	else
+		G_DIETPI-NOTIFY 1 "$1"
+	fi
+	return 1
+}
+
+# Print a note, or in menu mode store it to be shown inline in the next menu or input box
+Info()
+{
+	if (( $MENU ))
+	then
+		MENU_MSG+="[ INFO ] $1\n\n"
+	else
+		G_DIETPI-NOTIFY 2 "$1"
+	fi
+}
+
+# Note that $1 client configs have been changed
+Reimport_Note(){ (( $1 )) && Info "$1 client config(s) have been changed. Please import them on the client devices again, e.g. by scanning the QR code."; return 0; }
+
+# G_WHIP_MENU with the error or note of the last action prepended once
+Whip_Menu()
+{
+	local error=$MENU_MSG
+	MENU_MSG=
+	G_WHIP_MENU "$error$1"
+}
+
+# G_WHIP_INPUTBOX, shown again with the error prepended until function $1 accepts the input, or the user cancels
+# - G_WHIP_DEFAULT_ITEM, G_WHIP_INPUTBOX_REGEX and G_WHIP_INPUTBOX_REGEX_TEXT are applied to every attempt.
+# - Return code 1 of $1 means invalid input. Any other error code means the input was applied, but something failed afterwards, hence it is not asked again, and the error is shown in the next menu.
+Input_Checked()
+{
+	local check=$1 message=$2 default=$G_WHIP_DEFAULT_ITEM regex=$G_WHIP_INPUTBOX_REGEX regex_text=$G_WHIP_INPUTBOX_REGEX_TEXT error result
+	while :
+	do
+		error=$MENU_MSG
+		MENU_MSG=
+		G_WHIP_DEFAULT_ITEM=$default G_WHIP_INPUTBOX_REGEX=$regex G_WHIP_INPUTBOX_REGEX_TEXT=$regex_text G_WHIP_INPUTBOX "$error$message" || return 1
+		RESULT=$G_WHIP_RETURNED_VALUE
+		"$check" "$RESULT"
+		result=$?
+		(( $result == 1 )) || return "$result"
+		default=$RESULT
+	done
+}
+
+Confirm(){ (( $YES )) || G_WHIP_YESNO "$1"; }
+
+Input()
+{
+	while (( $# ))
+	do
+		case $1 in
+			'-i') shift; IFACE_OPT=$1;;
+			'-y') YES=1;;
+			'--ip') shift; OPT_IP=$1;;
+			'--dns') shift; OPT_DNS=$1;;
+			'--allowed-ips') shift; OPT_ALLOWED=$1;;
+			'--endpoint') shift; OPT_ENDPOINT=$1;;
+			'--keepalive') shift; OPT_KEEPALIVE=$1;;
+			'--psk') OPT_PSK=1;;
+			'-h'|'--help'|'help') echo "$USAGE"; exit 0;;
+			*)
+				if [[ ! $COMMAND ]]
+				then
+					[[ $1 =~ ^(init|list|add|remove|disable|enable|qr|rename|set|server|cleanup)$ ]] || Error "Invalid command ($1). Aborting ...$USAGE"
+					COMMAND=$1
+
+				# Public keys end with "=", hence for "set" the client name comes first
+				elif [[ $1 =~ ^[A-Za-z][A-Za-z0-9]*= && ( $COMMAND =~ ^(init|server)$ || ( $COMMAND == 'set' && $ARG1 ) ) ]]
+				then
+					KV+=("$1")
+
+				elif [[ ! $ARG1 && $COMMAND != 'cleanup' ]]
+				then
+					ARG1=$1
+
+				# Only "rename" takes a second argument
+				elif [[ ! $ARG2 && $COMMAND == 'rename' ]]
+				then
+					ARG2=$1
+				else
+					Error "Invalid input ($1). Aborting ...$USAGE"
+				fi
+			;;
+		esac
+		shift
+	done
+}
+
+#/////////////////////////////////////////////////////////////////////////////////////
+# Reading configs
+#/////////////////////////////////////////////////////////////////////////////////////
+# Derive public key from private key into $PUBKEY
+Pubkey()
+{
+	PUBKEY=
+	[[ $1 ]] || return 1
+	[[ ${PUB_CACHE[$1]} ]] || PUB_CACHE[$1]=$(wg pubkey <<< "$1")
+	PUBKEY=${PUB_CACHE[$1]}
+}
+
+Known(){ local k; for k in "$@"; do [[ $k ]] && KNOWN_KEYS[$k]=1; done; }
+
+# Parse a config into CONF_I and CONF_P, like wg-quick, ignoring comments
+Parse_Conf()
+{
+	CONF_I=() CONF_P=() CONF_PEERS=0
+	local sec key value
+	while IFS=$'\t' read -r sec key value
+	do
+		if [[ $sec == 'I' ]]
+		then
+			CONF_I[$key]+=${CONF_I[$key]:+, }$value
+		else
+			sec=${sec#P}
+			CONF_P[$sec,$key]+=${CONF_P[$sec,$key]:+, }$value
+			CONF_PEERS=$sec
+		fi
+	done < <(mawk '{
+		sub(/#.*/, ""); gsub(/^[ \t]+|[ \t\r]+$/, "")
+		if ($0 == "") next
+		if ($0 ~ /^\[/) { s = tolower($0); if (s == "[interface]") sec = "I"; else if (s == "[peer]") sec = "P" (++p); else sec = ""; next }
+		i = index($0, "=")
+		if (!i || sec == "") next
+		k = tolower(substr($0, 1, i - 1)); v = substr($0, i + 1)
+		gsub(/[ \t]+/, "", k); sub(/^[ \t]+/, "", v)
+		print sec "\t" k "\t" v
+	}' "$1")
+}
+
+# Find all server configs and client configs of local servers
+Load_State()
+{
+	SERVERS=() SRV_PUB=() SRV_PORT=() SRV_ADDR=() SRV_PEERS=() SRV_DISABLED=() KNOWN_KEYS=()
+	C_FILE=() C_NAME=() C_IF=() C_PUB=() C_ADDR=() C_STATE=()
+	local f iface i n candidates=() seen=' '
+	shopt -s nullglob
+	for f in "$WG_DIR"/*.conf
+	do
+		Parse_Conf "$f"
+		[[ ${CONF_I[listenport]} ]] || { candidates+=("$f"); continue; }
+		iface=${f##*/} iface=${iface%.conf}
+		SERVERS+=("$iface")
+		SRV_PORT[$iface]=${CONF_I[listenport]}
+		SRV_ADDR[$iface]=${CONF_I[address]}
+		# The private key might be set via hook command instead, e.g. "PostUp = wg set %i private-key <file>", then get the public key from the running interface
+		if Pubkey "${CONF_I[privatekey]}"
+		then
+			SRV_PUB[$iface]=$PUBKEY
+
+		elif [[ -e /sys/class/net/$iface ]]
+		then
+			SRV_PUB[$iface]=$(wg show "$iface" public-key)
+		fi
+		Known "${CONF_I[privatekey]}" "${SRV_PUB[$iface]}"
+		SRV_PEERS[$iface]=' '
+		for (( i=1; i<=$CONF_PEERS; i++ ))
+		do
+			SRV_PEERS[$iface]+="${CONF_P[$i,publickey]} "
+			Known "${CONF_P[$i,publickey]}" "${CONF_P[$i,presharedkey]}"
+		done
+		SRV_DISABLED[$iface]=' '
+		[[ -f $WG_DIR/$iface.disabled ]] || continue
+		Parse_Conf "$WG_DIR/$iface.disabled"
+		for (( i=1; i<=$CONF_PEERS; i++ ))
+		do
+			SRV_DISABLED[$iface]+="${CONF_P[$i,publickey]} "
+			Known "${CONF_P[$i,publickey]}" "${CONF_P[$i,presharedkey]}"
+		done
+	done
+
+	# Client configs: /etc/wireguard/clients/ first, so they take precedence over copies in /etc/wireguard/
+	for f in "$CLIENT_DIR"/*.conf "${candidates[@]}"
+	do
+		Parse_Conf "$f"
+		[[ ${CONF_I[privatekey]} && ${CONF_P[1,publickey]} ]] || continue
+		Pubkey "${CONF_I[privatekey]}"
+		[[ $PUBKEY && $seen != *" $PUBKEY "* ]] || continue
+		seen+="$PUBKEY "
+		Known "${CONF_I[privatekey]}" "$PUBKEY" "${CONF_P[1,presharedkey]}"
+
+		# Local server this client connects to, else it is a connection to an external server, which is not handled yet
+		iface=
+		for i in "${SERVERS[@]}"
+		do
+			[[ ${SRV_PUB[$i]} == "${CONF_P[1,publickey]}" ]] || continue
+			iface=$i
+			break
+		done
+		[[ $iface ]] || continue
+
+		n=${#C_FILE[@]}
+		C_FILE[n]=$f C_IF[n]=$iface C_PUB[n]=$PUBKEY C_ADDR[n]=${CONF_I[address]}
+		C_NAME[n]=${f##*/} C_NAME[n]=${C_NAME[n]%.conf} C_NAME[n]=${C_NAME[n]#"$iface-"}
+		if [[ ${SRV_PEERS[$iface]} == *" $PUBKEY "* ]]
+		then
+			C_STATE[n]='active'
+
+		elif [[ ${SRV_DISABLED[$iface]} == *" $PUBKEY "* ]]
+		then
+			C_STATE[n]='disabled'
+		else
+			C_STATE[n]='unused'
+		fi
+	done
+	shopt -u nullglob
+
+	(( ${#SERVERS[@]} ))
+}
+
+# Load active and disabled peers of $IFACE and match them to client configs
+Load_Peers()
+{
+	P_PUB=() P_IPS=() P_STATE=() P_CLIENT=() P_NAME=()
+	local state f i c n
+	for state in 'active' 'disabled'
+	do
+		f="$WG_DIR/$IFACE.conf"
+		[[ $state == 'disabled' ]] && f="$WG_DIR/$IFACE.disabled"
+		[[ -f $f ]] || continue
+		Parse_Conf "$f"
+		for (( i=1; i<=$CONF_PEERS; i++ ))
+		do
+			[[ ${CONF_P[$i,publickey]} ]] || continue
+			n=${#P_PUB[@]}
+			P_PUB[n]=${CONF_P[$i,publickey]} P_IPS[n]=${CONF_P[$i,allowedips]} P_STATE[n]=$state P_CLIENT[n]=-1 P_NAME[n]=
+			for c in "${!C_FILE[@]}"
+			do
+				[[ ${C_IF[c]} == "$IFACE" && ${C_PUB[c]} == "${P_PUB[n]}" ]] || continue
+				P_CLIENT[n]=$c P_NAME[n]=${C_NAME[c]}
+				break
+			done
+		done
+	done
+}
+
+# Load handshake and transfer data of $IFACE peers
+Load_Runtime()
+{
+	HS=() RX=() TX=() IFACE_UP=0
+	[[ -e /sys/class/net/$IFACE ]] || return 0
+	IFACE_UP=1
+	local pub psk endpoint ips hs rx tx keepalive
+	while read -r pub psk endpoint ips hs rx tx keepalive
+	do
+		HS[$pub]=$hs RX[$pub]=$rx TX[$pub]=$tx
+	done < <(wg show "$IFACE" dump | tail -n +2)
+}
+
+Ip2Int(){ local IFS=. a b c d; read -r a b c d <<< "$1"; INT=$(( ($a << 24) + ($b << 16) + ($c << 8) + $d )); }
+Int2Ip(){ IP="$(( $1 >> 24 & 255 )).$(( $1 >> 16 & 255 )).$(( $1 >> 8 & 255 )).$(( $1 & 255 ))"; }
+# No leading zeros, which would be interpreted as octal numbers
+Valid_IPv4(){ [[ $1 =~ ^(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})$ ]] && (( ${BASH_REMATCH[1]} < 256 && ${BASH_REMATCH[2]} < 256 && ${BASH_REMATCH[3]} < 256 && ${BASH_REMATCH[4]} < 256 )); }
+
+# Parse an address list into first IPv4 and IPv6 address, CIDR netmask and IPv4 network/broadcast as integer
+Parse_Net()
+{
+	NET4_IP='' NET4_PREFIX='' NET4_NET='' NET4_BCAST='' NET6_IP='' NET6_PREFIX=''
+	local a mask
+	for a in ${1//,/ }
+	do
+		if [[ ! $NET4_IP && $a =~ ^[0-9.]+(/[0-9]{1,2})?$ ]] && Valid_IPv4 "${a%/*}"
+		then
+			NET4_IP=${a%/*} NET4_PREFIX=32
+			[[ $a == */* ]] && NET4_PREFIX=${a#*/}
+
+		elif [[ ! $NET6_IP && $a == *':'* ]]
+		then
+			NET6_IP=${a%/*} NET6_PREFIX=128
+			[[ $a == */* ]] && NET6_PREFIX=${a#*/}
+		fi
+	done
+	[[ $NET4_IP ]] || return 0
+	Ip2Int "$NET4_IP"
+	mask=$(( (0xFFFFFFFF << (32 - $NET4_PREFIX)) & 0xFFFFFFFF ))
+	NET4_NET=$(( $INT & $mask )) NET4_BCAST=$(( ($INT & $mask) | (~$mask & 0xFFFFFFFF) ))
+}
+
+Load_Server_Net()
+{
+	Parse_Net "${SRV_ADDR[$IFACE]}"
+	SRV4_IP=$NET4_IP SRV4_PREFIX=$NET4_PREFIX SRV4_NET=$NET4_NET SRV4_BCAST=$NET4_BCAST SRV6_IP=$NET6_IP SRV6_PREFIX=$NET6_PREFIX
+}
+
+# Addresses in use by the server, its peers and client configs of $IFACE: IPv4 as integer keys of USED4, IPv6 as space-separated list USED6
+Load_Used()
+{
+	USED4=() USED6=' '
+	local list a i c
+	list=${SRV_ADDR[$IFACE]}
+	for i in "${!P_IPS[@]}"; do list+=", ${P_IPS[i]}"; done
+	for c in "${!C_FILE[@]}"; do [[ ${C_IF[c]} == "$IFACE" ]] && list+=", ${C_ADDR[c]}"; done
+	for a in ${list//,/ }
+	do
+		a=${a%/*}
+		[[ $a == *':'* ]] && { USED6+="${a,,} "; continue; }
+		Valid_IPv4 "$a" || continue
+		Ip2Int "$a"
+		USED4[$INT]=1
+	done
+}
+declare -A USED4
+
+Next_Free_IP()
+{
+	NEXT_IP=
+	[[ $SRV4_IP ]] || return 1
+	Load_Used
+	local i
+	for (( i=$SRV4_NET+1; i<$SRV4_BCAST; i++ ))
+	do
+		[[ ${USED4[$i]} ]] && continue
+		Int2Ip "$i"
+		NEXT_IP=$IP
+		return 0
+	done
+	return 1
+}
+
+# Check whether an IPv4 address can be used for a new client of $IFACE
+Check_Client_IP()
+{
+	Valid_IPv4 "$1" || { Fail "\"$1\" is not a valid IPv4 address."; return 1; }
+	[[ $SRV4_IP ]] || { Fail "Server $IFACE has no IPv4 address."; return 1; }
+	Load_Used
+	Ip2Int "$1"
+	(( $INT > $SRV4_NET && $INT < $SRV4_BCAST )) || { Fail "$1 is not inside the server subnet $SRV4_IP/$SRV4_PREFIX."; return 1; }
+	[[ ! ${USED4[$INT]} ]] || { Fail "$1 is used already."; return 1; }
+}
+
+# Check client settings, which are not validated by WireGuard until the config is imported on the client device
+Check_AllowedIPs()
+{
+	local a ip prefix max
+	[[ ${1//[ ,]/} ]] || { Fail 'AllowedIPs must not be empty.'; return 1; }
+	for a in ${1//,/ }
+	do
+		# The CIDR netmask is optional, like for WireGuard
+		ip=${a%/*} prefix=${a#"${a%/*}"} prefix=${prefix#/} max=32
+		[[ $ip == *':'* ]] && max=128
+		if [[ $a != *'/' && $prefix =~ ^(0|[1-9][0-9]{0,2})?$ ]] && (( ${prefix:-0} <= $max )) && { [[ $max == 128 && $ip =~ ^[0-9A-Fa-f:.]+$ ]] || Valid_IPv4 "$ip"; }
+		then
+			continue
+		fi
+		Fail "\"$a\" is not a valid network, e.g. 192.168.1.0/24 or fd42::/64."
+		return 1
+	done
+}
+
+Check_Endpoint()
+{
+	[[ $1 =~ ^[^[:blank:]]+:([1-9][0-9]{0,4})$ ]] && (( ${BASH_REMATCH[1]} <= 65535 )) && return 0
+	Fail "\"$1\" is not a valid endpoint. Please use <host>:<port>, e.g. myserver.example.com:51820."
+	return 1
+}
+
+Check_Keepalive()
+{
+	[[ $1 =~ ^[0-9]{0,5}$ ]] && (( 10#${1:-0} <= 65535 )) && return 0
+	Fail "\"$1\" is not a valid keepalive interval. Allowed are 0 to 65535 seconds, or empty to disable it."
+	return 1
+}
+
+# Check server settings, also called via Input_Checked. The port must not be used by another server than $IFACE.
+Check_Port()
+{
+	if [[ ! $1 =~ ^[1-9][0-9]{0,4}$ ]] || (( $1 > 65535 ))
+	then
+		Fail "\"$1\" is not a valid port."
+		return 1
+	fi
+	local i
+	for i in "${SERVERS[@]}"
+	do
+		[[ $i != "$IFACE" && ${SRV_PORT[$i]} == "$1" ]] && { Fail "Port $1 is used by server $i already."; return 1; }
+	done
+	return 0
+}
+
+Check_Server_IPv4_Address()
+{
+	[[ $1 =~ ^[0-9.]+/[0-9]{1,2}$ ]] && Valid_IPv4 "${1%/*}" && (( ${1#*/} <= 30 )) && return 0
+	local ipv6='"IPv6 (NAT66)"'
+	(( $MENU )) || ipv6='"ipv6=<address>"'
+	Fail "\"$1\" is not a valid IPv4 address with CIDR network, e.g. \"10.9.0.1/24\". The IPv6 address is set separately via $ipv6."
+	return 1
+}
+
+# Full or compressed IPv6 address, without embedded IPv4 address
+Valid_IPv6()
+{
+	local g n=0 IFS=:
+	[[ $1 =~ ^[0-9A-Fa-f:]+$ && $1 != *':::'* && $1 != *'::'*'::'* && $1 != ':'[^:]* && $1 != *[^:]':' ]] || return 1
+	for g in $1
+	do
+		[[ $g ]] || continue
+		(( ${#g} <= 4 )) || return 1
+		((n++))
+	done
+	if [[ $1 == *'::'* ]]
+	then
+		(( $n <= 7 ))
+	else
+		(( $n == 8 ))
+	fi
+}
+
+# IPv6 address of a server with CIDR netmask, or empty for none. Clients get the same host part as for IPv4 in the last group, hence the CIDR netmask must be 112 or less.
+Check_Server_IPv6_Address()
+{
+	[[ $1 ]] || return 0
+	local ip=${1%/*} prefix=${1##*/}
+	[[ $1 == "$ip/$prefix" && $prefix =~ ^[0-9]{1,3}$ && $ip != *':' ]] && Valid_IPv6 "$ip" && (( $prefix <= 112 )) && return 0
+	Fail "\"$1\" is not a valid IPv6 address with CIDR netmask of 112 or less, e.g. \"fd10:9::1/64\"."
+	return 1
+}
+
+# Interface name for a new server, as allowed by wg-quick
+Check_Iface()
+{
+	[[ $1 =~ ^[A-Za-z0-9_=+.-]{1,15}$ ]] || { Fail "\"$1\" is not a valid interface name. Allowed are up to 15 letters, digits, and _ = + . -"; return 1; }
+	[[ ! -e $WG_DIR/$1.conf ]] || { Fail "$WG_DIR/$1.conf exists already."; return 1; }
+	[[ ! -e /sys/class/net/$1 ]] || { Fail "A network interface $1 exists already."; return 1; }
+}
+
+# IPv6 address into $V6 for a client with IPv4 address $1 inside the server subnet: the server IPv6 subnet with the same host part in the last group, if it fits and is not the server IPv6 address
+V6_Map()
+{
+	V6=
+	[[ $SRV6_IP && $SRV4_IP ]] && Valid_IPv4 "$1" || return 1
+	Ip2Int "$1"
+	(( $INT > $SRV4_NET && $INT < $SRV4_BCAST && $INT - $SRV4_NET <= 0xFFFF )) || return 1
+	V6="${SRV6_IP%:*}:$(printf '%x' "$(( $INT - $SRV4_NET ))")"
+	[[ ${V6,,} != "${SRV6_IP,,}" ]] && return 0
+	V6=
+	return 1
+}
+
+# Like V6_Map, if the IPv6 address is not used already
+V6_For()
+{
+	V6_Map "$1" || return 1
+	Load_Used
+	[[ $USED6 != *" ${V6,,} "* ]] && return 0
+	V6=
+	return 1
+}
+
+# Address list $1 without IPv6 entries into $IPS, plus the V6_Map address of its first IPv4 address inside the server subnet with CIDR netmask $2, if $2 is given
+Swap_V6()
+{
+	local a v6=''
+	IPS=
+	for a in ${1//,/ }
+	do
+		[[ $a == *':'* ]] && continue
+		IPS+=${IPS:+, }$a
+		[[ $2 && ! $v6 ]] && V6_Map "${a%/*}" && v6="$V6/$2"
+	done
+	[[ $v6 ]] && IPS+=", $v6"
+	return 0
+}
+
+# Compare address lists, ignoring spaces and case
+Same_IPs(){ local a=${1// /} b=${2// /}; [[ ${a,,} == "${b,,}" ]]; }
+
+# IPv6 is disabled by dietpi-network via "disable_ipv6", which new interfaces inherit from "default"
+IPv6_Enabled(){ [[ -f '/proc/sys/net/ipv6/conf/default/disable_ipv6' && $(< /proc/sys/net/ipv6/conf/default/disable_ipv6) == 0 ]]; }
+
+# Default IPv6 address into $ADDR6 for a server with IPv4 address $1: fd10:<n>::<host>/64 with <n> from 10.<n>.*, or the next one not used by another server than $2, and the same host part as the IPv4 address
+Default_IPv6()
+{
+	local n=9 i used=' '
+	for i in "${SERVERS[@]}"
+	do
+		[[ $i == "$2" ]] || used+="${SRV_ADDR[$i]//,/ } "
+	done
+	Parse_Net "$1"
+	[[ $NET4_IP =~ ^10\.([0-9]{1,3})\. ]] && n=${BASH_REMATCH[1]}
+	while [[ ${used,,} == *" fd10:$n::"* ]]; do ((n++)); done
+	ADDR6="fd10:$n::1/64"
+	[[ $NET4_IP ]] || return 0
+	Ip2Int "$NET4_IP"
+	(( $INT - $NET4_NET <= 0xFFFF )) && ADDR6="fd10:$n::$(printf '%x' "$(( $INT - $NET4_NET ))")/64"
+	return 0
+}
+
+# Hint into $HINT, if clients of server $1 with address(es) $2 cannot use IPv6 through the VPN, which they expect with "::/0" in AllowedIPs
+# - $3 = 1 to recommend enabling IPv6 if it is disabled on this system, on server creation and address change only, as it is intended by the admin otherwise
+IPv6_Hint()
+{
+	HINT=
+	local on="\"IPv6 (NAT66)\"" off="\"IPv6 (NAT66)\""
+	(( $MENU )) || on="\"dietpi-wireguard server $1 ipv6=on\"" off="\"dietpi-wireguard server $1 ipv6=off\""
+	Parse_Net "$2"
+	if [[ ! $NET6_IP ]]
+	then
+		if IPv6_Enabled
+		then
+			HINT="Server $1 has no IPv6 address, hence clients cannot use IPv6 through the VPN: connections to IPv6 hosts hang until they fall back to IPv4, or fail. Please turn on IPv6 via $on."
+
+		elif (( ${3:-0} ))
+		then
+			HINT="IPv6 is disabled on this system, hence clients of server $1 cannot use IPv6 through the VPN: connections to IPv6 hosts hang until they fall back to IPv4, or fail. Please enable IPv6 via dietpi-network, then turn on IPv6 via $on."
+		fi
+
+	elif ! IPv6_Enabled
+	then
+		HINT="IPv6 is disabled on this system, hence server $1 cannot start with an IPv6 address. Please enable IPv6 via dietpi-network, or turn off IPv6 via $off."
+
+	elif [[ -e /sys/class/net/$1 && $(< /proc/sys/net/ipv6/conf/all/forwarding) == 0 ]]
+	then
+		HINT="IPv6 forwarding is disabled, hence clients cannot use IPv6 through the VPN. Please add \"PostUp = sysctl net.ipv6.conf.all.forwarding=1\" to $WG_DIR/$1.conf, below an \"accept_ra=2\" line if present, and restart the server."
+	fi
+	[[ $HINT ]]
+}
+
+# Defaults for new clients from the newest client config of $IFACE
+Load_Defaults()
+{
+	DEF_ENDPOINT='' DEF_DNS='' DEF_ALLOWED='' DEF_KEEPALIVE=''
+	local c newest='' newest_time=0 t host
+	for c in "${!C_FILE[@]}"
+	do
+		[[ ${C_IF[c]} == "$IFACE" && ${C_STATE[c]} != 'unused' ]] || continue
+		t=$(stat -c '%Y' "${C_FILE[c]}")
+		(( $t > $newest_time )) || continue
+		newest=$c newest_time=$t
+	done
+	if [[ $newest ]]
+	then
+		Parse_Conf "${C_FILE[newest]}"
+		DEF_DNS=${CONF_I[dns]} DEF_ALLOWED=${CONF_P[1,allowedips]} DEF_KEEPALIVE=${CONF_P[1,persistentkeepalive]}
+		[[ ${CONF_P[1,endpoint]} ]] && host=${CONF_P[1,endpoint]%:*}
+	else
+		DEF_ALLOWED='0.0.0.0/0, ::/0'
+		# Local DNS resolvers are reachable via the server VPN IP: https://github.com/MichaIng/DietPi/issues/2482
+		DEF_DNS=$(mawk '/^[[:blank:]]*nameserver[[:blank:]]/{print $2;exit}' /etc/resolv.conf)
+		[[ $DEF_DNS =~ ^(127\.|::1$|localhost$) ]] && DEF_DNS=$SRV4_IP
+	fi
+	[[ $host ]] || host=$(sed -n '/^[[:blank:]]*SOFTWARE_PUBLIC_DOMAIN_NAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+	[[ $host ]] || host=$(hostname -f)
+	DEF_ENDPOINT="$host:${SRV_PORT[$IFACE]}"
+}
+
+Name_Exists()
+{
+	local c
+	for c in "${!C_FILE[@]}"
+	do
+		[[ ${C_IF[c]} == "$IFACE" && ${C_NAME[c]} == "$1" ]] && return 0
+	done
+	[[ -e $CLIENT_DIR/$IFACE-$1.conf ]]
+}
+
+Check_Name()
+{
+	[[ $1 =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || { Fail "\"$1\" is not a valid client name. Allowed are letters, digits, and _ . -"; return 1; }
+	! Name_Exists "$1" || { Fail "A client with the name \"$1\" exists already for $IFACE."; return 1; }
+}
+
+# Like Check_Name, but keeping the current name $RENAME_FROM is accepted as well, called via Input_Checked
+# shellcheck disable=SC2329
+Check_Rename(){ [[ $1 == "$RENAME_FROM" ]] || Check_Name "$1"; }
+
+#/////////////////////////////////////////////////////////////////////////////////////
+# Changing configs
+#/////////////////////////////////////////////////////////////////////////////////////
+# Shared mawk code: store lines, detect section headers (hdr) and key/value lines (kk/vv), find a section by header and optional public key (bs = header line, be = last line before next header)
+# shellcheck disable=SC2016
+readonly AWK_LIB='
+function scan(   i, t, p) {
+	for (i = 1; i <= NR; i++) {
+		t = line[i]; sub(/#.*/, "", t); gsub(/^[ \t]+|[ \t\r]+$/, "", t)
+		if (t ~ /^\[/) { hdr[i] = tolower(t); continue }
+		p = index(t, "=")
+		if (t == "" || !p) continue
+		kk[i] = tolower(substr(t, 1, p - 1)); gsub(/[ \t]+/, "", kk[i])
+		vv[i] = substr(t, p + 1); sub(/^[ \t]+/, "", vv[i])
+	}
+}
+function find(h, pub,   i, j, m) {
+	for (i = 1; i <= NR; i++) {
+		if (!(i in hdr) || hdr[i] != h) continue
+		for (j = i + 1; j <= NR && !(j in hdr); j++);
+		if (pub == "") { bs = i; be = j - 1; return 1 }
+		for (m = i + 1; m < j; m++) if ((m in kk) && kk[m] == "publickey" && vv[m] == pub) { bs = i; be = j - 1; return 1 }
+	}
+	return 0
+}
+{ line[NR] = $0 }'
+
+# Print config $1 with key $4 set to value $5 in section $2 (Interface or Peer), the latter matched by public key $3 if given. An empty value removes the key.
+Conf_Set()
+{
+	mawk -v sec="[${2,,}]" -v pub="$3" -v key="$4" -v val="$5" "$AWK_LIB"'
+	END {
+		scan()
+		if (!find(sec, pub)) exit 2
+		last = bs
+		for (m = bs + 1; m <= be; m++) if (m in kk) last = m
+		lk = tolower(key)
+		for (i = 1; i <= NR; i++) {
+			if (i > bs && i <= be && (i in kk) && kk[i] == lk) {
+				if (!done && val != "") { print key " = " val; done = 1 }
+				continue
+			}
+			print line[i]
+			if (i == last && !done && val != "") { print key " = " val; done = 1 }
+		}
+	}' "$1"
+}
+
+# Print config $1 without the [Peer] section with public key $2, and write that section to file $3. Comment lines directly above the section header belong to it, trailing comments are kept.
+Conf_Cut()
+{
+	mawk -v pub="$2" -v out="$3" "$AWK_LIB"'
+	END {
+		scan()
+		if (!find("[peer]", pub)) exit 2
+		e = bs
+		for (m = bs + 1; m <= be; m++) if (m in kk) e = m
+		s = bs
+		while (s > 1 && !((s - 1) in hdr) && line[s - 1] ~ /^[ \t]*#/) s--
+		ds = s
+		if (s > 1 && line[s - 1] ~ /^[ \t\r]*$/ && (e == NR || line[e + 1] ~ /^[ \t\r]*$/)) ds = s - 1
+		for (i = 1; i <= NR; i++) {
+			if (i >= s && i <= e) { print line[i] > out; continue }
+			if (i >= ds && i < s) continue
+			print line[i]
+		}
+	}' "$1"
+}
+
+# Print an empty line to separate a new section, and a newline first if the file does not end with one
+Block_Separator()
+{
+	[[ -s $1 ]] || return 0
+	[[ $(tail -c 1 "$1") ]] && echo
+	echo
+}
+
+# Bring $IFACE up or down: $1 = up|down, via wg-quick@.service if $SERVICE = 1
+Iface_Ctl()
+{
+	if (( $SERVICE ))
+	then
+		local action='start'
+		[[ $1 == 'down' ]] && action='stop'
+		G_EXEC_NOEXIT=1 G_EXEC systemctl "$action" "wg-quick@$IFACE"
+	else
+		G_EXEC_NOEXIT=1 G_EXEC wg-quick "$1" "$IFACE"
+	fi
+}
+
+# Sync the running $IFACE with its config, without disconnecting unchanged peers
+Iface_Sync()
+{
+	local tmp key result
+	tmp=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
+	wg-quick strip "$IFACE" > "$tmp" || { rm -f "$tmp"; return 1; }
+	# "wg syncconf" removes the private key if the config has none, e.g. when it is set via "PostUp = wg set %i private-key <file>", hence keep the current one
+	if ! grep -qi '^[[:blank:]]*PrivateKey[[:blank:]]*=' "$tmp"
+	then
+		key=$(wg show "$IFACE" private-key)
+		[[ $key && $key != '(none)' ]] && sed -i "/^[[:blank:]]*\[interface\]/I a PrivateKey = $key" "$tmp"
+	fi
+	G_EXEC_NOEXIT=1 G_EXEC wg syncconf "$IFACE" "$tmp"
+	result=$?
+	rm -f "$tmp"
+	return "$result"
+}
+
+# Replace the server config of $IFACE with file $1 and apply it, if the interface is running. On failure, the previous config and interface state are restored.
+# - $2 = 1 to restart the interface, else peers are synced without disconnecting others
+Server_Commit()
+{
+	local new=$1 restart=${2:-0} conf="$WG_DIR/$IFACE.conf" backup="$WG_DIR/.$IFACE.conf.bak" up=0 SERVICE=0 result=1
+	[[ -e /sys/class/net/$IFACE ]] && up=1
+	systemctl -q is-active "wg-quick@$IFACE" && SERVICE=1
+	G_EXEC cp -a "$conf" "$backup"
+	# Stop before writing the config, as with "SaveConfig = true", wg-quick down overwrites it with the runtime state
+	(( $restart && $up )) && Iface_Ctl down
+	if cat "$new" > "$conf" && wg-quick strip "$IFACE" > /dev/null
+	then
+		if (( ! $up ))
+		then
+			result=0
+
+		elif (( $restart ))
+		then
+			Iface_Ctl up && result=0
+		else
+			Iface_Sync && result=0
+		fi
+	fi
+	rm -f "$new"
+	(( $result )) || { G_EXEC rm "$backup"; return 0; }
+
+	G_DIETPI-NOTIFY 1 "Applying the changed $conf failed, restoring the previous config"
+	G_EXEC mv "$backup" "$conf"
+	if (( $up && $restart ))
+	then
+		Iface_Ctl up
+
+	elif (( $up ))
+	then
+		Iface_Sync
+	fi
+	Fail "Applying the changed $conf failed. The previous config has been restored."
+}
+
+# Write file $1 to $2 and remove $1. Remove $2 if nothing but comments and empty lines are left, used for <interface>.disabled.
+File_Replace()
+{
+	cat "$1" > "$2" || { rm -f "$1"; return 1; }
+	rm -f "$1"
+	[[ $2 == *'.disabled' ]] && ! grep -q '^[[:blank:]]*[^#[:blank:]]' "$2" && G_EXEC rm "$2"
+	return 0
+}
+
+# Add a peer to the server config of $IFACE: $1 = public key, $2 = AllowedIPs, $3 = PresharedKey
+Peer_Add()
+{
+	local conf="$WG_DIR/$IFACE.conf" new
+	new=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
+	{
+		cat "$conf"
+		Block_Separator "$conf"
+		echo '[Peer]'
+		echo "PublicKey = $1"
+		[[ $3 ]] && echo "PresharedKey = $3"
+		echo "AllowedIPs = $2"
+	} > "$new"
+	Server_Commit "$new"
+}
+
+# Set key $2 to value $3 in the server side section of peer $1
+Peer_Set()
+{
+	local f="$WG_DIR/$IFACE.conf" tmp
+	[[ ${P_STATE[$1]} == 'disabled' ]] && f="$WG_DIR/$IFACE.disabled"
+	tmp=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
+	Conf_Set "$f" 'Peer' "${P_PUB[$1]}" "$2" "$3" > "$tmp" || { rm -f "$tmp"; Fail "Peer ${P_PUB[$1]} was not found in $f."; return 1; }
+	if [[ ${P_STATE[$1]} == 'active' ]]
+	then
+		Server_Commit "$tmp"
+	else
+		File_Replace "$tmp" "$f"
+	fi
+}
+
+# Move peer $1 between the server config and <interface>.disabled: $2 = target state
+Peer_Move()
+{
+	local from="$WG_DIR/$IFACE.conf" to="$WG_DIR/$IFACE.disabled" rest block new
+	[[ $2 == 'active' ]] && from="$WG_DIR/$IFACE.disabled" to="$WG_DIR/$IFACE.conf"
+	rest=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") && block=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") && new=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
+	Conf_Cut "$from" "${P_PUB[$1]}" "$block" > "$rest" || { rm -f "$rest" "$block" "$new"; Fail "Peer ${P_PUB[$1]} was not found in $from."; return 1; }
+	{ [[ -f $to ]] && cat "$to" && Block_Separator "$to"; cat "$block"; } > "$new"
+	rm -f "$block"
+	if [[ $2 == 'active' ]]
+	then
+		# Add to server config first, remove from disabled peers only on success
+		Server_Commit "$new" || { rm -f "$rest"; return 1; }
+		File_Replace "$rest" "$from"
+	else
+		Server_Commit "$rest" || { rm -f "$new"; return 1; }
+		File_Replace "$new" "$to"
+	fi
+}
+
+Peer_Remove()
+{
+	local f="$WG_DIR/$IFACE.conf" rest block
+	[[ ${P_STATE[$1]} == 'disabled' ]] && f="$WG_DIR/$IFACE.disabled"
+	rest=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") && block=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
+	Conf_Cut "$f" "${P_PUB[$1]}" "$block" > "$rest" || { rm -f "$rest" "$block"; Fail "Peer ${P_PUB[$1]} was not found in $f."; return 1; }
+	rm -f "$block"
+	if [[ ${P_STATE[$1]} == 'active' ]]
+	then
+		Server_Commit "$rest" || return 1
+	else
+		File_Replace "$rest" "$f" || return 1
+	fi
+	(( ${P_CLIENT[$1]} < 0 )) || G_EXEC rm "${C_FILE[${P_CLIENT[$1]}]}"
+	G_DIETPI-NOTIFY 0 "Removed client ${P_NAME[$1]:-${P_PUB[$1]}}"
+}
+
+# Move client config $1 to /etc/wireguard/clients/<interface>-<name>.conf, if it is not there yet
+Client_Migrate()
+{
+	local target="$CLIENT_DIR/$IFACE-${C_NAME[$1]}.conf"
+	[[ ${C_FILE[$1]} == "$target" ]] && return 0
+	[[ ! -e $target ]] || { Fail "${C_FILE[$1]} cannot be moved to $target, as the latter exists already."; return 1; }
+	[[ -d $CLIENT_DIR ]] || G_EXEC mkdir -m 0700 "$CLIENT_DIR"
+	G_EXEC mv "${C_FILE[$1]}" "$target"
+	C_FILE[$1]=$target
+}
+
+# Set key $3 to value $4 in section $2 (Interface or Peer) of client config $1
+Client_Set()
+{
+	local tmp
+	Client_Migrate "$1" || return 1
+	tmp=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
+	Conf_Set "${C_FILE[$1]}" "$2" '' "$3" "$4" > "$tmp" || { rm -f "$tmp"; Fail "Section [$2] was not found in ${C_FILE[$1]}."; return 1; }
+	File_Replace "$tmp" "${C_FILE[$1]}"
+}
+
+Client_Rename()
+{
+	local target="$CLIENT_DIR/$IFACE-$2.conf"
+	Check_Name "$2" || return 1
+	[[ -d $CLIENT_DIR ]] || G_EXEC mkdir -m 0700 "$CLIENT_DIR"
+	G_EXEC mv "${C_FILE[$1]}" "$target"
+	C_FILE[$1]=$target C_NAME[$1]=$2
+}
+
+# Create a new client of $IFACE: $1 = name, $2 = IPv4 address, $3 = endpoint, $4 = DNS, $5 = AllowedIPs, $6 = keepalive, $7 = 1 for PresharedKey
+Client_Create()
+{
+	local file="$CLIENT_DIR/$IFACE-$1.conf" priv pub psk='' address server_ips
+	Check_Name "$1" && Check_Client_IP "$2" && Check_Endpoint "$3" && Check_AllowedIPs "$5" && Check_Keepalive "$6" || return 1
+	[[ ${SRV_PUB[$IFACE]} ]] || { Fail "The public key of server $IFACE is unknown, as its config has no PrivateKey and the interface is not running."; return 1; }
+	if ! priv=$(wg genkey) || ! pub=$(wg pubkey <<< "$priv")
+	then
+		Fail 'Generating the client keys failed.'
+		return 1
+	fi
+	(( $7 )) && { psk=$(wg genpsk) || { Fail 'Generating the PresharedKey failed.'; return 1; }; }
+	address="$2/$SRV4_PREFIX" server_ips="$2/32"
+	V6_For "$2" && address+=", $V6/$SRV6_PREFIX" server_ips+=", $V6/128"
+
+	# Write the client config first, so that no peer without client config and private key remains if this fails
+	[[ -d $CLIENT_DIR ]] || G_EXEC mkdir -m 0700 "$CLIENT_DIR"
+	{
+		echo '[Interface]'
+		echo "Address = $address"
+		echo "PrivateKey = $priv"
+		[[ $4 ]] && echo "DNS = $4"
+		echo
+		echo '[Peer]'
+		echo "PublicKey = ${SRV_PUB[$IFACE]}"
+		[[ $psk ]] && echo "PresharedKey = $psk"
+		echo "AllowedIPs = $5"
+		echo "Endpoint = $3"
+		[[ $6 && $6 != 0 ]] && echo "PersistentKeepalive = $6"
+		:
+	} > "$file" || { rm -f "$file"; Fail "Writing $file failed."; return 1; }
+	Peer_Add "$pub" "$server_ips" "$psk" || { G_EXEC rm "$file"; return 1; }
+	G_DIETPI-NOTIFY 0 "Created client $1: $file"
+}
+
+# Add unused client config $1 as peer again
+Client_Readd()
+{
+	local a ips='' i
+	Load_Server_Net
+	Parse_Conf "${C_FILE[$1]}"
+	for a in ${CONF_I[address]//,/ }
+	do
+		a=${a%/*}
+		if Valid_IPv4 "$a"
+		then
+			Ip2Int "$a"
+			if [[ ! $SRV4_IP || $a == "$SRV4_IP" ]] || (( $INT <= $SRV4_NET || $INT >= $SRV4_BCAST ))
+			then
+				Fail "Address $a of ${C_FILE[$1]} is not a client address inside the server subnet $SRV4_IP/$SRV4_PREFIX."
+				return 1
+			fi
+		fi
+		[[ $a == *':'* ]] && a+='/128' || a+='/32'
+		for i in "${!P_IPS[@]}"
+		do
+			[[ ", ${P_IPS[i]}, " == *", $a, "* ]] && { Fail "Address $a is used by another peer already."; return 1; }
+		done
+		ips+=${ips:+, }$a
+	done
+	[[ $ips ]] || { Fail "${C_FILE[$1]} has no Address."; return 1; }
+	Peer_Add "${C_PUB[$1]}" "$ips" "${CONF_P[1,presharedkey]}"
+}
+
+# Enable ($2 = 1) or disable a PresharedKey for peer $1, on server and client side
+Client_PSK()
+{
+	local psk=
+	(( $2 )) && { psk=$(wg genpsk) || return 1; }
+	Peer_Set "$1" 'PresharedKey' "$psk" || return 1
+	# "wg syncconf" does not remove a PresharedKey from an existing peer
+	[[ ! $psk && ${P_STATE[$1]} == 'active' && -e /sys/class/net/$IFACE ]] && { G_EXEC wg set "$IFACE" peer "${P_PUB[$1]}" preshared-key /dev/null || return 1; }
+	(( ${P_CLIENT[$1]} < 0 )) || Client_Set "${P_CLIENT[$1]}" 'Peer' 'PresharedKey' "$psk"
+}
+
+# Defaults for a new server into $NEW_IFACE, $NEW_PORT, $NEW_ADDR and $NEW_ADDR6, which are not used by other servers
+Server_Defaults()
+{
+	local n=0
+	while [[ -e $WG_DIR/wg$n.conf || -e /sys/class/net/wg$n ]]; do ((n++)); done
+	NEW_IFACE="wg$n"
+	NEW_PORT=$(sed -n '/^[[:blank:]]*SOFTWARE_WIREGUARD_PORT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+	[[ $NEW_PORT =~ ^[1-9][0-9]{0,4}$ ]] && (( $NEW_PORT <= 65535 )) || NEW_PORT=51820
+	while [[ " ${SRV_PORT[*]} " == *" $NEW_PORT "* ]]; do ((NEW_PORT++)); done
+	n=9
+	while [[ " ${SRV_ADDR[*]//,/ } " == *" 10.$n."* || " ${SRV_ADDR[*],,} " == *"fd10:$n::"* ]]; do ((n++)); done
+	NEW_ADDR="10.$n.0.1/24"
+	# IPv6 via NAT66 from a unique local subnet, so that clients with "::/0" in AllowedIPs can use IPv6. An interface with IPv6 address cannot start if IPv6 is disabled.
+	NEW_ADDR6=
+	IPv6_Enabled && Default_IPv6 "$NEW_ADDR" && NEW_ADDR6=$ADDR6
+}
+
+# Add the IPv6 forwarding hook to server config $1, if missing, e.g. for servers created by older DietPi versions: after the other IPv6 sysctl hooks, as "accept_ra=2" needs to be set before, else before the ip6tables hooks
+Add_Forwarding_Hook()
+{
+	grep -q 'net\.ipv6\.conf\.all\.forwarding' "$1" && return 0
+	local tmp
+	tmp=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
+	mawk '{ line[NR] = $0; t = tolower($0) }
+	t ~ /^[ \t]*postup[ \t]*=.*sysctl.*net\.ipv6\.conf\./ { after = NR }
+	t ~ /^[ \t]*postup[ \t]*=.*ip6tables/ && !first { first = NR }
+	END {
+		pos = after ? after : first - 1
+		for (i = 1; i <= NR; i++) {
+			print line[i]
+			if (i == pos) print "PostUp = sysctl net.ipv6.conf.all.forwarding=1"
+		}
+	}' "$1" > "$tmp" && cat "$tmp" > "$1"
+	rm -f "$tmp"
+}
+
+# Create a new server config with hooks to forward and masquerade client traffic, then enable and start it: $1 = interface, $2 = listen port, $3 = IPv4 address, $4 = IPv6 address or empty for none
+Server_Create()
+{
+	local conf="$WG_DIR/$1.conf" key net
+	Check_Iface "$1" && Check_Port "$2" && Check_Server_IPv4_Address "$3" && Check_Server_IPv6_Address "$4" || return 1
+	[[ ! $4 ]] || IPv6_Enabled || { Fail 'IPv6 is disabled on this system, hence the server cannot start with an IPv6 address. Please enable IPv6 via dietpi-network first, or turn off IPv6 for the server.'; return 1; }
+	Parse_Net "$3"
+	Int2Ip "$NET4_NET"
+	net="$IP/$NET4_PREFIX"
+
+	# The hooks use iptables. Install it with the default umask, like the packages in the main part.
+	umask 0022
+	G_AG_CHECK_INSTALL_PREREQ iptables
+	umask 0077
+	[[ -d $WG_DIR ]] || G_EXEC mkdir -m 0700 "$WG_DIR"
+
+	# Re-use the server key of old dietpi-software installs, so that existing clients keep working
+	if [[ $1 == 'wg0' && -f $WG_DIR/server_private.key ]] && key=$(<"$WG_DIR/server_private.key") && Pubkey "$key" && [[ $PUBKEY ]]
+	then
+		G_DIETPI-NOTIFY 2 "Re-using the server key from $WG_DIR/server_private.key"
+	else
+		key=$(wg genkey) || { Fail 'Generating the server key failed.'; return 1; }
+	fi
+	# IPv6 forwarding can only be enabled for all interfaces: the per-interface "forwarding" setting only switches between host and router behaviour, e.g. whether router advertisements are accepted.
+	# "accept_ra=2" needs to be set before, else enabling forwarding removes the default route of the LAN interface, which it got from router advertisements.
+	cat << _EOF_ > "$conf" || { rm -f "$conf"; Fail "Writing $conf failed."; return 1; }
+[Interface]
+Address = $3${4:+, $4}
+PrivateKey = $key
+ListenPort = $2
+
+PostUp = sysctl net.ipv4.conf.%i.forwarding=1 net.ipv4.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').forwarding=1
+PostUp = sysctl net.ipv6.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').accept_ra=2
+PostUp = sysctl net.ipv6.conf.all.forwarding=1
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -s $net -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
+PostUp = ip6tables -A FORWARD -i %i -j ACCEPT; ip6tables -t nat -A POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -s $net -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
+PostDown = ip6tables -D FORWARD -i %i -j ACCEPT; ip6tables -t nat -D POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
+_EOF_
+	wg-quick strip "$conf" > /dev/null || { G_EXEC rm "$conf"; Fail "The created config $conf is invalid."; return 1; }
+	G_DIETPI-NOTIFY 0 "Created server $1: $conf"
+	# The config exists now, hence report a failed start with return code 2, so that it is shown in the main menu
+	G_EXEC_NOEXIT=1 G_EXEC systemctl enable --now "wg-quick@$1" || { Fail "Server $1 has been created, but starting it failed."; return 2; }
+	G_DIETPI-NOTIFY 0 "Server $1 listens on port $2. Please forward this UDP port from your router to this server, if it is behind NAT."
+}
+
+Server_Set_Port()
+{
+	local port=$1 old=${SRV_PORT[$IFACE]} tmp c update=()
+	Check_Port "$port" || return 1
+	[[ $port == "$old" ]] && return 0
+	tmp=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
+	Conf_Set "$WG_DIR/$IFACE.conf" 'Interface' '' 'ListenPort' "$port" > "$tmp" || { rm -f "$tmp"; return 1; }
+	Server_Commit "$tmp" || return 1
+	SRV_PORT[$IFACE]=$port
+	G_DIETPI-NOTIFY 0 "Server $IFACE listens on port $port now. Please adjust port forwarding and firewall rules, if required."
+
+	# Unused client configs as well, so that they work when being re-added
+	for c in "${!C_FILE[@]}"
+	do
+		[[ ${C_IF[c]} == "$IFACE" ]] || continue
+		Parse_Conf "${C_FILE[c]}"
+		[[ ${CONF_P[1,endpoint]} == *":$old" ]] && update+=("$c")
+	done
+	(( ${#update[@]} )) || return 0
+	Confirm "Update the endpoint port from $old to $port in ${#update[@]} client config(s)?\n\nClient devices need to import their config again afterwards, e.g. by scanning the QR code." || return 0
+	# The server has been changed already: report failures with return code 2, so that the input is not asked again
+	local failed=0 changed=0
+	for c in "${update[@]}"
+	do
+		Parse_Conf "${C_FILE[c]}"
+		Client_Set "$c" 'Peer' 'Endpoint' "${CONF_P[1,endpoint]%:*}:$port" && ((++changed)) || failed=1
+	done
+	(( $failed )) && { Fail "Server $IFACE listens on port $port now, but not all client configs could be updated."; return 2; }
+	Reimport_Note "$changed"
+}
+
+# Change the server IPv4 address, keeping its other addresses, e.g. the IPv6 address. If the IPv4 subnet changes, peers and client configs are moved to the new subnet, keeping their host part, hence their IPv6 addresses remain aligned.
+Set_Server_IPv4_Address()
+{
+	local new=$1 a tmp tmp2 i c ips entry old_net='' new_net='' renumber=0 moved=0 o_mask
+	Check_Server_IPv4_Address "$1" || return 1
+	Load_Server_Net
+	[[ $1 == "$SRV4_IP/$SRV4_PREFIX" ]] && return 0
+	local o_ip=$SRV4_IP o_prefix=$SRV4_PREFIX o_net=$SRV4_NET
+	for a in ${SRV_ADDR[$IFACE]//,/ }
+	do
+		[[ ${a%/*} == "$o_ip" ]] || new+=", $a"
+	done
+	Parse_Net "$1"
+	local n_ip=$NET4_IP n_prefix=$NET4_PREFIX n_net=$NET4_NET n_bcast=$NET4_BCAST
+
+	# Map IPv4 host addresses of peers and unused client configs from the old subnet to the new one, and check that the new server IP is not used by a client
+	local -A map=() clients=()
+	local addresses=()
+	for i in "${!P_IPS[@]}"
+	do
+		for a in ${P_IPS[i]//,/ }
+		do
+			[[ $a == *'/32' ]] && addresses+=("${a%/32}")
+		done
+	done
+	for c in "${!C_FILE[@]}"
+	do
+		[[ ${C_IF[c]} == "$IFACE" && ${C_STATE[c]} == 'unused' ]] || continue
+		for a in ${C_ADDR[c]//,/ }
+		do
+			addresses+=("${a%/*}")
+		done
+	done
+	if [[ $o_ip && $n_ip ]]
+	then
+		(( $o_net != $n_net || $o_prefix != $n_prefix )) && renumber=1
+		o_mask=$(( (0xFFFFFFFF << (32 - $o_prefix)) & 0xFFFFFFFF ))
+		for a in "${addresses[@]}"
+		do
+			Valid_IPv4 "$a" || continue
+			Ip2Int "$a"
+			if (( $renumber && ($INT & $o_mask) == $o_net ))
+			then
+				(( $INT - $o_net < $n_bcast - $n_net )) || { Fail "Client address $a does not fit into the new subnet $n_ip/$n_prefix."; return 1; }
+				Int2Ip "$(( $n_net + $INT - $o_net ))"
+				map[$a]=$IP
+				((moved++))
+				a=$IP
+			fi
+			clients[$a]=1
+		done
+		[[ ${clients[$n_ip]} ]] && { Fail "$n_ip is used by a client already."; return 1; }
+		Int2Ip "$o_net"
+		old_net="$IP/$o_prefix"
+		Int2Ip "$n_net"
+		new_net="$IP/$n_prefix"
+	fi
+
+	# Server config: Address, active peers and subnet in hook commands
+	tmp=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") && tmp2=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
+	Conf_Set "$WG_DIR/$IFACE.conf" 'Interface' '' 'Address' "$new" > "$tmp" || { rm -f "$tmp" "$tmp2"; return 1; }
+	(( $renumber )) && sed -Ei "/^[[:blank:]]*(Pre|Post)(Up|Down)[[:blank:]]*=/s#${old_net//./\\.}#$new_net#g" "$tmp"
+	for i in "${!P_IPS[@]}"
+	do
+		[[ ${P_STATE[i]} == 'active' ]] || continue
+		Map_IPs "${P_IPS[i]}"
+		[[ $IPS == "${P_IPS[i]}" ]] && continue
+		Conf_Set "$tmp" 'Peer' "${P_PUB[i]}" 'AllowedIPs' "$IPS" > "$tmp2" && cat "$tmp2" > "$tmp"
+	done
+	rm -f "$tmp2"
+	Server_Commit "$tmp" 1 || return 1
+	SRV_ADDR[$IFACE]=$new
+
+	# The server has been changed now: update everything else, and report failures with return code 2, so that the input is not asked again
+	local failed=0 changed=0 set
+
+	# Disabled peers
+	for i in "${!P_IPS[@]}"
+	do
+		[[ ${P_STATE[i]} == 'disabled' ]] || continue
+		Map_IPs "${P_IPS[i]}"
+		[[ $IPS == "${P_IPS[i]}" ]] || Peer_Set "$i" 'AllowedIPs' "$IPS" || failed=1
+	done
+
+	# Client configs, including unused ones: Address, AllowedIPs and DNS
+	for c in "${!C_FILE[@]}"
+	do
+		[[ ${C_IF[c]} == "$IFACE" ]] || continue
+		Parse_Conf "${C_FILE[c]}"
+		set=0
+		ips=
+		for a in ${CONF_I[address]//,/ }
+		do
+			entry=$a
+			[[ ${map[${a%/*}]} ]] && entry="${map[${a%/*}]}/$n_prefix"
+			ips+=${ips:+, }$entry
+		done
+		if [[ $ips != "${CONF_I[address]}" ]]
+		then
+			Client_Set "$c" 'Interface' 'Address' "$ips" || { failed=1; continue; }
+			set=1
+		fi
+		if (( $renumber )) && [[ ", ${CONF_P[1,allowedips]}, " == *", $old_net, "* ]]
+		then
+			entry=", ${CONF_P[1,allowedips]}, "
+			entry=${entry//, $old_net, /, $new_net, }
+			entry=${entry#, } entry=${entry%, }
+			Client_Set "$c" 'Peer' 'AllowedIPs' "$entry" || { failed=1; continue; }
+			set=1
+		fi
+		if [[ $o_ip && $o_ip != "$n_ip" ]] && Replace_DNS "${CONF_I[dns]}" "$o_ip" "$n_ip"
+		then
+			Client_Set "$c" 'Interface' 'DNS' "$DNS" || { failed=1; continue; }
+			set=1
+		fi
+		(( $set )) && ((++changed))
+	done
+	(( $failed )) && { Fail "Server $IFACE uses IPv4 address $1 now, but not all client configs could be updated."; return 2; }
+	G_DIETPI-NOTIFY 0 "Server $IFACE uses IPv4 address $1 now"
+	Reimport_Note "$changed"
+	# If IPv6 is disabled and the server has no IPv6 address, this is not shown in the main menu, as it is intended by the admin, hence recommend enabling IPv6 here once
+	(( $MENU )) && [[ $new != *":"* ]] && ! IPv6_Enabled && IPv6_Hint "$IFACE" "$new" 1 && Info "$HINT"
+	return 0
+}
+
+# DNS list $1 with server address $2 replaced by $3, or removed if $3 is empty, into $DNS. Returns 1 if $2 is not in the list.
+Replace_DNS()
+{
+	local list=${1// /}
+	list=", ${list//,/, }, "
+	[[ $list == *", $2, "* ]] || return 1
+	list=${list//, $2, /${3:+, $3}, }
+	list=${list#, }
+	DNS=${list%, }
+}
+
+# Apply the IPv4 address map of Set_Server_IPv4_Address to an AllowedIPs list into $IPS
+Map_IPs()
+{
+	local a
+	IPS=
+	for a in ${1//,/ }
+	do
+		[[ $a == *'/32' && ${map[${a%/32}]} ]] && a="${map[${a%/32}]}/32"
+		IPS+=${IPS:+, }$a
+	done
+}
+
+# Turn on IPv6 (NAT66) for $IFACE with address $1, change its address, or turn it off if $1 is empty
+# - Server, peers and client configs are aligned: all IPv6 entries of the server Address, of the server side peer AllowedIPs and of the client Address are replaced with addresses of the new subnet, with the same host part as the IPv4 address, or removed.
+# - Client AllowedIPs are kept, so that IPv6 traffic of clients does not bypass the VPN.
+Set_Server_IPv6_Address()
+{
+	local new=$1 old tmp tmp2 i c ips set failed=0 changed=0 unaligned=0
+	Check_Server_IPv6_Address "$new" || return 1
+	Load_Server_Net
+	old=${SRV6_IP:+$SRV6_IP/$SRV6_PREFIX}
+	# V6_Map derives the client addresses from the new server address
+	Parse_Net "$new"
+	SRV6_IP=$NET6_IP SRV6_PREFIX=$NET6_PREFIX
+
+	# Peers and client configs which are not aligned with the new setting, e.g. created before IPv6 was added to the server manually
+	for i in "${!P_IPS[@]}"
+	do
+		Swap_V6 "${P_IPS[i]}" "${new:+128}"
+		Same_IPs "$IPS" "${P_IPS[i]}" || ((++unaligned))
+	done
+	for c in "${!C_FILE[@]}"
+	do
+		[[ ${C_IF[c]} == "$IFACE" ]] || continue
+		Swap_V6 "${C_ADDR[c]}" "${new:+$SRV6_PREFIX}"
+		Same_IPs "$IPS" "${C_ADDR[c]}" || ((++unaligned))
+	done
+	Same_IPs "$new" "$old" && (( ! $unaligned )) && return 0
+
+	if [[ $new ]]
+	then
+		IPv6_Enabled || { Fail 'IPv6 is disabled on this system. Please enable it via dietpi-network first.'; return 1; }
+		[[ $SRV4_IP ]] || { Fail "Server $IFACE has no IPv4 address, which the IPv6 addresses of the clients are derived from."; return 1; }
+	fi
+
+	# Server config: Address, active peers, and the IPv6 forwarding hook for servers created by older DietPi versions
+	tmp=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") && tmp2=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
+	Swap_V6 "${SRV_ADDR[$IFACE]}"
+	ips=$IPS${new:+, $new}
+	Conf_Set "$WG_DIR/$IFACE.conf" 'Interface' '' 'Address' "$ips" > "$tmp" || { rm -f "$tmp" "$tmp2"; return 1; }
+	[[ $new ]] && Add_Forwarding_Hook "$tmp"
+	for i in "${!P_IPS[@]}"
+	do
+		[[ ${P_STATE[i]} == 'active' ]] || continue
+		Swap_V6 "${P_IPS[i]}" "${new:+128}"
+		Same_IPs "$IPS" "${P_IPS[i]}" && continue
+		Conf_Set "$tmp" 'Peer' "${P_PUB[i]}" 'AllowedIPs' "$IPS" > "$tmp2" && cat "$tmp2" > "$tmp"
+	done
+	rm -f "$tmp2"
+	# If only disabled peers or client configs are not aligned, the server does not need to be restarted
+	if cmp -s "$tmp" "$WG_DIR/$IFACE.conf"
+	then
+		rm -f "$tmp"
+	else
+		Server_Commit "$tmp" 1 || return 1
+	fi
+	SRV_ADDR[$IFACE]=$ips
+
+	# The server has been changed now: update everything else, and report failures with return code 2, so that the input is not asked again
+	# Disabled peers
+	for i in "${!P_IPS[@]}"
+	do
+		[[ ${P_STATE[i]} == 'disabled' ]] || continue
+		Swap_V6 "${P_IPS[i]}" "${new:+128}"
+		Same_IPs "$IPS" "${P_IPS[i]}" || Peer_Set "$i" 'AllowedIPs' "$IPS" || failed=1
+	done
+
+	# Client configs, including unused ones: Address, and DNS entries pointing to the old server IPv6 address
+	for c in "${!C_FILE[@]}"
+	do
+		[[ ${C_IF[c]} == "$IFACE" ]] || continue
+		Parse_Conf "${C_FILE[c]}"
+		set=0
+		Swap_V6 "${CONF_I[address]}" "${new:+$SRV6_PREFIX}"
+		if ! Same_IPs "$IPS" "${CONF_I[address]}"
+		then
+			Client_Set "$c" 'Interface' 'Address' "$IPS" || { failed=1; continue; }
+			set=1
+		fi
+		if [[ $old ]] && ! Same_IPs "$old" "$new" && Replace_DNS "${CONF_I[dns]}" "${old%/*}" "${new%/*}"
+		then
+			Client_Set "$c" 'Interface' 'DNS' "$DNS" || { failed=1; continue; }
+			set=1
+		fi
+		(( $set )) && ((++changed))
+	done
+	if [[ $new ]]
+	then
+		(( $failed )) && { Fail "Server $IFACE uses IPv6 address $new now, but not all client configs could be updated."; return 2; }
+		G_DIETPI-NOTIFY 0 "Server $IFACE uses IPv6 address $new now"
+	else
+		(( $failed )) && { Fail "IPv6 has been turned off for server $IFACE, but not all client configs could be updated."; return 2; }
+		G_DIETPI-NOTIFY 0 "IPv6 has been turned off for server $IFACE"
+	fi
+	Reimport_Note "$changed"
+}
+
+# Files not needed anymore: key files which contain keys that are stored in configs already into KEY_FILES, plus unused client configs of all servers into CLEANUP_FILES
+Load_Cleanup()
+{
+	KEY_FILES=()
+	local c f key
+	shopt -s nullglob
+	for f in "$WG_DIR"/*.key
+	do
+		key=$(<"$f")
+		key=${key//[[:space:]]/}
+		[[ $key && ${KNOWN_KEYS[$key]} ]] && KEY_FILES+=("$f")
+	done
+	shopt -u nullglob
+	CLEANUP_FILES=("${KEY_FILES[@]}")
+	for c in "${!C_FILE[@]}"
+	do
+		[[ ${C_STATE[c]} == 'unused' ]] && CLEANUP_FILES+=("${C_FILE[c]}")
+	done
+}
+
+# Print client config $1 as QR code, without comments and empty lines
+Show_QR()
+{
+	local qr lines
+	qr=$(sed -E 's/[[:blank:]]*#.*$//; /^[[:blank:]]*$/d' "$1" | qrencode -t ansiutf8) || { Fail 'Generating the QR code failed.'; return 1; }
+	(( $MENU )) && G_TERM_CLEAR
+	echo "$qr"
+	(( $MENU )) || return 0
+	lines=$(wc -l <<< "$qr")
+	(( $lines * 2 > $(tput cols) || $lines + 3 > $(tput lines) )) && G_DIETPI-NOTIFY 2 'The QR code might not fit into this terminal. If it cannot be scanned, please enlarge the window or reduce the font size.'
+	read -rp " - Scan the QR code of client \"$2\" with the WireGuard app, then press Enter to return ..."
+}
+
+#/////////////////////////////////////////////////////////////////////////////////////
+# Menus
+#/////////////////////////////////////////////////////////////////////////////////////
+Age_Text()
+{
+	if (( $1 < 60 ))
+	then
+		AGE="${1}s"
+
+	elif (( $1 < 3600 ))
+	then
+		AGE="$(( $1 / 60 ))m"
+
+	elif (( $1 < 86400 ))
+	then
+		AGE="$(( $1 / 3600 ))h"
+	else
+		AGE="$(( $1 / 86400 ))d"
+	fi
+}
+
+# Address list without CIDR netmask /32 and /128, or without any netmask if $2 = 1 (for client Address)
+Short_IPs(){ local a out=''; for a in ${1//,/ }; do a=${a%/32} a=${a%/128}; (( ${2:-0} )) && a=${a%/*}; out+=${out:+, }$a; done; echo "$out"; }
+
+# The state starts with a 3 byte symbol, while printf pads by bytes, hence the state column width is 12 for 10 characters
+Peer_Status_Text()
+{
+	local pub=${P_PUB[$1]} ips hs state
+	ips=$(Short_IPs "${P_IPS[$1]}")
+	hs=${HS[$pub]:-0}
+	if [[ ${P_STATE[$1]} == 'disabled' ]]
+	then
+		state='○ disabled'
+
+	elif (( ! $IFACE_UP ))
+	then
+		state='○ down'
+
+	elif (( ! $hs ))
+	then
+		state='○ never'
+	else
+		Age_Text "$(( EPOCHSECONDS - $hs ))"
+		(( EPOCHSECONDS - $hs < 180 )) && state='● online' || state='○ offline'
+		printf '%-12s %-15s %4s ago  rx %s tx %s' "$state" "$ips" "$AGE" "$(numfmt --to=iec-i --suffix=B "${RX[$pub]:-0}")" "$(numfmt --to=iec-i --suffix=B "${TX[$pub]:-0}")"
+		return
+	fi
+	printf '%-12s %s' "$state" "$ips"
+	(( ${P_CLIENT[$1]} < 0 )) && printf '  no local config'
+}
+
+# Find peer index by public key into $PEER, after reloading
+Reload_Peer()
+{
+	Load_State || return 1
+	Load_Peers
+	local i
+	for i in "${!P_PUB[@]}"
+	do
+		[[ ${P_PUB[i]} == "$1" ]] && { PEER=$i; return 0; }
+	done
+	return 1
+}
+
+Input_AllowedIPs()
+{
+	local lan_ip lan_if lan_net=''
+	lan_ip=$(G_GET_NET -q ip) lan_if=$(G_GET_NET -q iface)
+	[[ $lan_if ]] && lan_net=$(ip -br -4 a s dev "$lan_if" | mawk '{print $3;exit}')
+	if [[ $lan_net ]]
+	then
+		Parse_Net "$lan_net"
+		Int2Ip "$NET4_NET"
+		lan_net="$IP/$NET4_PREFIX"
+	fi
+	G_WHIP_MENU_ARRAY=('Full tunnel' ': 0.0.0.0/0, ::/0 | Route all traffic through the VPN')
+	[[ $lan_net ]] && G_WHIP_MENU_ARRAY+=('Server LAN' ": $lan_net | Access the local network of the server only")
+	[[ $lan_ip ]] && G_WHIP_MENU_ARRAY+=('Server only' ": $lan_ip/32 | Access this server only")
+	G_WHIP_MENU_ARRAY+=('Custom' ": Enter AllowedIPs manually")
+	case $1 in
+		'0.0.0.0/0, ::/0') G_WHIP_DEFAULT_ITEM='Full tunnel';;
+		"$lan_net") G_WHIP_DEFAULT_ITEM='Server LAN';;
+		"$lan_ip/32") G_WHIP_DEFAULT_ITEM='Server only';;
+		*) G_WHIP_DEFAULT_ITEM='Custom';;
+	esac
+	G_WHIP_BUTTON_CANCEL_TEXT='Back'
+	Whip_Menu "Please select which traffic the client routes through the VPN (AllowedIPs):\n\nCurrent: $1" || return 1
+	case $G_WHIP_RETURNED_VALUE in
+		'Full tunnel') RESULT='0.0.0.0/0, ::/0';;
+		'Server LAN') RESULT=$lan_net;;
+		'Server only') RESULT="$lan_ip/32";;
+		*)
+			G_WHIP_DEFAULT_ITEM=$1
+			G_WHIP_INPUTBOX_REGEX='^[0-9A-Fa-f.:/, ]+$' G_WHIP_INPUTBOX_REGEX_TEXT='be a comma-separated list of networks'
+			Input_Checked Check_AllowedIPs 'Please enter the AllowedIPs for the client, comma-separated, e.g.: 192.168.1.0/24, 10.9.0.0/24'
+		;;
+	esac
+}
+
+Input_DNS()
+{
+	G_WHIP_DEFAULT_ITEM=$1
+	G_WHIP_INPUTBOX_REGEX='^[0-9A-Za-z.:, -]*$' G_WHIP_INPUTBOX_REGEX_TEXT='be a comma-separated list of DNS servers or empty'
+	G_WHIP_INPUTBOX 'Please enter the DNS servers the client uses while connected, comma-separated.\n\nLeave it empty to keep the DNS servers of the client device.' || return 1
+	RESULT=$G_WHIP_RETURNED_VALUE
+}
+
+Input_Endpoint()
+{
+	G_WHIP_DEFAULT_ITEM=$1
+	G_WHIP_INPUTBOX_REGEX='^[^ ]+:[0-9]+$' G_WHIP_INPUTBOX_REGEX_TEXT='be <host>:<port>'
+	Input_Checked Check_Endpoint 'Please enter the public domain or IP address and port, where the client can reach this server, e.g.: myserver.example.com:51820\n\nThe port needs to be forwarded by your router, if the server is behind NAT.'
+}
+
+Input_Keepalive()
+{
+	G_WHIP_DEFAULT_ITEM=$1
+	G_WHIP_INPUTBOX_REGEX='^([0-9]{1,5})?$' G_WHIP_INPUTBOX_REGEX_TEXT='be a number of seconds or empty'
+	Input_Checked Check_Keepalive 'Please enter the interval in seconds, in which the client sends keepalive packets, e.g. 25.\n\nThis keeps the connection open, if the client is behind NAT. Leave it empty or enter 0 to disable it.' || return 1
+	[[ $RESULT == 0 ]] && RESULT=
+	return 0
+}
+
+# Server port and address input, for new and existing servers: $1 = check function, or the function which applies the input, $2 = default, $3 = interface
+Input_Port()
+{
+	G_WHIP_DEFAULT_ITEM=$2
+	G_WHIP_INPUTBOX_REGEX='^[1-9][0-9]{0,4}$' G_WHIP_INPUTBOX_REGEX_TEXT='be a valid port number'
+	Input_Checked "$1" "Please enter the UDP port the server $3 listens on:\n\nThis port needs to be forwarded by your router and/or opened in your firewall."
+}
+
+Input_Server_IPv4_Address()
+{
+	G_WHIP_DEFAULT_ITEM=$2
+	G_WHIP_INPUTBOX_REGEX='^[0-9.]+/[0-9]+$' G_WHIP_INPUTBOX_REGEX_TEXT='be an IPv4 address with CIDR netmask'
+	Input_Checked "$1" "Please enter the VPN IPv4 address of the server $3 with CIDR netmask, e.g. \"10.9.0.1/24\".
+\nAll peers of this server and respective client configs are updated automatically, to match the new server address and subnet.
+\nThe interface is restarted, and client devices need to import their config again, e.g. by scanning the QR code."
+}
+
+Input_Server_IPv6_Address()
+{
+	G_WHIP_DEFAULT_ITEM=$2
+	G_WHIP_INPUTBOX_REGEX='^[0-9A-Fa-f:/]*$' G_WHIP_INPUTBOX_REGEX_TEXT='be an IPv6 address with CIDR netmask, or empty'
+	Input_Checked "$1" "Please enter the VPN IPv6 address of the server $3 with CIDR netmask, e.g. \"fd10:9::1/64\". Leave it empty to turn off IPv6 support for this VPN.
+\nAll peers of this server and respective clients configs are updated automatically, to get an IPv6 address of this subnet, with the same host part as their IPv4 address. Their IPv6 traffic is masqueraded behind this server (NAT66). Without it, clients cannot use IPv6 through the VPN, so that connections to IPv6 hosts hang until they fall back to IPv4, or fail. IPv6 leaks however are prevented in any case.
+\nThe interface is restarted, and client devices need to import their config again, e.g. by scanning the QR code."
+}
+
+# Client name input: $1 = default, $2 = check function
+Input_Name()
+{
+	G_WHIP_DEFAULT_ITEM=$1
+	G_WHIP_INPUTBOX_REGEX='^[A-Za-z0-9_][A-Za-z0-9_.-]*$' G_WHIP_INPUTBOX_REGEX_TEXT='contain letters, digits, and _ . - only'
+	Input_Checked "$2" "Please enter a name for the client, e.g. the device it is used on.\n\nIts config is stored as $CLIENT_DIR/$IFACE-<name>.conf."
+}
+
+Menu_Add()
+{
+	Load_Server_Net
+	[[ $SRV4_IP ]] || { Fail "Server $IFACE has no IPv4 address. Please add one via \"Server address\" first."; return 0; }
+	[[ ${SRV_PUB[$IFACE]} ]] || { Fail "The public key of server $IFACE is unknown, as its config has no PrivateKey and the interface is not running."; return 0; }
+	Load_Defaults
+	Next_Free_IP || { Fail "There is no free IP address left in the subnet $SRV4_IP/$SRV4_PREFIX."; return 0; }
+	Input_Name '' Check_Name || return 0
+	local name=$RESULT ip=$NEXT_IP endpoint=$DEF_ENDPOINT dns=$DEF_DNS allowed=$DEF_ALLOWED keepalive=$DEF_KEEPALIVE psk=0 last='Create' psk_text
+	while :
+	do
+		psk_text='Off'
+		(( $psk )) && psk_text='On'
+		V6_For "$ip"
+		G_WHIP_MENU_ARRAY=(
+			'Name' ": [$name]"
+			'Address' ": [$ip${V6:+, $V6}]"
+			'Endpoint' ": [$endpoint]"
+			'DNS' ": [${dns:-none}]"
+			'AllowedIPs' ": [$allowed]"
+			'Keepalive' ": [${keepalive:-off}]"
+			'PresharedKey' ": [$psk_text]"
+			'' '●─ Apply '
+			'Create' ': Create the client with above settings'
+		)
+		G_WHIP_DEFAULT_ITEM=$last
+		G_WHIP_BUTTON_CANCEL_TEXT='Back'
+		Whip_Menu "New client of server $IFACE. The settings are taken from the newest client config of this server, if one exists." || return 0
+		last=$G_WHIP_RETURNED_VALUE
+		case $G_WHIP_RETURNED_VALUE in
+			'Name') Input_Name "$name" Check_Name && name=$RESULT;;
+			'Address')
+				G_WHIP_DEFAULT_ITEM=$ip
+				Input_Checked Check_Client_IP "Please enter the VPN IPv4 address of the client inside the server subnet $SRV4_IP/$SRV4_PREFIX:" && ip=$RESULT
+			;;
+			'Endpoint') Input_Endpoint "$endpoint" && endpoint=$RESULT;;
+			'DNS') Input_DNS "$dns" && dns=$RESULT;;
+			'AllowedIPs') Input_AllowedIPs "$allowed" && allowed=$RESULT;;
+			'Keepalive') Input_Keepalive "$keepalive" && keepalive=$RESULT;;
+			'PresharedKey') psk=$(( ! $psk ));;
+			'Create')
+				Client_Create "$name" "$ip" "$endpoint" "$dns" "$allowed" "$keepalive" "$psk" || continue
+				G_WHIP_DEFAULT_ITEM='yes' G_WHIP_YESNO "Client $name has been created.\n\nShow its config as QR code now, to scan it with the WireGuard app?" && Show_QR "$CLIENT_DIR/$IFACE-$name.conf" "$name"
+				return 0
+			;;
+			*) :;;
+		esac
+	done
+}
+
+Menu_Peer()
+{
+	local pub=${P_PUB[$1]} i c last text psk_text
+	while Reload_Peer "$pub"
+	do
+		i=$PEER c=${P_CLIENT[$PEER]}
+		Load_Runtime
+		text="Client: ${P_NAME[i]:-<no name>} | $(Peer_Status_Text "$i")\nPublic key: $pub\nServer side AllowedIPs: ${P_IPS[i]}"
+		G_WHIP_MENU_ARRAY=()
+		if (( $c < 0 ))
+		then
+			text+='\n\nNo local client config was found for this peer. It was not created on this host, or its config has been removed. Hence only disabling and removing it is possible.'
+		else
+			text+="\nConfig: ${C_FILE[c]}"
+			[[ ${C_FILE[c]} == "$CLIENT_DIR/"* ]] || text+=" (will be moved to $CLIENT_DIR/ on change)"
+			text+='\n\nChanges to the client config need to be imported on the client device again, e.g. by scanning the QR code.'
+			Parse_Conf "${C_FILE[c]}"
+			psk_text='Off'
+			[[ ${CONF_P[1,presharedkey]} ]] && psk_text='On'
+			G_WHIP_MENU_ARRAY+=(
+				'QR code' ': Show the client config as QR code'
+				'Show config' ': View the client config file'
+				'Rename' ": [${C_NAME[c]}]"
+				'AllowedIPs' ": [${CONF_P[1,allowedips]}]"
+				'Endpoint' ": [${CONF_P[1,endpoint]}]"
+				'DNS' ": [${CONF_I[dns]:-none}]"
+				'Keepalive' ": [${CONF_P[1,persistentkeepalive]:-off}]"
+				'PresharedKey' ": [$psk_text]"
+				'' '●─ State '
+			)
+		fi
+		if [[ ${P_STATE[i]} == 'active' ]]
+		then
+			G_WHIP_MENU_ARRAY+=('Disable' ': Remove the peer from the server, but keep it for re-enabling')
+		else
+			G_WHIP_MENU_ARRAY+=('Enable' ': Add the peer to the server again')
+		fi
+		G_WHIP_MENU_ARRAY+=('Remove' ': Remove the peer and its client config')
+		G_WHIP_DEFAULT_ITEM=$last
+		G_WHIP_BUTTON_CANCEL_TEXT='Back'
+		Whip_Menu "$text" || return 0
+		last=$G_WHIP_RETURNED_VALUE
+		case $G_WHIP_RETURNED_VALUE in
+			'QR code') Show_QR "${C_FILE[c]}" "${C_NAME[c]}";;
+			'Show config') G_WHIP_VIEWFILE "${C_FILE[c]}";;
+			'Rename') RENAME_FROM=${C_NAME[c]} Input_Name "${C_NAME[c]}" Check_Rename && [[ $RESULT != "${C_NAME[c]}" ]] && Client_Rename "$c" "$RESULT";;
+			'AllowedIPs') Input_AllowedIPs "${CONF_P[1,allowedips]}" && Client_Set "$c" 'Peer' 'AllowedIPs' "$RESULT";;
+			'Endpoint') Input_Endpoint "${CONF_P[1,endpoint]}" && Client_Set "$c" 'Peer' 'Endpoint' "$RESULT";;
+			'DNS') Input_DNS "${CONF_I[dns]}" && Client_Set "$c" 'Interface' 'DNS' "$RESULT";;
+			'Keepalive') Input_Keepalive "${CONF_P[1,persistentkeepalive]}" && Client_Set "$c" 'Peer' 'PersistentKeepalive' "$RESULT";;
+			'PresharedKey') Client_PSK "$i" "$([[ $psk_text == 'Off' ]] && echo 1 || echo 0)";;
+			'Disable') Peer_Move "$i" 'disabled';;
+			'Enable') Peer_Move "$i" 'active';;
+			'Remove')
+				text="Remove client ${P_NAME[i]:-$pub}?\n\nIts peer is removed from the server"
+				(( $c < 0 )) || text+=", and its client config ${C_FILE[c]} is deleted"
+				G_WHIP_YESNO "$text. This cannot be undone." && Peer_Remove "$i" && return 0
+			;;
+			*) :;;
+		esac
+	done
+}
+
+Menu_Unused()
+{
+	local c=$1
+	G_WHIP_MENU_ARRAY=(
+		'Re-add' ": Add the client as peer to $IFACE again"
+		'Show config' ': View the client config file'
+		'Remove' ': Delete the client config'
+	)
+	G_WHIP_BUTTON_CANCEL_TEXT='Back'
+	Whip_Menu "Unused client config: ${C_FILE[c]}\n\nThis config belongs to server $IFACE, but its public key is not a peer of this server." || return 0
+	case $G_WHIP_RETURNED_VALUE in
+		'Re-add') Client_Readd "$c";;
+		'Show config') G_WHIP_VIEWFILE "${C_FILE[c]}";;
+		'Remove') G_WHIP_YESNO "Delete ${C_FILE[c]}?" && G_EXEC rm "${C_FILE[c]}";;
+		*) :;;
+	esac
+}
+
+Menu_Service()
+{
+	local active=0 enabled=0
+	systemctl -q is-active "wg-quick@$IFACE" && active=1
+	systemctl -q is-enabled "wg-quick@$IFACE" && enabled=1
+	if (( $active ))
+	then
+		G_WHIP_MENU_ARRAY=('Restart' ': Restart the interface' 'Stop' ': Stop the interface')
+	else
+		G_WHIP_MENU_ARRAY=('Start' ': Start the interface')
+	fi
+	if (( $enabled ))
+	then
+		G_WHIP_MENU_ARRAY+=('Disable' ': Do not start the interface at boot')
+	else
+		G_WHIP_MENU_ARRAY+=('Enable' ': Start the interface at boot')
+	fi
+	G_WHIP_BUTTON_CANCEL_TEXT='Back'
+	Whip_Menu "Service: wg-quick@$IFACE" || return 0
+	G_EXEC_NOEXIT=1 G_EXEC systemctl "${G_WHIP_RETURNED_VALUE,,}" "wg-quick@$IFACE"
+}
+
+Menu_Interface()
+{
+	local i
+	G_WHIP_MENU_ARRAY=()
+	for i in "${SERVERS[@]}"
+	do
+		G_WHIP_MENU_ARRAY+=("$i" ": Port ${SRV_PORT[$i]} | ${SRV_ADDR[$i]}")
+	done
+	G_WHIP_DEFAULT_ITEM=$IFACE
+	G_WHIP_BUTTON_CANCEL_TEXT='Back'
+	Whip_Menu 'Please select the server interface to manage:' && IFACE=$G_WHIP_RETURNED_VALUE
+}
+
+# Edit a copy of the server config, then apply it like any other change, restoring the previous config on failure
+Edit_Config()
+{
+	local conf="$WG_DIR/$IFACE.conf" dir copy error restart=0
+	dir=$(mktemp -d "$G_WORKING_DIR/tmp.XXXXXX") || return 1
+	# wg-quick requires the file name to be <interface>.conf
+	copy="$dir/$IFACE.conf"
+	G_EXEC cp -a "$conf" "$copy"
+	while :
+	do
+		sensible-editor "$copy"
+		cmp -s "$conf" "$copy" && { G_EXEC rm -R "$dir"; return 0; }
+		error=$(wg-quick strip "$copy" 2>&1 > /dev/null) && break
+		G_WHIP_BUTTON_OK_TEXT='Edit' G_WHIP_BUTTON_CANCEL_TEXT='Discard' G_WHIP_YESNO "[FAILED] The config is invalid:\n\n$error\n\nEdit it again, or discard the changes?" && continue
+		G_EXEC rm -R "$dir"
+		return 0
+	done
+	[[ -e /sys/class/net/$IFACE ]] && G_WHIP_YESNO 'Restart the interface to apply all changes?\n\nConnected clients reconnect automatically. Otherwise, only changed peers are applied now, and changed [Interface] settings on next restart.' && restart=1
+	Server_Commit "$copy" "$restart"
+	G_EXEC rm -R "$dir"
+}
+
+Menu_Create()
+{
+	Server_Defaults
+	local iface=$NEW_IFACE port=$NEW_PORT address=$NEW_ADDR address6=$NEW_ADDR6 last='Create'
+	while :
+	do
+		G_WHIP_MENU_ARRAY=(
+			'Interface' ": [$iface]"
+			'Listen port' ": [$port]"
+			'Server address' ": [$address]"
+		)
+		IPv6_Enabled && G_WHIP_MENU_ARRAY+=('IPv6 (NAT66)' ": [${address6:-off}]")
+		G_WHIP_MENU_ARRAY+=(
+			'' '●─ Apply '
+			'Create' ': Create and start the server with above settings'
+		)
+		G_WHIP_DEFAULT_ITEM=$last
+		G_WHIP_BUTTON_CANCEL_TEXT='Back'
+		Whip_Menu "New server config: $WG_DIR/$iface.conf\n\nClient traffic is forwarded and masqueraded, so that clients can access the local network and the internet through this server." || return 0
+		last=$G_WHIP_RETURNED_VALUE
+		case $G_WHIP_RETURNED_VALUE in
+			'Interface')
+				G_WHIP_DEFAULT_ITEM=$iface
+				Input_Checked Check_Iface "Please enter the name of the server interface, e.g. wg0:\n\nIts config is stored as $WG_DIR/<interface>.conf." && iface=$RESULT
+			;;
+			'Listen port') Input_Port Check_Port "$port" "$iface" && port=$RESULT;;
+			'Server address') Input_Server_IPv4_Address Check_Server_IPv4_Address "$address" "$iface" && address=$RESULT;;
+			'IPv6 (NAT66)')
+				ADDR6=$address6
+				[[ $ADDR6 ]] || Default_IPv6 "$address"
+				Input_Server_IPv6_Address Check_Server_IPv6_Address "$ADDR6" "$iface" && address6=$RESULT
+			;;
+			'Create')
+				Server_Create "$iface" "$port" "$address" "$address6"
+				(( $? == 1 )) && continue
+				IFACE=$iface
+				# If IPv6 is disabled, this is not shown in the main menu, as it is intended by the admin, hence recommend enabling IPv6 here once
+				IPv6_Enabled || ! IPv6_Hint "$iface" "$address" 1 || Info "$HINT"
+				return 0
+			;;
+			*) :;;
+		esac
+	done
+}
+
+Menu_Main()
+{
+	# Without server config, show an empty server section with the option to create one
+	if ! Load_State
+	then
+		G_WHIP_MENU_ARRAY=(
+			'' '●─ Server '
+			'Create server' ': Create a new server config and start it'
+		)
+		G_WHIP_DEFAULT_ITEM='Create server'
+		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+		Whip_Menu "No WireGuard server config was found in $WG_DIR. A server config is a file $WG_DIR/<interface>.conf with a \"ListenPort\" setting.\n\nCreate a server first, to add clients to it." || return 1
+		[[ $G_WHIP_RETURNED_VALUE == 'Create server' ]] && Menu_Create
+		return 0
+	fi
+	[[ $IFACE && ${SRV_PORT[$IFACE]} ]] || IFACE=${SERVERS[0]}
+	Load_Peers
+	Load_Runtime
+	Load_Cleanup
+
+	local state='inactive' boot='disabled at boot' i c tag unused=() hint='' address4 address6
+	declare -A tags=()
+	systemctl -q is-active "wg-quick@$IFACE" && state='active'
+	systemctl -q is-enabled "wg-quick@$IFACE" && boot='enabled at boot'
+	IPv6_Hint "$IFACE" "${SRV_ADDR[$IFACE]}" && hint="\n\n[WARNING] $HINT"
+	Load_Server_Net
+	address4=${SRV4_IP:+$SRV4_IP/$SRV4_PREFIX} address6=${SRV6_IP:+$SRV6_IP/$SRV6_PREFIX}
+
+	G_WHIP_MENU_ARRAY=()
+	(( ${#SERVERS[@]} > 1 )) && G_WHIP_MENU_ARRAY+=('Server interface' ": [$IFACE]")
+	G_WHIP_MENU_ARRAY+=(
+		'' "●─ Server $IFACE "
+		'Service state' ": [$state, $boot]"
+		'Listen port' ": [${SRV_PORT[$IFACE]}]"
+		'Server address' ": [${address4:-none}]"
+	)
+	# If IPv6 is disabled, it can only be turned off
+	{ IPv6_Enabled || [[ $address6 ]]; } && G_WHIP_MENU_ARRAY+=('IPv6 (NAT66)' ": [${address6:-off}]")
+	G_WHIP_MENU_ARRAY+=(
+		'Edit config' ": Open $WG_DIR/$IFACE.conf in an editor"
+		'' '●─ Clients '
+		'Refresh' ': Refresh client states'
+	)
+	# Client names are file names, which never contain spaces, unlike the fixed menu entries. Peers without client config are shown by public key.
+	for i in "${!P_PUB[@]}"
+	do
+		tag=${P_NAME[i]:-<${P_PUB[i]::8}...>}
+		while [[ ${tags[$tag]} ]]; do tag+='*'; done
+		tags[$tag]="peer $i"
+		G_WHIP_MENU_ARRAY+=("$tag" ": $(Peer_Status_Text "$i")")
+	done
+	G_WHIP_MENU_ARRAY+=('Add client' ': Create a new client')
+	for c in "${!C_FILE[@]}"
+	do
+		[[ ${C_IF[c]} == "$IFACE" && ${C_STATE[c]} == 'unused' ]] && unused+=("$c")
+	done
+	if (( ${#unused[@]} || ${#KEY_FILES[@]} ))
+	then
+		G_WHIP_MENU_ARRAY+=('' '●─ Unused client configs ')
+		for c in "${unused[@]}"
+		do
+			tag=${C_NAME[c]}
+			while [[ ${tags[$tag]} ]]; do tag+='*'; done
+			tags[$tag]="unused $c"
+			G_WHIP_MENU_ARRAY+=("$tag" ": $(Short_IPs "${C_ADDR[c]}" 1) | not a peer of $IFACE")
+		done
+		(( ${#KEY_FILES[@]} )) && G_WHIP_MENU_ARRAY+=('Old key files' ": ${#KEY_FILES[@]} key file(s) not needed anymore")
+	fi
+
+	G_WHIP_DEFAULT_ITEM=$MAIN_LAST
+	G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+	Whip_Menu "Manage WireGuard server $IFACE and its clients.\n\nPublic key: ${SRV_PUB[$IFACE]:-unknown, as the config has no PrivateKey and the interface is not running}$hint" || return 1
+	MAIN_LAST=$G_WHIP_RETURNED_VALUE
+	case $G_WHIP_RETURNED_VALUE in
+		'Server interface') Menu_Interface;;
+		'Service state') Menu_Service;;
+		'Listen port') Input_Port Server_Set_Port "${SRV_PORT[$IFACE]}" "$IFACE";;
+		'Server address') Input_Server_IPv4_Address Set_Server_IPv4_Address "$address4" "$IFACE";;
+		'IPv6 (NAT66)')
+			ADDR6=$address6
+			[[ $ADDR6 ]] || Default_IPv6 "${SRV_ADDR[$IFACE]}" "$IFACE"
+			Input_Server_IPv6_Address Set_Server_IPv6_Address "$ADDR6" "$IFACE"
+		;;
+		'Edit config') Edit_Config;;
+		'Refresh') :;; # dummy entry as states are reloaded by Load_State at Menu_Main start
+		'Add client') Menu_Add;;
+		'Old key files')
+			G_WHIP_YESNO "The following key files contain keys which are stored in configs already. They are not needed anymore:\n\n$(printf '%s\n' "${KEY_FILES[@]}")\n\nRemove them?" && G_EXEC rm "${KEY_FILES[@]}"
+		;;
+		*)
+			[[ ${tags[$G_WHIP_RETURNED_VALUE]} ]] || return 0
+			read -r tag i <<< "${tags[$G_WHIP_RETURNED_VALUE]}"
+			if [[ $tag == 'peer' ]]
+			then
+				Menu_Peer "$i"
+			else
+				Menu_Unused "$i"
+			fi
+		;;
+	esac
+	return 0
+}
+
+#/////////////////////////////////////////////////////////////////////////////////////
+# CLI
+#/////////////////////////////////////////////////////////////////////////////////////
+# Select server interface from -i option, or the only one
+Select_Iface()
+{
+	if [[ $IFACE_OPT ]]
+	then
+		[[ ${SRV_PORT[$IFACE_OPT]} ]] || Error "Server interface \"$IFACE_OPT\" was not found. A server config is a file $WG_DIR/<interface>.conf with a \"ListenPort\" setting."
+		IFACE=$IFACE_OPT
+
+	elif (( ${#SERVERS[@]} == 1 ))
+	then
+		IFACE=${SERVERS[0]}
+	else
+		Error "Multiple server interfaces found: ${SERVERS[*]}. Please select one with -i <interface>."
+	fi
+	Load_Peers
+}
+
+# Find a client by name or public key into $IFACE, $TARGET_TYPE (peer or unused) and $TARGET
+Find_Target()
+{
+	[[ $1 ]] || Error "Missing client name. Aborting ...$USAGE"
+	local iface i c found=() list=("${SERVERS[@]}")
+	[[ $IFACE_OPT ]] && { Select_Iface; list=("$IFACE"); }
+	for iface in "${list[@]}"
+	do
+		IFACE=$iface
+		Load_Peers
+		for i in "${!P_PUB[@]}"
+		do
+			[[ ${P_NAME[i]} == "$1" || ${P_PUB[i]} == "$1" ]] && found+=("$iface peer $i")
+		done
+		for c in "${!C_FILE[@]}"
+		do
+			[[ ${C_IF[c]} == "$iface" && ${C_STATE[c]} == 'unused' && ${C_NAME[c]} == "$1" ]] && found+=("$iface unused $c")
+		done
+	done
+	(( ${#found[@]} )) || Error "Client \"$1\" was not found."
+	(( ${#found[@]} == 1 )) || Error "Client \"$1\" exists for multiple server interfaces. Please select one with -i <interface>."
+	read -r IFACE TARGET_TYPE TARGET <<< "${found[0]}"
+	Load_Peers
+	Load_Server_Net
+}
+
+# Client config index of the target, error if there is none
+Target_Client()
+{
+	if [[ $TARGET_TYPE == 'unused' ]]
+	then
+		CLIENT=$TARGET
+	else
+		CLIENT=${P_CLIENT[$TARGET]}
+		(( $CLIENT >= 0 )) || Error "Peer ${P_PUB[$TARGET]} has no local client config."
+	fi
+}
+
+Cmd_List()
+{
+	local list=("${SERVERS[@]}") iface i c rows=() row name address state config w1=4 w2=7
+	if [[ $ARG1 || $IFACE_OPT ]]
+	then
+		IFACE_OPT=${ARG1:-$IFACE_OPT}
+		Select_Iface
+		list=("$IFACE")
+	fi
+	for iface in "${list[@]}"
+	do
+		IFACE=$iface
+		Load_Peers
+		(( ${#list[@]} > 1 )) && rows+=("#$iface")
+		for i in "${!P_PUB[@]}"
+		do
+			config="(no local config, public key ${P_PUB[i]::8}...)"
+			(( ${P_CLIENT[i]} < 0 )) || config=${C_FILE[${P_CLIENT[i]}]}
+			rows+=("${P_NAME[i]:--}"$'\t'"$(Short_IPs "${P_IPS[i]}")"$'\t'"${P_STATE[i]}"$'\t'"$config")
+		done
+		for c in "${!C_FILE[@]}"
+		do
+			[[ ${C_IF[c]} == "$iface" && ${C_STATE[c]} == 'unused' ]] || continue
+			rows+=("${C_NAME[c]}"$'\t'"$(Short_IPs "${C_ADDR[c]}" 1)"$'\t''unused'$'\t'"${C_FILE[c]}")
+		done
+	done
+	for row in "${rows[@]}"
+	do
+		[[ $row == '#'* ]] && continue
+		IFS=$'\t' read -r name address state config <<< "$row"
+		(( ${#name} > $w1 )) && w1=${#name}
+		(( ${#address} > $w2 )) && w2=${#address}
+	done
+	(( ${#list[@]} > 1 )) || printf '%-*s  %-*s  %-8s  %s\n' "$w1" 'NAME' "$w2" 'ADDRESS' 'STATE' 'CONFIG'
+	for row in "${rows[@]}"
+	do
+		if [[ $row == '#'* ]]
+		then
+			printf '\nServer interface %s:\n%-*s  %-*s  %-8s  %s\n' "${row#\#}" "$w1" 'NAME' "$w2" 'ADDRESS' 'STATE' 'CONFIG'
+			continue
+		fi
+		IFS=$'\t' read -r name address state config <<< "$row"
+		printf '%-*s  %-*s  %-8s  %s\n' "$w1" "$name" "$w2" "$address" "$state" "$config"
+	done
+}
+
+Cmd_Add()
+{
+	[[ $ARG1 ]] || Error "Missing client name. Aborting ...$USAGE"
+	Select_Iface
+	Load_Server_Net
+	[[ $SRV4_IP ]] || Error "Server $IFACE has no IPv4 address."
+	Load_Defaults
+	local ip=$OPT_IP endpoint=${OPT_ENDPOINT:-$DEF_ENDPOINT} keepalive=${OPT_KEEPALIVE-$DEF_KEEPALIVE}
+	[[ $ip ]] || { Next_Free_IP || Error "There is no free IP address left in the subnet $SRV4_IP/$SRV4_PREFIX."; ip=$NEXT_IP; }
+	[[ $endpoint =~ :[0-9]+$ ]] || endpoint+=":${SRV_PORT[$IFACE]}"
+	Client_Create "$ARG1" "$ip" "$endpoint" "${OPT_DNS-$DEF_DNS}" "${OPT_ALLOWED-$DEF_ALLOWED}" "$keepalive" "$OPT_PSK"
+}
+
+Cmd_Set()
+{
+	Find_Target "$ARG1"
+	Target_Client
+	(( ${#KV[@]} )) || Error "Missing <key>=<value>. Aborting ...$USAGE"
+	local kv key value
+	for kv in "${KV[@]}"
+	do
+		key=${kv%%=*} value=${kv#*=}
+		case ${key,,} in
+			'dns') Client_Set "$CLIENT" 'Interface' 'DNS' "$value";;
+			'allowedips')
+				Check_AllowedIPs "$value" || exit 1
+				Client_Set "$CLIENT" 'Peer' 'AllowedIPs' "$value"
+			;;
+			'endpoint')
+				Check_Endpoint "$value" || exit 1
+				Client_Set "$CLIENT" 'Peer' 'Endpoint' "$value"
+			;;
+			'keepalive')
+				Check_Keepalive "$value" || exit 1
+				[[ $value == 0 ]] && value=
+				Client_Set "$CLIENT" 'Peer' 'PersistentKeepalive' "$value"
+			;;
+			'psk')
+				[[ $TARGET_TYPE == 'peer' ]] || Error 'A PresharedKey can only be changed for clients which are peers of the server.'
+				[[ $value =~ ^(on|off)$ ]] || Error 'Valid values for psk are "on" and "off".'
+				Client_PSK "$TARGET" "$([[ $value == 'on' ]] && echo 1 || echo 0)"
+			;;
+			*) Error "Invalid key ($key). Aborting ...$USAGE";;
+		esac || exit 1
+	done
+	Reimport_Note 1
+}
+
+# "init" creates a new server config, "server" changes an existing one only, both with the same settings
+Cmd_Server()
+{
+	# Settings which are not given remain unset, so that "port=" is rejected as invalid port
+	local kv key port address ipv6
+	for kv in "${KV[@]}"
+	do
+		key=${kv%%=*}
+		case ${key,,} in
+			'port') port=${kv#*=};;
+			'address') address=${kv#*=};;
+			'ipv6')
+				ipv6=${kv#*=}
+				[[ $ipv6 ]] || Error 'Valid values for ipv6 are "on", "off" or an IPv6 address with CIDR netmask.'
+			;;
+			*) Error "Invalid key ($key). Aborting ...$USAGE";;
+		esac
+	done
+
+	if [[ $COMMAND == 'init' ]]
+	then
+		# Do nothing if a server config exists already, e.g. on dietpi-software reinstalls
+		if [[ $ARG1 && ${SRV_PORT[$ARG1]} ]] || { [[ ! $ARG1 ]] && (( ${#SERVERS[@]} )); }
+		then
+			G_DIETPI-NOTIFY 0 "Server config exists already: ${ARG1:-${SERVERS[*]}}"
+			return 0
+		fi
+		Server_Defaults
+		local iface=${ARG1:-$NEW_IFACE} result
+		address=${address-$NEW_ADDR}
+		# Default IPv6 address for the given IPv4 address, unless IPv6 is disabled
+		case ${ipv6-default} in
+			'off') ipv6=;;
+			'on') Default_IPv6 "$address"; ipv6=$ADDR6;;
+			'default') ipv6=; IPv6_Enabled && Default_IPv6 "$address" && ipv6=$ADDR6;;
+			*) :;;
+		esac
+		Server_Create "$iface" "${port-$NEW_PORT}" "$address" "$ipv6"
+		result=$?
+		(( $result != 1 )) && IPv6_Hint "$iface" "$address${ipv6:+, $ipv6}" 1 && G_DIETPI-NOTIFY 2 "$HINT"
+		return "$result"
+	fi
+
+	# Optional interface as first argument
+	[[ $ARG1 ]] && IFACE_OPT=$ARG1
+	Select_Iface
+	(( ${#KV[@]} )) || Error "Missing <key>=<value>. Aborting ...$USAGE"
+	[[ ${port+set} ]] && { Server_Set_Port "$port" || exit 1; }
+	if [[ ${address+set} ]]
+	then
+		Set_Server_IPv4_Address "$address" || exit 1
+		# Peers and client configs have been changed
+		Load_State
+		Load_Peers
+	fi
+	if [[ ${ipv6+set} ]]
+	then
+		Load_Server_Net
+		case $ipv6 in
+			'off') ipv6=;;
+			'on')
+				ipv6=${SRV6_IP:+$SRV6_IP/$SRV6_PREFIX}
+				[[ $ipv6 ]] || { Default_IPv6 "${SRV_ADDR[$IFACE]}" "$IFACE"; ipv6=$ADDR6; }
+			;;
+			*) :;;
+		esac
+		Set_Server_IPv6_Address "$ipv6" || exit 1
+	fi
+	IPv6_Hint "$IFACE" "${SRV_ADDR[$IFACE]}" "${address+1}" && G_DIETPI-NOTIFY 2 "$HINT"
+	return 0
+}
+
+Cmd_Cleanup()
+{
+	Load_Cleanup
+	(( ${#CLEANUP_FILES[@]} )) || { G_DIETPI-NOTIFY 0 'Nothing to clean up.'; return 0; }
+	printf ' - %s\n' "${CLEANUP_FILES[@]}"
+	if Confirm "The following unused client configs and key files, which contain keys stored in configs already, are not needed anymore:\n\n$(printf '%s\n' "${CLEANUP_FILES[@]}")\n\nRemove them?"
+	then
+		G_EXEC rm "${CLEANUP_FILES[@]}"
+	else
+		G_DIETPI-NOTIFY 2 'Nothing has been removed. Use "-y" to remove the files without confirmation.'
+	fi
+}
+
+#/////////////////////////////////////////////////////////////////////////////////////
+# Main
+#/////////////////////////////////////////////////////////////////////////////////////
+Input "$@"
+G_AG_CHECK_INSTALL_PREREQ wireguard-tools qrencode
+
+# Private keys are stored in all configs we create or change. Set this after APT installs to not affect package files.
+umask 0077
+
+if [[ ! $COMMAND ]]
+then
+	MENU=1
+	IFACE=$IFACE_OPT
+	MAIN_LAST=
+	while Menu_Main; do :; done
+	exit 0
+fi
+
+Load_State || [[ $COMMAND == 'init' ]] || Error "No WireGuard server config was found in $WG_DIR. A server config is a file $WG_DIR/<interface>.conf with a \"ListenPort\" setting. Use \"dietpi-wireguard init\" to create one."
+case $COMMAND in
+	'list') Cmd_List;;
+	'add') Cmd_Add;;
+	'remove')
+		Find_Target "$ARG1"
+		Confirm "Remove client $ARG1 of server $IFACE? Its client config is deleted, which cannot be undone." || { G_DIETPI-NOTIFY 2 'Nothing has been removed. Use "-y" to remove the client without confirmation.'; exit 0; }
+		if [[ $TARGET_TYPE == 'peer' ]]
+		then
+			Peer_Remove "$TARGET"
+		else
+			G_EXEC rm "${C_FILE[TARGET]}"
+		fi
+	;;
+	'disable'|'enable')
+		Find_Target "$ARG1"
+		[[ $TARGET_TYPE == 'peer' ]] || Error "Client \"$ARG1\" is not a peer of $IFACE. Use \"dietpi-wireguard add\" to create a new client."
+		state='active'
+		[[ $COMMAND == 'disable' ]] && state='disabled'
+		if [[ ${P_STATE[TARGET]} == "$state" ]]
+		then
+			G_DIETPI-NOTIFY 0 "Client \"$ARG1\" is ${COMMAND}d already"
+		else
+			Peer_Move "$TARGET" "$state"
+		fi
+	;;
+	'qr')
+		Find_Target "$ARG1"
+		Target_Client
+		Show_QR "${C_FILE[CLIENT]}" "${C_NAME[CLIENT]}"
+	;;
+	'rename')
+		Find_Target "$ARG1"
+		Target_Client
+		[[ $ARG2 ]] || Error "Missing new client name. Aborting ...$USAGE"
+		Client_Rename "$CLIENT" "$ARG2"
+	;;
+	'set') Cmd_Set;;
+	'init'|'server') Cmd_Server;;
+	'cleanup') Cmd_Cleanup;;
+	*) :;;
+esac || exit 1
+
+exit 0
+}

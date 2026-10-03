@@ -48,6 +48,7 @@
 	alias dietpi-optimal_mtu='/boot/dietpi/func/dietpi-optimal_mtu'
 	alias dietpi-cloudshell='/boot/dietpi/dietpi-cloudshell'
 	alias dietpi-vpn='/boot/dietpi/dietpi-vpn'
+	alias dietpi-wireguard='/boot/dietpi/dietpi-wireguard'
 	alias dietpi-ddns='/boot/dietpi/dietpi-ddns'
 	alias dietpi-network='/boot/dietpi/dietpi-network'
 	alias dietpi-display='/boot/dietpi/dietpi-display'

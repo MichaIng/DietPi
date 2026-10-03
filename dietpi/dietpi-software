@@ -11815,106 +11815,12 @@ _EOF_
 			# Server choice
 			if [[ $G_WHIP_RETURNED_VALUE == 'Server' ]]
 			then
-				# Public IP/domain and desired WireGuard server port
-				G_WHIP_DEFAULT_ITEM=$(sed -n '/^[[:blank:]]*SOFTWARE_PUBLIC_DOMAIN_NAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-				[[ $G_WHIP_DEFAULT_ITEM ]] || G_WHIP_DEFAULT_ITEM=$(find /etc/letsencrypt/live -mindepth 1 -maxdepth 1 -type d -print -quit 2> /dev/null)
-				[[ $G_WHIP_DEFAULT_ITEM ]] || G_WHIP_DEFAULT_ITEM=$(hostname -f)
-				G_WHIP_NOCANCEL=1
-				G_WHIP_INPUTBOX 'Please enter your servers public IP/domain for WireGuard client access:'
-				local domain=${G_WHIP_RETURNED_VALUE#http*://}
-				GCI_PRESERVE=1 G_CONFIG_INJECT 'SOFTWARE_PUBLIC_DOMAIN_NAME=' "SOFTWARE_PUBLIC_DOMAIN_NAME=$domain" /boot/dietpi.txt
+				# Create the server config with defaults and start it, if no server config exists yet. Server and clients are managed via dietpi-wireguard: https://github.com/MichaIng/DietPi/issues/3100
+				/boot/dietpi/dietpi-wireguard init || exit 1
 
-				G_WHIP_DEFAULT_ITEM=$(sed -n '/^[[:blank:]]*SOFTWARE_WIREGUARD_PORT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-				disable_error=1 G_CHECK_VALIDINT "$G_WHIP_DEFAULT_ITEM" 0 || G_WHIP_DEFAULT_ITEM=51820
-				G_WHIP_NOCANCEL=1 G_WHIP_INPUTBOX_REGEX='^[1-9][0-9]*$' G_WHIP_INPUTBOX_REGEX_TEXT='a valid port number'
-				G_WHIP_INPUTBOX 'Please enter the network port that will be used to access your WireGuard server:\n
-NB: This port needs to be forwarded by your router and/or opened in your firewall settings. Default value is: 51820'
-				local port=$G_WHIP_RETURNED_VALUE
-
-				# Create everything inside WireGuard config dir
-				G_EXEC cd /etc/wireguard
-
-				# For security reasons set umask to 0077
-				G_EXEC umask 0077
-
-				# Create server and client keys
-				[[ -f 'server_private.key' ]] || wg genkey > server_private.key
-				[[ -f 'server_public.key' ]] || wg pubkey < server_private.key > server_public.key
-				[[ -f 'client_private.key' ]] || wg genkey > client_private.key
-				[[ -f 'client_public.key' ]] || wg pubkey < client_private.key > client_public.key
-
-				# Server config
-				[[ -f 'wg0.conf' ]] || cat << _EOF_ > wg0.conf || exit 1
-[Interface]
-Address = 10.9.0.1/24
-PrivateKey = $(<server_private.key)
-ListenPort = $port
-
-PostUp = sysctl net.ipv4.conf.%i.forwarding=1 net.ipv4.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').forwarding=1
-PostUp = sysctl net.ipv6.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').accept_ra=2
-PostUp = sysctl net.ipv6.conf.%i.forwarding=1 net.ipv6.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').forwarding=1
-PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -s 10.9.0.0/24 -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
-PostUp = ip6tables -A FORWARD -i %i -j ACCEPT; ip6tables -t nat -A POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
-PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -s 10.9.0.0/24 -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
-PostDown = ip6tables -D FORWARD -i %i -j ACCEPT; ip6tables -t nat -D POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
-
-# Client 1
-[Peer]
-PublicKey = $(<client_public.key)
-AllowedIPs = 10.9.0.2/32
-
-# Client 2
-#[Peer]
-#PublicKey = XXXX
-#AllowedIPs = 10.9.0.3/32
-_EOF_
-				# Server local network IP
-				local server_ip=$(G_GET_NET ip)
-
-				# Server DNS nameserver
-				local server_dns=$(mawk '/nameserver/{print $2;exit}' /etc/resolv.conf)
-				# - Replace "127.0.0.1"/"localhost" loopback entries by server wg0 IP: https://github.com/MichaIng/DietPi/issues/2482
-				server_dns=${server_dns//127.0.0.1/10.9.0.1}
-				server_dns=${server_dns//localhost/10.9.0.1}
-
-				# Client config
-				[[ -f 'wg0-client.conf' ]] || cat << _EOF_ > wg0-client.conf
-[Interface]
-Address = 10.9.0.2/24
-PrivateKey = $(<client_private.key)
-
-# Comment the following to preserve the clients default DNS server, or force a desired one.
-DNS = $server_dns
-
-# Kill switch: Uncomment the following if the client should stop any network traffic, when disconnected from the VPN server
-# NB: This requires "iptables" to be installed, thus will not work on most mobile phones.
-#PostUp = iptables -I OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT; ip6tables -I OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT
-#PreDown = iptables -D OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT; ip6tables -D OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT
-
-[Peer]
-PublicKey = $(<server_public.key)
-# Tunnel all network traffic through the VPN:
-#	AllowedIPs = 0.0.0.0/0, ::/0
-# Tunnel access to server-side local network only:
-#	AllowedIPs = ${server_ip%.*}.0/24
-# Tunnel access to VPN server only:
-#	AllowedIPs = $server_ip/32
-AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = $domain:$port
-
-# Uncomment the following if you're behind a NAT and want the connection to be kept alive.
-#PersistentKeepalive = 25
-_EOF_
-				unset -v domain port server_ip server_dns
-
-				# Set umask back to default 0022
-				G_EXEC umask 0022
-
-				# Navigate back to DietPi-Software working dir
-				G_EXEC cd "$G_WORKING_DIR"
-
-				# Use wg-quick@.service to start VPN on boot
-				G_EXEC systemctl enable --now wg-quick@wg0
+				G_WHIP_MSG '[ INFO ] WireGuard server setup has been completed\n
+Server and client configs are located in /etc/wireguard, and can be managed with "dietpi-wireguard": create clients and show their configs as QR code to be scanned with the WireGuard app, change the server port and address, and more.\n
+Please remember to forward the WireGuard port (default UDP 51820) from your router to this server, if it is behind NAT.'
 
 			# Client choice
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Client' ]]
