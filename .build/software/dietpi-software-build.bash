@@ -154,7 +154,7 @@ then
 fi
 
 # Install Go for Gogs
-[[ $NAME == 'gogs' ]] && G_CONFIG_INJECT 'AUTO_SETUP_INSTALL_SOFTWARE_ID=' 'AUTO_SETUP_INSTALL_SOFTWARE_ID=188' rootfs/boot/dietpi.txt
+[[ $NAME == 'gogs' ]] && G_CONFIG_INJECT 'AUTO_SETUP_INSTALL_SOFTWARE_ID=' 'AUTO_SETUP_INSTALL_SOFTWARE_ID=go' rootfs/boot/dietpi.txt
 
 # Workaround invalid TERM on login
 # shellcheck disable=SC2016
