@@ -23,7 +23,7 @@ aREGEX[$software_id]='https://github.com/rustdesk/rustdesk-server/releases/downl
 # RustDesk Client
 software_id=13
 aURL[$software_id]='https://api.github.com/repos/rustdesk/rustdesk/releases/latest'
-aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/rustdesk-[^\"\/]*-$arch\.deb(?=\")"'
+aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/rustdesk-[0-9.]*-$arch\.deb(?=\")"'
 aARCH[$software_id]='armv7-sciter aarch64 x86_64'
 aARCH_CHECK[$software_id]='riscv64'
 aREGEX[$software_id]='https://github.com/rustdesk/rustdesk/releases/download/.*/rustdesk-.*-\$arch\.deb'
@@ -253,9 +253,10 @@ aREGEX[$software_id]='https://fill-data.papermc.io/v1/objects/.*/paper-1\.21\..*
 
 # Kubo
 software_id=186
-aCHECK[$software_id]='curl -sSf '\''https://dist.ipfs.tech/kubo/versions'\'' | sed '\''/-rc[0-9]*$/d'\'' | tail -1'
-aREGEX[$software_id]='version='\''[^'\'']*'\''; '
-aREPLACE[$software_id]='version='\''$release'\''; '
+aURL[$software_id]='https://api.github.com/repos/ipfs/kubo/releases/latest'
+aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/kubo_[^\"\/]*_linux-$arch\.tar\.gz(?=\")"'
+aARCH[$software_id]='arm64 amd64 riscv64'
+aREGEX[$software_id]='https://github.com/ipfs/kubo/releases/download/.*/kubo_.*_linux-\$arch\.tar\.gz'
 
 # Go
 software_id=188
