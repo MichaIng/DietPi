@@ -301,14 +301,14 @@ software_id='filebrowser'
 aURL[$software_id]='https://api.github.com/repos/filebrowser/filebrowser/releases/latest'
 aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/linux-$arch-filebrowser\.tar\.gz(?=\")"'
 aARCH[$software_id]='armv6 armv7 arm64 amd64 riscv64'
-aREGEX[$software_id]='https://github.com/filebrowser/filebrowser/releases/download/.*/linux-\$arch-filebrowser.tar.gz'
+aREGEX[$software_id]='https://github.com/filebrowser/filebrowser/releases/download/.*/linux-\$arch-filebrowser\.tar\.gz'
 
 # HomeBox
 software_id='homebox'
 aURL[$software_id]='https://api.github.com/repos/sysadminsmedia/homebox/releases/latest'
 aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/homebox_Linux_$arch\.tar\.gz(?=\")"'
 aARCH[$software_id]='arm64 x86_64 riscv64'
-aREGEX[$software_id]='https://github.com/sysadminsmedia/homebox/releases/download/.*/homebox_Linux_\$arch.tar.gz'
+aREGEX[$software_id]='https://github.com/sysadminsmedia/homebox/releases/download/.*/homebox_Linux_\$arch\.tar\.gz'
 
 # Spotifyd: only full variants for now
 software_id='spotifyd'
@@ -316,7 +316,7 @@ aURL[$software_id]='https://api.github.com/repos/Spotifyd/spotifyd/releases/late
 aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/spotifyd-linux-$arch-full\.tar\.gz(?=\")"'
 aARCH[$software_id]='armv7 aarch64 x86_64'
 aARCH_CHECK[$software_id]='riscv64'
-aREGEX[$software_id]='https://github.com/Spotifyd/spotifyd/releases/download/v[^$].*/spotifyd-linux-\$arch-\$variant.tar.gz'
+aREGEX[$software_id]='https://github.com/Spotifyd/spotifyd/releases/download/v[^$].*/spotifyd-linux-\$arch-\$variant\.tar\.gz'
 aREPLACE[$software_id]='${release/full/\$variant}'
 
 # Rclone
@@ -325,7 +325,7 @@ aURL[$software_id]='https://api.github.com/repos/rclone/rclone/releases/latest'
 aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/rclone-v[^\"\/]*-linux-$arch\.deb(?=\")"'
 aARCH[$software_id]='arm-v6 arm-v7 arm64 amd64'
 aARCH_CHECK[$software_id]='riscv64'
-aREGEX[$software_id]='https://github.com/rclone/rclone/releases/download/.*/rclone-.*-linux-\$arch.deb'
+aREGEX[$software_id]='https://github.com/rclone/rclone/releases/download/.*/rclone-.*-linux-\$arch\.deb'
 
 # Readarr
 software_id='readarr'
@@ -360,7 +360,7 @@ aURL[$software_id]='https://api.github.com/repos/Kareadita/Kavita/releases/lates
 aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/kavita-linux-$arch\.tar\.gz(?=\")"'
 aARCH[$software_id]='arm arm64 x64'
 aARCH_CHECK[$software_id]='riscv64'
-aREGEX[$software_id]='https://github.com/Kareadita/Kavita/releases/download/.*/kavita-linux-\$arch.tar.gz'
+aREGEX[$software_id]='https://github.com/Kareadita/Kavita/releases/download/.*/kavita-linux-\$arch\.tar\.gz'
 
 # soju
 software_id='soju'
@@ -465,13 +465,13 @@ do
 		echo "Replacing \"${aREGEX[$i]}\" with \"$release\" ..."
 
 		# Check whether regex exists in related code block
-		sed -n "/^\t\tif To_Install ${i%-alt?} /,/^\t\tfi$/p" dietpi/dietpi-software | grep -q "${aREGEX[$i]}" || Exit_Error "Regex \"${aREGEX[$i]}\" does not exist"
+		sed -En "/^\t\tif To_Install ${i%-alt?}([[:blank:]]|$)/,/^\t\tfi$/p" dietpi/dietpi-software | grep -q "${aREGEX[$i]}" || Exit_Error "Regex \"${aREGEX[$i]}\" does not exist"
 
 		# Replace URL/version in dietpi-software
-		sed -i "/^\t\tif To_Install ${i%-alt?} /,/^\t\tfi$/s|${aREGEX[$i]}|$release|" dietpi/dietpi-software
+		sed -Ei "/^\t\tif To_Install ${i%-alt?}([[:blank:]]|$)/,/^\t\tfi$/s|${aREGEX[$i]}|$release|" dietpi/dietpi-software
 
 		# Verify that release has been added
-		sed -n "/^\t\tif To_Install ${i%-alt?} /,/^\t\tfi$/p" dietpi/dietpi-software | grep -q "$release" || Exit_Error "Release \"$release\" failed to be added"
+		sed -En "/^\t\tif To_Install ${i%-alt?}([[:blank:]]|$)/,/^\t\tfi$/p" dietpi/dietpi-software | grep -q "$release" || Exit_Error "Release \"$release\" failed to be added"
 	fi
 
 	# Check for possibly newly supported architectures
