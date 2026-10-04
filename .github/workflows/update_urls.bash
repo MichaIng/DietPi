@@ -465,13 +465,13 @@ do
 		echo "Replacing \"${aREGEX[$i]}\" with \"$release\" ..."
 
 		# Check whether regex exists in related code block
-		sed -En "/^\t\tif To_Install ${i%-alt?}([[:blank:]]|$)/,/^\t\tfi$/p" dietpi/dietpi-software | grep -q "${aREGEX[$i]}" || Exit_Error "Regex \"${aREGEX[$i]}\" does not exist"
+		sed -n "/^\t\tif To_Install ${i%-alt?}\([[:blank:]]\|$\)/,/^\t\tfi$/p" dietpi/dietpi-software | grep -q "${aREGEX[$i]}" || Exit_Error "Regex \"${aREGEX[$i]}\" does not exist"
 
 		# Replace URL/version in dietpi-software
-		sed -Ei "/^\t\tif To_Install ${i%-alt?}([[:blank:]]|$)/,/^\t\tfi$/s|${aREGEX[$i]}|$release|" dietpi/dietpi-software
+		sed -i "/^\t\tif To_Install ${i%-alt?}\([[:blank:]]\|$\)/,/^\t\tfi$/s|${aREGEX[$i]}|$release|" dietpi/dietpi-software
 
 		# Verify that release has been added
-		sed -En "/^\t\tif To_Install ${i%-alt?}([[:blank:]]|$)/,/^\t\tfi$/p" dietpi/dietpi-software | grep -q "$release" || Exit_Error "Release \"$release\" failed to be added"
+		sed -n "/^\t\tif To_Install ${i%-alt?}\([[:blank:]]\|$\)/,/^\t\tfi$/p" dietpi/dietpi-software | grep -q "$release" || Exit_Error "Release \"$release\" failed to be added"
 	fi
 
 	# Check for possibly newly supported architectures
