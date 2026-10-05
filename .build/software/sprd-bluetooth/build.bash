@@ -20,7 +20,6 @@ Description=UNISOC/Spreadtrum Bluetooth support
 After=bluetooth.service
 
 [Service]
-Type=oneshot
 ExecStart=/usr/bin/hciattach_opi -n -s 1500000 /dev/ttyBT0 sprd
 
 [Install]
