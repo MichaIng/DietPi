@@ -38,10 +38,12 @@ Available commands:
   cleanup                         Remove unused client configs and key files which are not needed anymore, after confirmation
 Server address:
   address=<IPv4 address>/<prefix> The IPv4 address of the server, e.g. "10.9.0.1/24", whose subnet is used for the clients
+                                  The CIDR netmask needs to be from 16 to 30.
   ipv6=on|off|<address>/<prefix>  The IPv6 (NAT66) address of this server, e.g. "fd10:9::1/64", "on" for the default fd10:<n>::1/64,
                                   whose subnet is used for the clients, with the same host part as their IPv4 address.
                                   Without it, clients cannot use IPv6 through the VPN, so that connections to IPv6 hosts hang until
                                   they fall back to IPv4, or fail. Defaults to "on" for new servers.
+                                  "off" removes all IPv6 addresses and routes, also those which are not part of the NAT66 subnet.
                                   Changing the subnet and toggling IPv6 requires clients to import their config again.
 Available options:
   -i <interface>                  Server interface, required only if more than one server config exists
@@ -418,10 +420,12 @@ Next_Free_IP()
 	NEXT_IP=
 	[[ $SRV4_IP ]] || return 1
 	Load_Used
-	local i
+	# Skip the address whose IPv6 address would be the server IPv6 address
+	local i clash=-1 last=${SRV6_IP##*:}
+	[[ $SRV6_IP ]] && clash=$(( $SRV4_NET + 0x${last:-0} ))
 	for (( i=$SRV4_NET+1; i<$SRV4_BCAST; i++ ))
 	do
-		[[ ${USED4[$i]} ]] && continue
+		[[ ${USED4[$i]} || $i == "$clash" ]] && continue
 		Int2Ip "$i"
 		NEXT_IP=$IP
 		return 0
@@ -438,6 +442,7 @@ Check_Client_IP()
 	Ip2Int "$1"
 	(( $INT > $SRV4_NET && $INT < $SRV4_BCAST )) || { Fail "$1 is not inside the server subnet $SRV4_IP/$SRV4_PREFIX."; return 1; }
 	[[ ! ${USED4[$INT]} ]] || { Fail "$1 is used already."; return 1; }
+	! V6_Clash "$1" || { Fail "$1 cannot be used, as the IPv6 address with the same host part would be the server IPv6 address $SRV6_IP."; return 1; }
 }
 
 # Check client settings, which are not validated by WireGuard until the config is imported on the client device
@@ -489,12 +494,13 @@ Check_Port()
 	return 0
 }
 
+# The CIDR netmask needs to be 16 or more: a larger subnet is routed into the VPN, which can cover other networks, e.g. 8.0.0.0/5 for 10.9.0.1/5, and clients get the same host part for IPv6 in the last group, which has 16 bits.
 Check_Server_IPv4_Address()
 {
-	[[ $1 =~ ^[0-9.]+/[0-9]{1,2}$ ]] && Valid_IPv4 "${1%/*}" && (( ${1#*/} <= 30 )) && return 0
+	[[ $1 =~ ^[0-9.]+/[0-9]{1,2}$ ]] && Valid_IPv4 "${1%/*}" && (( ${1#*/} >= 16 && ${1#*/} <= 30 )) && return 0
 	local ipv6='"IPv6 (NAT66)"'
 	(( $MENU )) || ipv6='"ipv6=<address>"'
-	Fail "\"$1\" is not a valid IPv4 address with CIDR network, e.g. \"10.9.0.1/24\". The IPv6 address is set separately via $ipv6."
+	Fail "\"$1\" is not a valid IPv4 address with a CIDR netmask from 16 to 30, e.g. \"10.9.0.1/24\". The IPv6 address is set separately via $ipv6."
 	return 1
 }
 
@@ -535,17 +541,23 @@ Check_Iface()
 	[[ ! -e /sys/class/net/$1 ]] || { Fail "A network interface $1 exists already."; return 1; }
 }
 
+# Whether a client with IPv4 address $1 would get the server IPv6 address, which happens if the latter has another host part than the server IPv4 address
+V6_Clash()
+{
+	[[ $SRV6_IP && $SRV4_IP ]] && Valid_IPv4 "$1" || return 1
+	local last=${SRV6_IP##*:}
+	Ip2Int "$1"
+	(( $INT - $SRV4_NET == 0x${last:-0} ))
+}
+
 # IPv6 address into $V6 for a client with IPv4 address $1 inside the server subnet: the server IPv6 subnet with the same host part in the last group, if it fits and is not the server IPv6 address
 V6_Map()
 {
 	V6=
-	[[ $SRV6_IP && $SRV4_IP ]] && Valid_IPv4 "$1" || return 1
+	[[ $SRV6_IP && $SRV4_IP ]] && Valid_IPv4 "$1" && ! V6_Clash "$1" || return 1
 	Ip2Int "$1"
 	(( $INT > $SRV4_NET && $INT < $SRV4_BCAST && $INT - $SRV4_NET <= 0xFFFF )) || return 1
 	V6="${SRV6_IP%:*}:$(printf '%x' "$(( $INT - $SRV4_NET ))")"
-	[[ ${V6,,} != "${SRV6_IP,,}" ]] && return 0
-	V6=
-	return 1
 }
 
 # Like V6_Map, if the IPv6 address is not used already
@@ -558,23 +570,87 @@ V6_For()
 	return 1
 }
 
-# Address list $1 without IPv6 entries into $IPS, plus the V6_Map address of its first IPv4 address inside the server subnet with CIDR netmask $2, if $2 is given
-Swap_V6()
+# Full IPv6 address $1 as 32 hex digits into $HEX6
+Hex_IPv6()
 {
-	local a v6=''
-	IPS=
+	local IFS=: head=() tail=() g i
+	read -ra head <<< "${1%%::*}"
+	[[ $1 == *'::'* ]] && read -ra tail <<< "${1#*::}"
+	HEX6=
+	for g in "${head[@]}"; do printf -v g '%04x' "0x$g"; HEX6+=$g; done
+	for (( i=${#head[@]} + ${#tail[@]}; i<8; i++ )); do HEX6+='0000'; done
+	for g in "${tail[@]}"; do printf -v g '%04x' "0x$g"; HEX6+=$g; done
+}
+
+# Whether IPv6 address or network $1, with optional CIDR netmask, is inside the subnet of IPv6 address $2 with CIDR netmask $3
+In_IPv6_Subnet()
+{
+	local ip=${1%/*} len=128 n=$(( $3 / 4 )) r=$(( $3 % 4 )) hex
+	[[ $1 == */* ]] && len=${1##*/}
+	[[ $len =~ ^[0-9]{1,3}$ ]] && (( $len >= $3 )) && Valid_IPv6 "$ip" && Valid_IPv6 "$2" || return 1
+	Hex_IPv6 "$ip"
+	hex=$HEX6
+	Hex_IPv6 "$2"
+	[[ ${hex::n} == "${HEX6::n}" ]] || return 1
+	(( $r )) || return 0
+	(( ((0x${hex:n:1} ^ 0x${HEX6:n:1}) >> (4 - $r)) == 0 ))
+}
+
+# Whether address list entry $1 is inside the NAT66 subnet, before ($OLD6_IP) or after ($SRV6_IP) it is changed
+Is_NAT66()
+{
+	{ [[ $OLD6_IP ]] && In_IPv6_Subnet "$1" "$OLD6_IP" "$OLD6_PREFIX"; } || { [[ $SRV6_IP ]] && In_IPv6_Subnet "$1" "$SRV6_IP" "$SRV6_PREFIX"; }
+}
+
+# The V6_Map address with CIDR netmask $2 into $V6NET, for the first IPv4 address of address list $1 inside the server subnet, if $2 is given
+List_V6()
+{
+	local a
+	V6NET=
+	[[ $2 ]] || return 0
 	for a in ${1//,/ }
 	do
 		[[ $a == *':'* ]] && continue
-		IPS+=${IPS:+, }$a
-		[[ $2 && ! $v6 ]] && V6_Map "${a%/*}" && v6="$V6/$2"
+		V6_Map "${a%/*}" && { V6NET="$V6/$2"; return 0; }
 	done
-	[[ $v6 ]] && IPS+=", $v6"
+}
+
+# Address list $1 with its NAT66 entries replaced in place by $2, or removed if $2 is empty, into $IPS
+# - Other IPv6 entries are kept, e.g. routes to IPv6 networks behind a peer, unless $3 = 1 to remove all IPv6 entries, when IPv6 is turned off. Those are collected in $OTHER6 then.
+Swap_V6()
+{
+	local a new=$2 nat
+	IPS=
+	for a in ${1//,/ }
+	do
+		nat=0
+		[[ $a == *':'* ]] && Is_NAT66 "$a" && nat=1
+		if [[ $a != *':'* ]] || (( ! $nat && ! ${3:-0} ))
+		then
+			IPS+=${IPS:+, }$a
+			continue
+		fi
+		(( $nat )) || OTHER6+=" $a"
+		[[ $new ]] && IPS+=${IPS:+, }$new
+		new=
+	done
+	[[ $new ]] && IPS+=${IPS:+, }$new
 	return 0
 }
 
 # Compare address lists, ignoring spaces and case
 Same_IPs(){ local a=${1// /} b=${2// /}; [[ ${a,,} == "${b,,}" ]]; }
+
+# Whether active peers of $IFACE have IPv6 AllowedIPs, e.g. routes to IPv6 networks behind them, which prevent the server from starting while IPv6 is disabled
+Peers_IPv6()
+{
+	local i
+	for i in "${!P_IPS[@]}"
+	do
+		[[ ${P_STATE[i]} == 'active' && ${P_IPS[i]} == *':'* ]] && return 0
+	done
+	return 1
+}
 
 # IPv6 is disabled by dietpi-network via "disable_ipv6", which new interfaces inherit from "default"
 IPv6_Enabled(){ [[ -f '/proc/sys/net/ipv6/conf/default/disable_ipv6' && $(< /proc/sys/net/ipv6/conf/default/disable_ipv6) == 0 ]]; }
@@ -610,6 +686,10 @@ IPv6_Hint()
 		if IPv6_Enabled
 		then
 			HINT="Server $1 has no IPv6 address, hence clients cannot use IPv6 through the VPN: connections to IPv6 hosts hang until they fall back to IPv4, or fail. Please turn on IPv6 via $on."
+
+		elif [[ $1 == "$IFACE" ]] && Peers_IPv6
+		then
+			HINT="IPv6 is disabled on this system, hence server $1 cannot start with the IPv6 AllowedIPs of its peers. Please enable IPv6 via dietpi-network, or turn off IPv6 via $off."
 
 		elif (( ${3:-0} ))
 		then
@@ -1266,28 +1346,33 @@ Map_IPs()
 }
 
 # Turn on IPv6 (NAT66) for $IFACE with address $1, change its address, or turn it off if $1 is empty
-# - Server, peers and client configs are aligned: all IPv6 entries of the server Address, of the server side peer AllowedIPs and of the client Address are replaced with addresses of the new subnet, with the same host part as the IPv4 address, or removed.
+# - Server, peers and client configs are aligned: the entries inside the NAT66 subnet in the server Address, the server side peer AllowedIPs and the client Address are replaced with addresses of the new subnet, with the same host part as the IPv4 address. Other IPv6 entries are kept, e.g. routes to IPv6 networks behind a peer.
+# - Turning IPv6 off removes all IPv6 entries, as the interface cannot start with them while IPv6 is disabled on this system.
 # - Client AllowedIPs are kept, so that IPv6 traffic of clients does not bypass the VPN.
 Set_Server_IPv6_Address()
 {
-	local new=$1 old tmp tmp2 i c ips set failed=0 changed=0 unaligned=0
+	local new=$1 old tmp tmp2 i c ips set failed=0 changed=0 unaligned=0 all=0 last host
+	[[ $new ]] || all=1
 	Check_Server_IPv6_Address "$new" || return 1
 	Load_Server_Net
 	old=${SRV6_IP:+$SRV6_IP/$SRV6_PREFIX}
-	# V6_Map derives the client addresses from the new server address
+	# Is_NAT66 checks entries against the old and the new subnet, V6_Map derives the client addresses from the new server address
+	OLD6_IP=$SRV6_IP OLD6_PREFIX=$SRV6_PREFIX
 	Parse_Net "$new"
 	SRV6_IP=$NET6_IP SRV6_PREFIX=$NET6_PREFIX
 
 	# Peers and client configs which are not aligned with the new setting, e.g. created before IPv6 was added to the server manually
 	for i in "${!P_IPS[@]}"
 	do
-		Swap_V6 "${P_IPS[i]}" "${new:+128}"
+		List_V6 "${P_IPS[i]}" "${new:+128}"
+		Swap_V6 "${P_IPS[i]}" "$V6NET" "$all"
 		Same_IPs "$IPS" "${P_IPS[i]}" || ((++unaligned))
 	done
 	for c in "${!C_FILE[@]}"
 	do
 		[[ ${C_IF[c]} == "$IFACE" ]] || continue
-		Swap_V6 "${C_ADDR[c]}" "${new:+$SRV6_PREFIX}"
+		List_V6 "${C_ADDR[c]}" "${new:+$SRV6_PREFIX}"
+		Swap_V6 "${C_ADDR[c]}" "$V6NET" "$all"
 		Same_IPs "$IPS" "${C_ADDR[c]}" || ((++unaligned))
 	done
 	Same_IPs "$new" "$old" && (( ! $unaligned )) && return 0
@@ -1296,18 +1381,30 @@ Set_Server_IPv6_Address()
 	then
 		IPv6_Enabled || { Fail 'IPv6 is disabled on this system. Please enable it via dietpi-network first.'; return 1; }
 		[[ $SRV4_IP ]] || { Fail "Server $IFACE has no IPv4 address, which the IPv6 addresses of the clients are derived from."; return 1; }
+		# The client with the host part of the server IPv6 address would get no IPv6 address
+		Load_Used
+		last=${SRV6_IP##*:} host=$(( $SRV4_NET + 0x${last:-0} ))
+		Ip2Int "$SRV4_IP"
+		if (( $host != $INT )) && [[ ${USED4[$host]} ]]
+		then
+			Int2Ip "$host"
+			Fail "$new has the same host part as the client $IP, which would get it as IPv6 address. Please use the host part of the server IPv4 address $SRV4_IP, e.g. ${SRV6_IP%:*}:$(printf '%x' "$(( $INT - $SRV4_NET ))")/$SRV6_PREFIX."
+			return 1
+		fi
 	fi
+	OTHER6=
 
 	# Server config: Address, active peers, and the IPv6 forwarding hook for servers created by older DietPi versions
 	tmp=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") && tmp2=$(mktemp "$G_WORKING_DIR/tmp.XXXXXX") || return 1
-	Swap_V6 "${SRV_ADDR[$IFACE]}"
-	ips=$IPS${new:+, $new}
+	Swap_V6 "${SRV_ADDR[$IFACE]}" "$new" "$all"
+	ips=$IPS
 	Conf_Set "$WG_DIR/$IFACE.conf" 'Interface' '' 'Address' "$ips" > "$tmp" || { rm -f "$tmp" "$tmp2"; return 1; }
 	[[ $new ]] && Add_Forwarding_Hook "$tmp"
 	for i in "${!P_IPS[@]}"
 	do
 		[[ ${P_STATE[i]} == 'active' ]] || continue
-		Swap_V6 "${P_IPS[i]}" "${new:+128}"
+		List_V6 "${P_IPS[i]}" "${new:+128}"
+		Swap_V6 "${P_IPS[i]}" "$V6NET" "$all"
 		Same_IPs "$IPS" "${P_IPS[i]}" && continue
 		Conf_Set "$tmp" 'Peer' "${P_PUB[i]}" 'AllowedIPs' "$IPS" > "$tmp2" && cat "$tmp2" > "$tmp"
 	done
@@ -1326,7 +1423,8 @@ Set_Server_IPv6_Address()
 	for i in "${!P_IPS[@]}"
 	do
 		[[ ${P_STATE[i]} == 'disabled' ]] || continue
-		Swap_V6 "${P_IPS[i]}" "${new:+128}"
+		List_V6 "${P_IPS[i]}" "${new:+128}"
+		Swap_V6 "${P_IPS[i]}" "$V6NET" "$all"
 		Same_IPs "$IPS" "${P_IPS[i]}" || Peer_Set "$i" 'AllowedIPs' "$IPS" || failed=1
 	done
 
@@ -1336,7 +1434,8 @@ Set_Server_IPv6_Address()
 		[[ ${C_IF[c]} == "$IFACE" ]] || continue
 		Parse_Conf "${C_FILE[c]}"
 		set=0
-		Swap_V6 "${CONF_I[address]}" "${new:+$SRV6_PREFIX}"
+		List_V6 "${CONF_I[address]}" "${new:+$SRV6_PREFIX}"
+		Swap_V6 "${CONF_I[address]}" "$V6NET" "$all"
 		if ! Same_IPs "$IPS" "${CONF_I[address]}"
 		then
 			Client_Set "$c" 'Interface' 'Address' "$IPS" || { failed=1; continue; }
@@ -1356,6 +1455,7 @@ Set_Server_IPv6_Address()
 	else
 		(( $failed )) && { Fail "IPv6 has been turned off for server $IFACE, but not all client configs could be updated."; return 2; }
 		G_DIETPI-NOTIFY 0 "IPv6 has been turned off for server $IFACE"
+		[[ $OTHER6 ]] && Info "The following IPv6 addresses and routes, which are not part of the NAT66 subnet, have been removed as well:$OTHER6"
 	fi
 	Reimport_Note "$changed"
 }
@@ -1537,7 +1637,7 @@ Input_Server_IPv6_Address()
 {
 	G_WHIP_DEFAULT_ITEM=$2
 	G_WHIP_INPUTBOX_REGEX='^[0-9A-Fa-f:/]*$' G_WHIP_INPUTBOX_REGEX_TEXT='be an IPv6 address with CIDR netmask, or empty'
-	Input_Checked "$1" "Please enter the VPN IPv6 address of the server $3 with CIDR netmask, e.g. \"fd10:9::1/64\". Leave it empty to turn off IPv6 support for this VPN.
+	Input_Checked "$1" "Please enter the VPN IPv6 address of the server $3 with CIDR netmask, e.g. \"fd10:9::1/64\". Leave it empty to turn off IPv6 support for this VPN, which removes all IPv6 addresses and routes from its configs.
 \nAll peers of this server and respective clients configs are updated automatically, to get an IPv6 address of this subnet, with the same host part as their IPv4 address. Their IPv6 traffic is masqueraded behind this server (NAT66). Without it, clients cannot use IPv6 through the VPN, so that connections to IPv6 hosts hang until they fall back to IPv4, or fail. IPv6 leaks however are prevented in any case.
 \nThe interface is restarted, and client devices need to import their config again, e.g. by scanning the QR code."
 }
@@ -1820,7 +1920,7 @@ Menu_Main()
 		'Server address' ": [${address4:-none}]"
 	)
 	# If IPv6 is disabled, it can only be turned off
-	{ IPv6_Enabled || [[ $address6 ]]; } && G_WHIP_MENU_ARRAY+=('IPv6 (NAT66)' ": [${address6:-off}]")
+	{ IPv6_Enabled || [[ $address6 ]] || Peers_IPv6; } && G_WHIP_MENU_ARRAY+=('IPv6 (NAT66)' ": [${address6:-off}]")
 	G_WHIP_MENU_ARRAY+=(
 		'Edit config' ": Open $WG_DIR/$IFACE.conf in an editor"
 		'' '●─ Clients '
@@ -1863,7 +1963,7 @@ Menu_Main()
 		'Server address') Input_Server_IPv4_Address Set_Server_IPv4_Address "$address4" "$IFACE";;
 		'IPv6 (NAT66)')
 			ADDR6=$address6
-			[[ $ADDR6 ]] || Default_IPv6 "${SRV_ADDR[$IFACE]}" "$IFACE"
+			[[ $ADDR6 ]] || ! IPv6_Enabled || Default_IPv6 "${SRV_ADDR[$IFACE]}" "$IFACE"
 			Input_Server_IPv6_Address Set_Server_IPv6_Address "$ADDR6" "$IFACE"
 		;;
 		'Edit config') Edit_Config;;
@@ -2105,6 +2205,8 @@ Cmd_Server()
 			*) :;;
 		esac
 		Set_Server_IPv6_Address "$ipv6" || exit 1
+		Load_State
+		Load_Peers
 	fi
 	IPv6_Hint "$IFACE" "${SRV_ADDR[$IFACE]}" "${address+1}" && G_DIETPI-NOTIFY 2 "$HINT"
 	return 0
