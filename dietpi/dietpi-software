@@ -14739,8 +14739,39 @@ _EOF_
 				local backuppath=$(sed -n '/^[[:blank:]]*SOFTWARE_URBACKUP_BACKUPPATH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			fi
 			G_AGP urbackup-server
-			G_EXEC rm -Rf /var/log/urbackup.log "${backuppath:-/mnt/dietpi_userdata/urbackup}"
-			unset -v backuppath
+			G_EXEC rm -f /var/log/urbackup.log
+			backuppath=${backuppath:-/mnt/dietpi_userdata/urbackup}
+			# Btrfs snapshots created by UrBackup are read-only subvolumes, which cannot be removed via "rm"
+			local remove_backups=1
+			if [[ -d $backuppath ]] && command -v btrfs > /dev/null && [[ $(stat -fc '%T' "$backuppath") == 'btrfs' ]]
+			then
+				# Stacked mounts, e.g. autofs from "x-systemd.automount", are all listed: The mount point is the same
+				local mountpoint=$(findmnt -Ufno TARGET -T "$backuppath") realbackuppath=$(realpath "$backuppath") subvol subvols
+				# Subvolumes below the mounted one are listed relative to its mount point, others relative to the top-level subvolume: Keep existing subvolumes below the backup path, deepest first
+				mapfile -t subvols < <(btrfs subvolume list "$mountpoint" | sed -n 's/^ID [0-9]* gen [0-9]* top level [0-9]* path //p' | while IFS= read -r subvol
+				do
+					subvol="${mountpoint%/}/$subvol"
+					[[ $subvol == "$realbackuppath/"* && $(stat -c '%i' "$subvol" 2> /dev/null) == 256 ]] && echo "$subvol"
+				done | sort -ru)
+				if [[ ${subvols[0]} ]]
+				then
+					if G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO "[ INFO ] UrBackup Btrfs snapshots found
+\nUrBackup has created ${#subvols[@]} Btrfs snapshots (read-only subvolumes) below $backuppath, which cannot be removed via regular file deletion.
+\nShall they be deleted together with all other UrBackup backups at this location?
+\nIf you choose \"Skip\", the backups are kept and $backuppath is not touched."
+					then
+						for subvol in "${subvols[@]}"
+						do
+							G_EXEC btrfs subvolume delete "$subvol"
+						done
+					else
+						remove_backups=0
+						G_DIETPI-NOTIFY 2 "UrBackup backups at $backuppath have been kept"
+					fi
+				fi
+			fi
+			(( $remove_backups )) && G_EXEC rm -Rf "$backuppath"
+			unset -v backuppath remove_backups mountpoint realbackuppath subvol subvols
 
 			G_EXEC rm -f /etc/apt/sources.list.d/dietpi-urbackup.sources
 			G_EXEC rm -f /etc/apt/keyrings/dietpi-urbackup.asc
