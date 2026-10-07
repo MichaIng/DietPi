@@ -163,7 +163,7 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsup
 # Workaround for failing IPv4 network connectivity check as GitHub Actions runners do not receive external ICMP echo replies
 G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
 
-# ARMv6/7: Workaround for "deprecated CP15 Barrier instruction" on ARMv8 host: https://github.com/MichaIng/DietPi/issues/6306#issuecomment-1515303702
+# ARMv6/7: Workaround for "deprecated CP15 Barrier instruction" on ARMv8 host: https://github.com/llvm/llvm-project/issues/41201
 (( $arch < 3 && $G_HW_ARCH == 3 )) && G_EXEC sysctl -w 'abi.cp15_barrier=2'
 
 # Shutdown on failures before the custom script is executed
