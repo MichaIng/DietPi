@@ -674,30 +674,18 @@ To set the final Linux console resolution, please use dietpi-display, or the Dis
 		G_WHIP_MENU_ARRAY+=('APT' ': Manage APT cache and list storage')
 
 		# Time sync
-		local ntpd_mode_current=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		local ntpd_mode_text=''
-		if (( $ntpd_mode_current == 0 )); then
-
-			ntpd_mode_text='Custom'
-
-		elif (( $ntpd_mode_current == 1 )); then
-
-			ntpd_mode_text='Boot Only'
-
-		elif (( $ntpd_mode_current == 2 )); then
-
-			ntpd_mode_text='Boot + Daily'
-
-		elif (( $ntpd_mode_current == 3 )); then
-
-			ntpd_mode_text='Boot + Hourly'
-
-		elif (( $ntpd_mode_current == 4 )); then
-
-			ntpd_mode_text='Daemon + Drift'
-
-		fi
-		G_WHIP_MENU_ARRAY+=('Time sync mode' ": [$ntpd_mode_text]")
+		local timesync_mode_current=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt) timesync_mode_text
+		case $timesync_mode_current in
+			1) timesync_mode_text='Boot Only';;
+			2) timesync_mode_text='Boot + Daily';;
+			3) timesync_mode_text='Boot + Hourly';;
+			4) timesync_mode_text='Daemon + Drift';;
+			*) timesync_mode_text='Custom';;
+		esac
+		G_WHIP_MENU_ARRAY+=('Time sync mode' ": [$timesync_mode_text]")
+		local timesync_timeout_current=$(sed -n '/^[[:blank:]]*CONFIG_TIMESYNC_TIMEOUT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		[[ $timesync_timeout_current =~ ^[1-9][0-9]*$ ]] || timesync_timeout_current=60
+		G_WHIP_MENU_ARRAY+=('Time sync timeout' ": [$timesync_timeout_current seconds]")
 
 		# RTC clock: Only show if an RTC device node exists
 		if [[ -e '/dev/rtc0' || -e '/dev/rtc' || -e '/dev/misc/rtc' ]]
@@ -842,7 +830,7 @@ Please choose whether your device has an active RTC or requires "fake-hwclock":'
 				'4' ': Daemon + Drift'
 			)
 
-			G_WHIP_DEFAULT_ITEM=$ntpd_mode_current
+			G_WHIP_DEFAULT_ITEM=$timesync_mode_current
 			G_WHIP_MENU 'Here you can adjust the frequency of network time syncs.\n
  - Modes 1-3:\nDietPi will launch systemd-timesyncd as a program, rather than a daemon. Once the time has been updated on your system, timesyncd will exit to reduce resource usage.\n
  - Mode 4:\nsystemd-timesyncd will run as a background daemon/service. Differences in time will be gradually adjusted over time, rather than instantly.\n
@@ -853,6 +841,12 @@ Please choose whether your device has an active RTC or requires "fake-hwclock":'
 			# Sync time now
 			# - Run non-interactively, to avoid its internal error handler allowing to start a concurrent dietpi-config instance
 			G_INTERACTIVE=0 MAX_LOOPS_CHECK=10 /boot/dietpi/func/dietpi-timesync 1
+
+		elif [[ $G_WHIP_RETURNED_VALUE == 'Time sync timeout' ]]; then
+
+			G_WHIP_INPUTBOX_REGEX='^[1-9][0-9]*$' G_WHIP_INPUTBOX_REGEX_TEXT='a positive number'
+			G_WHIP_DEFAULT_ITEM=$timesync_timeout_current
+			G_WHIP_INPUTBOX 'Please enter the time sync timeout in seconds, after which a time sync attempt is aborted in modes 1-3.\n - E.g.: 60' || return 0
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Update RPi EEPROM firmware' ]]; then
 
@@ -1403,6 +1397,7 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Hostname' ]]
 		then
+			G_WHIP_MSG 'The hostname setting has been moved to "Network Options: Misc".\n\nIt will be removed from the "Security Options" in a future release.'
 			G_WHIP_DEFAULT_ITEM=$hostname_current
 			G_WHIP_INPUTBOX 'Please enter a new hostname:' || return 0
 			[[ $hostname_current == "$G_WHIP_RETURNED_VALUE" ]] && return 0
@@ -1893,12 +1888,12 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 
 			/boot/dietpi/func/dietpi-set_hardware soundcard none
 			[[ -d '/etc/systemd/system/alsa-state.service.d' ]] && G_EXEC rm -R /etc/systemd/system/alsa-state.service.d
-			[[ -f '/boot/dietpi/.installed' ]] && G_CONFIG_INJECT 'aSOFTWARE_INSTALL_STATE\[5\]=' 'aSOFTWARE_INSTALL_STATE[5]=0' /boot/dietpi/.installed
+			[[ -f '/boot/dietpi/.installed' ]] && G_CONFIG_INJECT 'aSOFTWARE_INSTALL_STATE\[alsa\]=' 'aSOFTWARE_INSTALL_STATE[alsa]=0' /boot/dietpi/.installed
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Enable' ]]; then
 
 			G_AG_CHECK_INSTALL_PREREQ alsa-utils
-			[[ -f '/boot/dietpi/.installed' ]] && G_CONFIG_INJECT 'aSOFTWARE_INSTALL_STATE\[5\]=' 'aSOFTWARE_INSTALL_STATE[5]=2' /boot/dietpi/.installed
+			[[ -f '/boot/dietpi/.installed' ]] && G_CONFIG_INJECT 'aSOFTWARE_INSTALL_STATE\[alsa\]=' 'aSOFTWARE_INSTALL_STATE[alsa]=2' /boot/dietpi/.installed
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Sound card' ]]; then
 
@@ -2233,6 +2228,9 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 	# TARGETMENUID=16
 	Menu_NetworkMisc()
 	{
+		# Hostname
+		local hostname_current=$(</etc/hostname)
+
 		# APT mirror
 		local apt_mirror_current=$(mawk '$1=="deb"{print $2;exit}' /etc/apt/sources.list)
 		[[ $apt_mirror_current ]] || apt_mirror_current='Unknown, no string from scrape'
@@ -2259,6 +2257,7 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 
 		G_WHIP_MENU_ARRAY=(
 
+			'Hostname' ": [$hostname_current] Change the system hostname"
 			'' '●─ Mirror Options '
 			'APT Mirror' ": [$apt_mirror_current]"
 			'NTP Mirror' ": [$ntp_mirror_current]"
@@ -2277,6 +2276,14 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 		G_WHIP_MENU || { Back_or_Exit 0; return 0; } # Main menu
 
 		case "$G_WHIP_RETURNED_VALUE" in
+
+			'Hostname')
+
+				G_WHIP_DEFAULT_ITEM=$hostname_current
+				G_WHIP_INPUTBOX 'Please enter a new hostname:' || return 0
+				[[ $hostname_current == "$G_WHIP_RETURNED_VALUE" ]] && return 0
+				/boot/dietpi/func/change_hostname "$G_WHIP_RETURNED_VALUE" || read -rp 'Press any key to return to DietPi-Config...'
+			;;
 
 			'Test timeout')
 
@@ -2300,10 +2307,7 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 			'Test IPv6 address') TARGETMENUID=21;;
 			'Test domain name') TARGETMENUID=22;;
 
-			'Network Drives')
-
-				G_WHIP_YESNO 'The ability to mount and control networked drives has moved to:\n - DietPi-Drive_Manager\n\nWould you like to launch the program now?' && /boot/dietpi/dietpi-drive_manager
-			;;
+			'Network Drives') /boot/dietpi/dietpi-drive_manager;;
 
 			'Boot wait for network')
 
