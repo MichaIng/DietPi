@@ -44,12 +44,12 @@ aREGEX[$software_id]='https://github.com/TasmoAdmin/TasmoAdmin/releases/download
 #software_id='nomachine'
 
 # Airsonic-Advanced
-software_id='airsonicadvanced'
+software_id='airsonic'
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/airsonic-advanced/airsonic-advanced/releases'\'' | grep -Po '\''"browser_download_url": *"\K[^"]*\/airsonic\.war(?=")'\'' | head -1'
 aREGEX[$software_id]='https://github.com/airsonic-advanced/airsonic-advanced/releases/download/.*/airsonic.war'
 
 # Lyrion Music Server
-software_id='lyrionmusicserver'
+software_id='lms'
 aURL[$software_id]='https://raw.githubusercontent.com/LMS-Community/lms-server-repository/master/stable.xml'
 aCHECK[$software_id]='echo "$response" | grep -om1 "https://[^\"]*_$arch.deb"'
 aARCH[$software_id]='arm amd64'
@@ -77,7 +77,7 @@ aARCH_CHECK[$software_id]='riscv64'
 aREGEX[$software_id]='https://github.com/MediaBrowser/Emby.Releases/releases/download/.*/emby-server-deb_.*_\$arch.deb'
 
 # ownCloud Infinite Scale
-software_id='owncloudinfinitescale'
+software_id='ocis'
 aURL[$software_id]='https://api.github.com/repos/owncloud/ocis/releases/latest'
 aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/ocis-[^\"\/]*-linux-$arch(?=\")"'
 aARCH[$software_id]='arm arm64 amd64'
@@ -106,7 +106,7 @@ aREGEX[$software_id]='version='\''[^'\'']*'\'
 aREPLACE[$software_id]='version='\''$release'\'
 
 # Single File PHP Gallery
-software_id='singlefilephpgallery'
+software_id='sfpg'
 aCHECK[$software_id]='curl -sSf '\''https://sye.dk/sfpg/?latest'\'
 aREGEX[$software_id]='file='\''[^'\'']*'\'
 aREPLACE[$software_id]='file='\''$release'\'
@@ -404,7 +404,7 @@ aARCH[$software_id]='aarch64 x86_64'
 aREGEX[$software_id]='https://github.com/WebAssembly/binaryen/releases/download/.*/binaryen-.*-$arch-linux.tar.gz'
 
 # Immich Machine Learning (same Immich release)
-software_id='immichmachinelearning'
+software_id='immichml'
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/immich-app/immich/releases/latest'\'' | grep -Po '\''"tag_name": *"\K[^"]+(?=")'\'
 aREGEX[$software_id]='version='\''[^'\'']*'\'
 aREPLACE[$software_id]='version='\''$release'\'

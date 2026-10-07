@@ -114,7 +114,7 @@ Process_Software()
 			'webserver') [[ $SOFTWARE =~ (^| )(apache|lighttpd|nginx)( |$) ]] || Process_Software apache;;
 			opensshclient) aCOMMANDS[$i]='ssh -V';;
 			sambaclient) aCOMMANDS[$i]='smbclient -V';;
-			foldinghome) aSERVICES[$i]='fahclient' aTCP[$i]='7396';;
+			foldingathome) aSERVICES[$i]='fahclient' aTCP[$i]='7396';;
 			mc) aCOMMANDS[$i]='mc -V';;
 			fish) aCOMMANDS[$i]='fish -v';;
 			alsa) aCOMMANDS[$i]='aplay -l';;
@@ -138,27 +138,27 @@ Process_Software()
 			nomachine) aSERVICES[$i]='nxserver' aTCP[$i]='4000';;
 			kodi) [[ $arch == 1 && $DISTRO == 'bookworm' ]] || aCOMMANDS[$i]='kodi -v';; # Bookworm RPi repo "kodi" calls fgconsole and chvt which both fails in non-interactive container: "Couldn't get a file descriptor referring to the console."
 			ympd) aSERVICES[$i]='ympd' aTCP[$i]='1337';;
-			airsonicadvanced) (( $emulation )) || aSERVICES[$i]='airsonic' aTCP[$i]='8080' aDELAY[$i]=60;; # Fails in QEMU-emulated containers, probably due to missing device access
-			phpcomposer) aCOMMANDS[$i]='COMPOSER_ALLOW_SUPERUSER=1 composer -n -V';;
-			lyrionmusicserver) aSERVICES[$i]='lyrionmusicserver' aTCP[$i]='9000';;
+			airsonic) (( $emulation )) || aSERVICES[$i]='airsonic' aTCP[$i]='8080' aDELAY[$i]=60;; # Fails in QEMU-emulated containers, probably due to missing device access
+			composer) aCOMMANDS[$i]='COMPOSER_ALLOW_SUPERUSER=1 composer -n -V';;
+			lms) aSERVICES[$i]='lyrionmusicserver' aTCP[$i]='9000';;
 			squeezelite) aSERVICES[$i]='squeezelite';; # Service listens on random high UDP port
 			shairportsync) aSERVICES[$i]='shairport-sync' aTCP[$i]='5000';; # AirPlay 2 would be TCP port 7000
 			freshrss) aCOMMANDS[$i]='/opt/FreshRSS/cli/user-info.php';;
 			readymedia) aSERVICES[$i]='minidlna' aTCP[$i]='8200';;
 			ampache) :;;
 			emby) aSERVICES[$i]='emby-server' aTCP[$i]='8096';;
-			plexmediaserver) aSERVICES[$i]='plexmediaserver' aTCP[$i]='32400';;
+			plex) aSERVICES[$i]='plexmediaserver' aTCP[$i]='32400';;
 			mumbleserver) aSERVICES[$i]='mumble-server' aTCP[$i]='64738';;
 			transmission) aSERVICES[$i]='transmission-daemon' aTCP[$i]='9091 51413' aUDP[$i]='51413';;
 			deluge) aSERVICES[$i]='deluged deluge-web' aTCP[$i]='8112 58846 6882';;
 			qbittorrent) aSERVICES[$i]='qbittorrent' aTCP[$i]='1340 6881';;
-			owncloudinfinitescale) aSERVICES[$i]='ocis' aTCP[$i]='9200';;
+			ocis) aSERVICES[$i]='ocis' aTCP[$i]='9200';;
 			gogs) aSERVICES[$i]='gogs' aTCP[$i]='3000';;
 			syncthing) aSERVICES[$i]='syncthing' aTCP[$i]='8384';;
 			opentyrian) aCOMMANDS[$i]='/usr/games/opentyrian/opentyrian -h';;
 			cuberite) aSERVICES[$i]='cuberite' aTCP[$i]='1339' aDELAY[$i]=60;;
 			mineos) aSERVICES[$i]='mineos' aTCP[$i]='8443';;
-			phpbb|wordpress|singlefilephpgallery|baikal) :;; # Baïkal
+			phpbb|wordpress|sfpg|baikal) :;; # Baïkal
 			tailscale) aCOMMANDS[$i]='tailscale version';; # aSERVICES[$i]='tailscaled' aUDP[$i]='41641' GitHub Actions runners do not support the TUN module
 			wifihotspot) aCOMMANDS[$i]='iptables -V' aSERVICES[$i]='isc-dhcp-server' aUDP[$i]='67';; # aSERVICES[$i]='hostapd' fails without actual WiFi interface
 			torhotspot) aSERVICES[$i]='tor' aTCP[$i]='9040' aUDP[$i]='53';;
@@ -168,7 +168,7 @@ Process_Software()
 			rpimonitor) aSERVICES[$i]='rpimonitor' aTCP[$i]='8888';;
 			firefox) aCOMMANDS[$i]='firefox-esr -v';;
 			remoteit) aSERVICES[$i]='schannel' aUDP[$i]='5980';; # remoteit@.service service listens on random high UDP port
-			python3rpigpio) :;;
+			rpigpio) :;;
 			wiringpi) aCOMMANDS[$i]='gpio -v | grep '\''gpio version'\';;
 			webiopi) aSERVICES[$i]='webiopi' aTCP[$i]='8002';;
 			i2c) :;;
@@ -265,7 +265,7 @@ Process_Software()
 			gmediarender) aSERVICES[$i]='gmediarender';; # DLNA => UPnP high range of ports
 			nukkit) aSERVICES[$i]='nukkit' aUDP[$i]='19132'; (( $emulation )) && aDELAY[$i]=60;;
 			gitea) aSERVICES[$i]='gitea' aTCP[$i]='3000';;
-			audiophonicspispc) :;; # aSERVICES[i]='pi-spc' Service cannot reasonably start in container as WirinPi's gpio command fails reading /proc/cpuinfo
+			pispc) :;; # aSERVICES[i]='pi-spc' Service cannot reasonably start in container as WirinPi's gpio command fails reading /proc/cpuinfo
 			raspotify) aSERVICES[$i]='raspotify';;
 			nextcloudtalk) aSERVICES[$i]='coturn' aTCP[$i]=3478 aUDP[$i]=3478;;
 			lazylibrarian) aSERVICES[$i]='lazylibrarian' aTCP[$i]=5299; (( $emulation )) && aDELAY[$i]=60;;
@@ -314,7 +314,7 @@ Process_Software()
 			soju) aSERVICES[$i]='soju' aTCP[$i]='6667';;
 			whodb) aSERVICES[$i]='whodb' aTCP[$i]='8091';;
 			immich) aSERVICES[$i]='immich' aTCP[$i]='2283';;
-			immichmachinelearning) aSERVICES[$i]='immich-ml' aTCP[$i]='3003';;
+			immichml) aSERVICES[$i]='immich-ml' aTCP[$i]='3003';;
 			uv) aCOMMANDS[$i]='uv --version';;
 			prometheus) aSERVICES[$i]='prometheus' aTCP[$i]='9090' aCOMMANDS[$i]='curl -sSf '\''http://127.0.0.1:9090/api/v1/query?query=up'\'' | grep '\''"status":"success"'\';;
 			homebox) aSERVICES[$i]='homebox' aTCP[$i]='7745' aCOMMANDS[$i]='curl -sSf '\''http://127.0.0.1:7745/api/v1/status'\'' | grep '\''"health":true'\';;
@@ -328,10 +328,10 @@ for i in $SOFTWARE
 do
 	case $i in
 		homer) Process_Software webserver;;
-		tasmoadmin|singlefilephpgallery|linuxdash|phpsysinfo|rtorrent|aria2) Process_Software php webserver;;
+		tasmoadmin|sfpg|linuxdash|phpsysinfo|rtorrent|aria2) Process_Software php webserver;;
 		freshrss|phpbb|wordpress|baikal|phpmyadmin|allogui|mediawiki) Process_Software mariadb php webserver;;
 		alloguifull) Process_Software squeezelite shairportsync netdata mariadb php sambaserver roonbridge naadaemon mpd ompd avahidaemon allogui gmediarender webserver;;
-		owncloudinfinitescale|nextcloud|nextcloudtalk) Process_Software mariadb php redis webserver;;
+		ocis|nextcloud|nextcloudtalk) Process_Software mariadb php redis webserver;;
 		javajdk|ubooquity|yacy|nukkit|komga|papermc|openhab) Process_Software javajre;;
 		nodered) Process_Software nodejs;;
 		mineos|blynkserver) Process_Software nodejs javajre;;
@@ -342,7 +342,7 @@ do
 		synapse) Process_Software postgresql;;
 		roonextensionmanager|dockercompose|portainer) Process_Software docker;;
 		adsbfeeder) Process_Software git dockercompose docker;;
-		audiophonicspispc) Process_Software wiringpi;;
+		pispc) Process_Software wiringpi;;
 		bazarr) (( $arch == 10 || $arch == 3 )) || Process_Software unrar;;
 		go) Process_Software git;;
 		soju) Process_Software git go;;
@@ -357,7 +357,7 @@ do
 		llmp) Process_Software lighttpd mariadb php;;
 		lxde|mate|xfce|gnustep|lxqt|squeezelite|mopidy|roonbridge|naadaemon|icecast|roonserver|snapcastserver|snapcastclient|spotifyd|navidrome|amiberry|amiberrylite|opentyrian|dxxrebirth|steam|gzdoom|vscodium|chromium|firefox) Process_Software alsa;;
 		kodi|shairportsync|mpd|gmediarender|raspotify) Process_Software alsa avahidaemon;;
-		airsonicadvanced) Process_Software alsa javajre;;
+		airsonic) Process_Software alsa javajre;;
 		ampache) Process_Software alsa mariadb php webserver;;
 		*) :;;
 	esac
