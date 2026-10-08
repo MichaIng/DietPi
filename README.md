@@ -344,3 +344,27 @@ Links to hardware and software manufacturers, sources and build instructions use
 	<img src="https://raw.githubusercontent.com/MichaIng/DietPi-Website/master/images/login-systemhaus-logo.jpg" alt="LOGIN SystemHaus GmbH logo" width="236" height="121" loading="lazy">
 	<br>DietPi's web hosting is powered by <a href="https://login-online.com/" target="_blank" rel="noopener">LOGIN SystemHaus GmbH</a>.
 </p>
+
+## This fork: App Store banner and first-run integration
+
+The banner adds appstore only when it is installed. DietPi GPL licensing and normal OS setup remain unchanged. No upstream PR is sent.
+
+The helper `dietpi/func/install-pi-app-store` is present, but the large `dietpi-software` source is intentionally NOT modified in this repository. To enable the first-run hook on a prepared image or device, review and run the root-level `patch-app-store.py` script:
+
+    python3 patch-app-store.py apply
+
+It requires the known unique custom-script anchor inside DietPi-Automation_Post, makes a timestamped backup and SHA-256 manifest, applies only the six-line hook, validates Bash syntax and preserves target permissions/ownership. Repeating it is a no-op. Unknown layouts or changed files are refused. It does not execute an installer. To revert, use the exact printed backup path:
+
+    python3 patch-app-store.py revert --backup /path/printed/by/apply
+
+Revert refuses when target/backup differ from recorded hashes, rather than overwrite later OS edits. Backups are mode600 and stay beside the target. No concurrency lock; run only while no other OS update is changing the file.
+
+**Fresh installs must include the fork helper and apply the patch before first-run setup.** This fork is not a rebuilt/downloadable image and unmodified upstream images do not auto-install Store. Existing installed Pis do not replay first-run; patching one does NOT install Store immediately. To install it manually after inspecting the helper:
+
+    bash /boot/dietpi/func/install-pi-app-store
+
+That path exists only if the helper has been copied from this fork to the device. No device files have been changed on your behalf. Do not switch a stable OS to dev only for this feature. A DietPi update can replace the patched file.
+
+The helper announces installation, ensures Python3+wget with DietPi package helpers, downloads installer+program from pinned commit `9b06fce93257722c4062e6e60fae1a9433314ac8` of the separate [Pi App Store](https://github.com/Greenisus1/pi-app-store), verifies both SHA-256 values, and runs the inspected installer with --local. This is reviewed Store1.3.0, plain terminal menu default and optional GUI; explicit Store Updates can upgrade later. No moving-main execution at installation, Tk/desktop install, unattended GitHub login or credential upload. Existing appstore commands are left untouched. Failures print warnings and do not stop DietPi first-run; existing custom post-scripts still run afterward.
+
+Tested in isolation: helper success/download failure/checksum mismatch/existing-command skip using mocked package/transport/installer calls. Patch apply/idempotence/revert, unknown-layout refusal, changed-target revert refusal and symlink refusal tested against current fork source; Bash/Python syntax passes. No actual apt or Store install performed in tests. Full first-boot, image building and physical Pi are untested. Banner function output tested with appstore present/absent.
