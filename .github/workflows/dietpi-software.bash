@@ -261,6 +261,7 @@ Process_Software()
 			'snapcastclient') aSERVICES[$i]='snapclient';;
 			'snapcastserver') aSERVICES[$i]='snapserver' aTCP[$i]='1704 1780';;
 			'soju') aSERVICES[$i]='soju' aTCP[$i]='6667';;
+			'solidping') aSERVICES[$i]='solidping' aTCP[$i]='4002' aCOMMANDS[$i]='curl -sSf '\''http://127.0.0.1:4002/api/mgmt/health'\'' | grep '\''"status":"ok"'\';;
 			'sonarr') (( $arch == 1 )) || aSERVICES[$i]='sonarr' aTCP[$i]='8989';; # Skip on ARMv6 failing in container with "If you're reading this, the MonoMod.RuntimeDetour selftest failed."
 			'spotifyd') aSERVICES[$i]='spotifyd' aUDP[$i]='5353';; # + random high TCP port
 			'sqlite') aCOMMANDS[$i]='sqlite3 -version';;
