@@ -450,7 +450,7 @@ do
 	do
 		[[ $arch == 'dummy' ]] && arch=''
 		[[ $arch ]] && echo "Checking for architecture $arch ..."
-		release=$(eval "${aCHECK[$i]}") || { (( $i == 56 )) && continue 2; }
+		release=$(eval "${aCHECK[$i]}") || { [[ $i == 'sfpg' ]] && continue 2; }
 		[[ $release ]] || Exit_Error "No release found${arch:+ for architecture $arch}"
 	done
 	[[ $arch ]] && release=${release/${arch}_/\$\{arch\}_} release=${release/$arch/\$arch}
