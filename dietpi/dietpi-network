@@ -117,6 +117,11 @@ PROXY_ADDRESS=
 PROXY_PORT=
 PROXY_USERNAME=
 PROXY_PASSWORD=
+# IPv4 address without leading zeros (ambiguous octal notation) and CIDR prefix length, shared by CLI and menu input validation
+REGEX_IPV4='((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
+REGEX_CIDR='(3[0-2]|[12][0-9]|[1-9])'
+REGEX_HOTSPOT_KEY='^[[:print:]]{8,63}$'
+REGEX_IFACE='^[[:alnum:]][[:alnum:]_.-]{0,14}$'
 ETH_INTERFACES=()
 WIFI_INTERFACES=()
 
@@ -550,7 +555,7 @@ Copy_Current_To_Static()
 
 Change_StaticIp()
 {
-	G_WHIP_INPUTBOX_REGEX='^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]+)?$'
+	G_WHIP_INPUTBOX_REGEX="^$REGEX_IPV4(/$REGEX_CIDR)?\$"
 	G_WHIP_INPUTBOX_REGEX_TEXT='be a valid IPv4 address with optional CIDR netmask, e.g. "192.168.0.100" or "192.168.0.100/24"'
 	G_WHIP_DEFAULT_ITEM=$CURRENT_IFACE_IP_STATIC
 	G_WHIP_INPUTBOX "Please enter a new static $(Current_Interface_Type_Text) IP address, optionally with CIDR netmask to define a subnet mask other than the default /24 (255.255.255.0), e.g.: 192.168.0.100/24" || return 0
@@ -560,7 +565,7 @@ Change_StaticIp()
 
 Change_StaticGateway()
 {
-	G_WHIP_INPUTBOX_REGEX='^(([0-9]{1,3}\.){3}[0-9]{1,3})?$'
+	G_WHIP_INPUTBOX_REGEX="^($REGEX_IPV4)?\$"
 	G_WHIP_INPUTBOX_REGEX_TEXT='be a valid IPv4 address, e.g. "192.168.0.1", or empty'
 	G_WHIP_DEFAULT_ITEM=${CURRENT_IFACE_GATEWAY_STATIC:-${CURRENT_IFACE_IP_STATIC%.*}.1}
 	G_WHIP_INPUTBOX "Please enter a new static $(Current_Interface_Type_Text) gateway address. You can leave this empty if this interface shall not be used for Internet access." || return 0
@@ -590,7 +595,7 @@ Change_StaticDns()
 	G_WHIP_MENU 'Please select a DNS server, or choose "Custom" for manual entry:' || return 0
 	if [[ $G_WHIP_RETURNED_VALUE == 'Custom' ]]
 	then
-		G_WHIP_INPUTBOX_REGEX='^([0-9]{1,3}\.){3}[0-9]{1,3}( ([0-9]{1,3}\.){3}[0-9]{1,3})?$'
+		G_WHIP_INPUTBOX_REGEX="^$REGEX_IPV4( $REGEX_IPV4)?\$"
 		G_WHIP_INPUTBOX_REGEX_TEXT='be one or two space-separated valid IPv4 address, e.g. "9.9.9.9" or "9.9.9.9 149.112.112.112"'
 		G_WHIP_DEFAULT_ITEM=$CURRENT_IFACE_DNS_STATIC
 		G_WHIP_INPUTBOX "Please enter one or two space-separated DNS server addresses.
@@ -779,6 +784,19 @@ Check_Network_Conflicts()
 	return 0
 }
 
+# Succeeds if the gateway is within the subnet of the given CIDR address
+Gateway_In_Subnet()
+{
+	local ip=${1%/*} bits=24 gateway=$2 a b c d
+	[[ $1 == */* ]] && bits=${1#*/}
+	IFS=. read -r a b c d <<< "$ip"
+	ip=$(( a << 24 | b << 16 | c << 8 | d ))
+	IFS=. read -r a b c d <<< "$gateway"
+	gateway=$(( a << 24 | b << 16 | c << 8 | d ))
+	local mask=$(( (0xFFFFFFFF << (32 - bits)) & 0xFFFFFFFF ))
+	(( (ip & mask) == (gateway & mask) ))
+}
+
 Apply_Current_Interface()
 {
 	[[ $CURRENT_IFACE ]] || return 1
@@ -789,11 +807,16 @@ Apply_Current_Interface()
 		G_DIETPI-NOTIFY 1 'IP address input missing for static mode'
 		return 1
 	fi
+	if [[ $CURRENT_IFACE_MODE == 'static' && $CURRENT_IFACE_GATEWAY_STATIC && ${CURRENT_IFACE_IP_STATIC#*/} != 32 ]] && (( ! $CURRENT_IFACE_HOTSPOT )) && ! Gateway_In_Subnet "$CURRENT_IFACE_IP_STATIC" "$CURRENT_IFACE_GATEWAY_STATIC"
+	then
+		G_DIETPI-NOTIFY 1 "The gateway $CURRENT_IFACE_GATEWAY_STATIC is not within the subnet of $CURRENT_IFACE_IP_STATIC, hence not reachable."
+		return 1
+	fi
 	if [[ $CURRENT_IFACE_TYPE == 'wifi' ]]
 	then
 		if (( $CURRENT_IFACE_HOTSPOT ))
 		then
-			(( ${#HOTSPOT_KEY} > 7 )) || { G_DIETPI-NOTIFY 1 'WiFi hotspot key must have at least 8 characters.'; return 1; }
+			[[ $HOTSPOT_KEY =~ $REGEX_HOTSPOT_KEY ]] || { G_DIETPI-NOTIFY 1 'WiFi hotspot key must be 8 to 63 printable ASCII characters long.'; return 1; }
 			Apply_Hotspot_Settings
 			# Unset static gateway variable explicitly since the config won't get it applied anyway
 			CURRENT_IFACE_GATEWAY_STATIC=
@@ -1147,10 +1170,10 @@ Menu_Interface()
 			'Apply') Apply_Current_Interface 1;;
 			'SSID') G_WHIP_DEFAULT_ITEM=$HOTSPOT_SSID; G_WHIP_INPUTBOX 'Please enter an SSID for your WiFi hotspot:' && HOTSPOT_SSID=$G_WHIP_RETURNED_VALUE;;
 			'Key')
-				G_WHIP_INPUTBOX_REGEX='.{8}'
-				G_WHIP_INPUTBOX_REGEX_TEXT='at least 8 characters long'
+				G_WHIP_INPUTBOX_REGEX=$REGEX_HOTSPOT_KEY
+				G_WHIP_INPUTBOX_REGEX_TEXT='be 8 to 63 printable ASCII characters long'
 				G_WHIP_DEFAULT_ITEM=$HOTSPOT_KEY
-				G_WHIP_INPUTBOX 'Please enter a key/password with a minimum of 8 characters for your WiFi hotspot:' || return 0
+				G_WHIP_INPUTBOX 'Please enter a key/password with 8 to 63 characters for your WiFi hotspot:' || return 0
 				HOTSPOT_KEY=$G_WHIP_RETURNED_VALUE
 			;;
 			'Frequency') HOTSPOT_5G=$(( ! $HOTSPOT_5G )); (( $HOTSPOT_5G && ! $HOTSPOT_WIFI5 && ! $HOTSPOT_WIFI6 )) && HOTSPOT_WIFI4=1;;
@@ -1158,6 +1181,8 @@ Menu_Interface()
 				if (( $HOTSPOT_5G ))
 				then
 					G_WHIP_DEFAULT_ITEM=$HOTSPOT_5G_CHANNEL
+					G_WHIP_INPUTBOX_REGEX='^(3[6-9]|[4-9][0-9]|1[0-6][0-9]|17[0-7])$'
+					G_WHIP_INPUTBOX_REGEX_TEXT='be a valid 5 GHz channel number between 36 and 177'
 					G_WHIP_INPUTBOX 'Please enter a 5 GHz WiFi channel for your hotspot:' && HOTSPOT_5G_CHANNEL=$G_WHIP_RETURNED_VALUE
 				else
 					local channel_mhz=2412
@@ -1213,12 +1238,14 @@ Input()
 				shift
 				APPLY_IFACE=$1
 				[[ $APPLY_IFACE ]] || Error "Missing interface name for 'apply'.$USAGE"
+				[[ $APPLY_IFACE =~ $REGEX_IFACE ]] || Error "Invalid interface name ($APPLY_IFACE)."
 			;;
 			'remove')
 				COMMAND='remove'
 				shift
 				ACTION_VALUE=$1
 				[[ $ACTION_VALUE ]] || Error "Missing interface name for 'remove'.$USAGE"
+				[[ $ACTION_VALUE =~ $REGEX_IFACE ]] || Error "Invalid interface name ($ACTION_VALUE)."
 			;;
 			'--enable') APPLY_ENABLE=1;;
 			'--disable') APPLY_ENABLE=0;;
@@ -1255,9 +1282,26 @@ Input()
 	done
 }
 
+Validate_CLI_Input()
+{
+	[[ $APPLY_IP =~ ^$REGEX_IPV4(/$REGEX_CIDR)?$ || ! $APPLY_IP ]] || Error "Invalid IPv4 address ($APPLY_IP). Use e.g. 192.168.0.100 or 192.168.0.100/24."
+	[[ $APPLY_GATEWAY =~ ^$REGEX_IPV4$ || ! $APPLY_GATEWAY ]] || Error "Invalid IPv4 gateway address ($APPLY_GATEWAY)."
+	[[ $APPLY_DNS =~ ^$REGEX_IPV4(\ $REGEX_IPV4)?$ || ! $APPLY_DNS ]] || Error "Invalid DNS server list ($APPLY_DNS). Use one or two space-separated IPv4 addresses."
+	[[ $APPLY_FREQ == '2.4' || $APPLY_FREQ == '5' || ! $APPLY_FREQ ]] || Error "Invalid WiFi frequency band ($APPLY_FREQ). Use 2.4 or 5."
+	local opt
+	for opt in "$APPLY_WIFI4" "$APPLY_WIFI5" "$APPLY_WIFI6"
+	do
+		[[ $opt == [01] || ! $opt ]] || Error "Invalid WiFi standard switch ($opt). Use 0 or 1."
+	done
+	local LC_ALL=C # count bytes instead of characters, as the SSID limit is 32 bytes
+	[[ ! $APPLY_SSID ]] || { (( ${#APPLY_SSID} < 33 )) && [[ $APPLY_SSID != *[[:cntrl:]]* ]]; } || Error 'Invalid WiFi SSID. It must be 1 to 32 bytes long and must not contain control characters.'
+	[[ $APPLY_KEY =~ $REGEX_HOTSPOT_KEY || ! $APPLY_KEY ]] || Error 'Invalid WiFi key. It must be 8 to 63 printable ASCII characters long.'
+}
+
 Apply_From_CLI()
 {
 	[[ $APPLY_IFACE ]] || Error "Missing interface name for 'apply'.$USAGE"
+	Validate_CLI_Input
 	(( $APPLY_FORCE )) || [[ -d /sys/class/net/$APPLY_IFACE ]] || Error "Network interface '$APPLY_IFACE' was not detected."
 	Load_Interface_State "$APPLY_IFACE"
 	[[ $APPLY_ENABLE ]] && CURRENT_IFACE_ENABLED=$APPLY_ENABLE
@@ -1297,8 +1341,10 @@ Apply_From_CLI()
 	then
 		if (( $HOTSPOT_5G ))
 		then
+			[[ $APPLY_CHANNEL =~ ^(3[6-9]|[4-9][0-9]|1[0-6][0-9]|17[0-7])$ ]] || Error "Invalid 5 GHz WiFi channel ($APPLY_CHANNEL). Use a number between 36 and 177."
 			HOTSPOT_5G_CHANNEL=$APPLY_CHANNEL
 		else
+			[[ $APPLY_CHANNEL =~ ^([1-9]|1[0-3])$ ]] || Error "Invalid 2.4 GHz WiFi channel ($APPLY_CHANNEL). Use a number between 1 and 13."
 			HOTSPOT_CHANNEL=$APPLY_CHANNEL
 		fi
 	fi
