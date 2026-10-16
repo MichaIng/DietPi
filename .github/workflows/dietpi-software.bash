@@ -75,7 +75,15 @@ case $ARCH in
 	*) Error_Exit "Invalid architecture \"$ARCH\" passed";;
 esac
 image="DietPi_Container-$image.img"
-[[ $SOFTWARE =~ ^[0-9\ ]+$ ]] || Error_Exit "Invalid software list \"$SOFTWARE\" passed"
+# Normalise software IDs like DietPi-Software does: Lower case, remove all non-alphanumeric characters
+software=
+for i in $SOFTWARE
+do
+	i=${i//[ïÏ]/i}
+	i=${i,,}
+	software+=" ${i//[^[:alnum:]]/}"
+done
+SOFTWARE=${software# }
 [[ $RPI =~ ^('false'|'true')$ ]] || Error_Exit "Invalid RPi flag \"$RPI\" passed"
 [[ $TEST =~ ^('false'|'true')$ ]] || Error_Exit "Invalid test flag \"$TEST\" passed"
 
@@ -83,18 +91,19 @@ image="DietPi_Container-$image.img"
 emulation=0
 (( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || emulation=1
 
-# Allo GUI (non-full/reinstall ID 160): Add MariaDB for needed database generation
-[[ $SOFTWARE =~ (^| )160( |$) ]] && SOFTWARE=$(sed -E 's/(^| )160( |$)/\188 160\2/g' <<< "$SOFTWARE")
+# Allo GUI (non-full/reinstall): Add MariaDB for needed database generation
+[[ $SOFTWARE =~ (^| )allogui( |$) ]] && SOFTWARE=$(sed -E 's/(^| )allogui( |$)/\1mariadb allogui\2/g' <<< "$SOFTWARE")
 # Removals for QEMU-emulated tests:
 # - PostgreSQL and dependants (Synapse): https://gitlab.com/qemu-project/qemu/-/issues/3068
 # - WireGuard: "Unable to modify/access interface: Protocol not supported"
 # - Docker containers (Roon Extension Manager and Portainer): Docker daemon fails with "iptables: Failed to initialize nft: Protocol not supported" and similar error with iptables-legacy
-[[ $arch == 11 && $emulation == 1 && $SOFTWARE =~ (^| )(86|125|172|185|194)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager, PostgreSQL, WireGuard, Portainer, and Synapse from test installs as they fail in emulated RISC-V containers'; SOFTWARE=$(sed -E 's/(^| )(86|125|172|185|194)( |$)/\1\3/g' <<< "$SOFTWARE"); }
+[[ $arch == 11 && $emulation == 1 && $SOFTWARE =~ (^| )(roonextensionmanager|synapse|wireguard|portainer|postgresql)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager, PostgreSQL, WireGuard, Portainer, and Synapse from test installs as they fail in emulated RISC-V containers'; SOFTWARE=$(sed -E 's/(^| )(roonextensionmanager|synapse|wireguard|portainer|postgresql)( |$)/\1\3/g' <<< "$SOFTWARE"); }
 
 ##########################################
 # Create service and port lists
 ##########################################
-aINSTALL=() aSERVICES=() aTCP=() aUDP=() aCOMMANDS=() aDELAY=() CAPABILITIES='' SYSCALLS='' aOPTIONS=()
+declare -A aINSTALL aSERVICES aTCP aUDP aCOMMANDS aDELAY
+CAPABILITIES='' SYSCALLS='' aOPTIONS=()
 Process_Software()
 {
 	local i
@@ -102,263 +111,246 @@ Process_Software()
 	do
 		# shellcheck disable=SC2016
 		case $i in
-			'webserver') [[ $SOFTWARE =~ (^| )8[345]( |$) ]] || Process_Software 83;;
-			0) aCOMMANDS[i]='ssh -V';;
-			1) aCOMMANDS[i]='smbclient -V';;
-			2) aSERVICES[i]='fahclient' aTCP[i]='7396';;
-			3) aCOMMANDS[i]='mc -V';;
-			4) aCOMMANDS[i]='fish -v';;
-			5) aCOMMANDS[i]='aplay -l';;
-			6) aCOMMANDS[i]='X -version';;
-			7) aCOMMANDS[i]='ffmpeg -version';;
-			8) aCOMMANDS[i]='javac -version';;
-			9) aCOMMANDS[i]='node -v';;
-			10) aCOMMANDS[i]='amiberry-lite -h | grep '\''^\$VER: Amiberry-Lite '\';;
-			11) aCOMMANDS[i]='gzdoom -norun | grep '\''^GZDoom version '\';;
-			12) aSERVICES[i]='rustdesksignal rustdeskrelay' aTCP[i]='21115 21116 21117 21118 21119' aUDP[i]='21116';;
-			13) aCOMMANDS[i]='rustdesk --version';;
-			#16) aSERVICES[i]='microblog-pub' aTCP[i]='8007';; Service enters a CPU-intense internal error loop until it has been configured interactively via "microblog-pub configure", hence it is not enabled and started anymore after install but instead as part of "microblog-pub configure"
-			17) aCOMMANDS[i]='git -v';;
-			23) aCOMMANDS[i]='lxsession -h';;
-			24) aCOMMANDS[i]='mate-session -h';;
-			25) aCOMMANDS[i]='xfce4-session -h';;
-			26) aCOMMANDS[i]='gnustep-tests';;
-			#27) TasmoAdmin
-			28) aSERVICES[i]='vncserver' aTCP[i]='5901';;
-			29) aSERVICES[i]='xrdp' aTCP[i]='3389';;
-			30) aSERVICES[i]='nxserver' aTCP[i]='4000';;
-			31) [[ $arch == 1 && $DISTRO == 'bookworm' ]] || aCOMMANDS[i]='kodi -v';; # Bookworm RPi repo "kodi" calls fgconsole and chvt which both fails in non-interactive container: "Couldn't get a file descriptor referring to the console."
-			32) aSERVICES[i]='ympd' aTCP[i]='1337';;
-			33) (( $emulation )) || aSERVICES[i]='airsonic' aTCP[i]='8080' aDELAY[i]=60;; # Fails in QEMU-emulated containers, probably due to missing device access
-			34) aCOMMANDS[i]='COMPOSER_ALLOW_SUPERUSER=1 composer -n -V';;
-			35) aSERVICES[i]='lyrionmusicserver' aTCP[i]='9000';;
-			36) aSERVICES[i]='squeezelite';; # Service listens on random high UDP port
-			37) aSERVICES[i]='shairport-sync' aTCP[i]='5000';; # AirPlay 2 would be TCP port 7000
-			38) aCOMMANDS[i]='/opt/FreshRSS/cli/user-info.php';;
-			39) aSERVICES[i]='minidlna' aTCP[i]='8200';;
-			#40) Ampache
-			41) aSERVICES[i]='emby-server' aTCP[i]='8096';;
-			42) aSERVICES[i]='plexmediaserver' aTCP[i]='32400';;
-			43) aSERVICES[i]='mumble-server' aTCP[i]='64738';;
-			44) aSERVICES[i]='transmission-daemon' aTCP[i]='9091 51413' aUDP[i]='51413';;
-			45) aSERVICES[i]='deluged deluge-web' aTCP[i]='8112 58846 6882';;
-			46) aSERVICES[i]='qbittorrent' aTCP[i]='1340 6881';;
-			47) aSERVICES[i]='ocis' aTCP[i]='9200';;
-			49) aSERVICES[i]='gogs' aTCP[i]='3000';;
-			50) aSERVICES[i]='syncthing' aTCP[i]='8384';;
-			51) aCOMMANDS[i]='/usr/games/opentyrian/opentyrian -h';;
-			52) aSERVICES[i]='cuberite' aTCP[i]='1339' aDELAY[i]=60;;
-			53) aSERVICES[i]='mineos' aTCP[i]='8443';;
-			#54) phpBB
-			#55) WordPress
-			#56) Single File PHP Gallery
-			#57) Baïkal
-			58) aCOMMANDS[i]='tailscale version';; # aSERVICES[i]='tailscaled' aUDP[i]='41641' GitHub Actions runners do not support the TUN module
-			60) aCOMMANDS[i]='iptables -V' aSERVICES[i]='isc-dhcp-server' aUDP[i]='67';; # aSERVICES[i]='hostapd' fails without actual WiFi interface
-			61) aSERVICES[i]='tor' aTCP[i]='9040' aUDP[i]='53';;
-			62) aCOMMANDS[i]='box86 -v';;
-			#63) LinuxDash
-			#64) phpSysInfo
-			65) aSERVICES[i]='netdata' aTCP[i]='19999';;
-			66) aSERVICES[i]='rpimonitor' aTCP[i]='8888';;
-			67) aCOMMANDS[i]='firefox-esr -v';;
-			68) aSERVICES[i]='schannel' aUDP[i]='5980';; # remoteit@.service service listens on random high UDP port
-			#69) RPi.GPIO
-			70) aCOMMANDS[i]='gpio -v | grep '\''gpio version'\';;
-			71) aSERVICES[i]='webiopi' aTCP[i]='8002';;
-			#72) I2C
-			73) aSERVICES[i]='fail2ban';;
-			74) aSERVICES[i]='influxdb' aTCP[i]='8086 8088';;
-			#75) LASP
-			#76) LAMP
-			77) aSERVICES[i]='grafana-server' aTCP[i]='3001' aDELAY[i]=30;;
-			#78) LESP
-			#79) LEMP
-			80) aSERVICES[i]='ubooquity' aTCP[i]='2038 2039'; (( $emulation )) && aDELAY[i]=60;;
-			#81) LLSP
-			#82) LLMP
-			83) aSERVICES[i]='apache2' aTCP[i]='80';;
-			84) aSERVICES[i]='lighttpd' aTCP[i]='80';;
-			85) aSERVICES[i]='nginx' aTCP[i]='80';;
-			86) aSERVICES[i]='roon-extension-manager' SYSCALLS+=' add_key keyctl bpf';;
-			87) aCOMMANDS[i]='sqlite3 -version';;
-			88) aSERVICES[i]='mariadb' aTCP[i]='3306';;
-			89) case $DISTRO in
-				'bookworm') aSERVICES[i]='php8.2-fpm';;
-				*) aSERVICES[i]='php8.4-fpm';;
-			esac;;
-			#90) phpMyAdmin
-			91) aSERVICES[i]='redis-server' aTCP[i]='6379';;
-			92) aCOMMANDS[i]='certbot --version';;
-			93) aSERVICES[i]='pihole-FTL' aUDP[i]='53';;
-			94) aSERVICES[i]='proftpd' aTCP[i]='21';;
-			95) aSERVICES[i]='vsftpd' aTCP[i]='21';;
-			96) aSERVICES[i]='smbd' aTCP[i]='139 445' aUDP[i]='137 138';;
-			97) aCOMMANDS[i]='openvpn --version';; # aSERVICES[i]='openvpn' aUDP[i]='1194' GitHub Actions runners do not support the TUN module
-			98) aSERVICES[i]='haproxy' aTCP[i]='80 1338';;
-			99) aSERVICES[i]='node_exporter' aTCP[i]='9100';;
-			#100) (( $arch < 3 )) && aCOMMANDS[i]='/usr/bin/pijuice_cli32 -V' || aCOMMANDS[i]='/usr/bin/pijuice_cli64 -V'; aSERVICES[i]='pijuice' aTCP[i]='????';; Service does not start without I2C device, not present in container and CLI command always puts you in interactive console
-			101) aCOMMANDS[i]='logrotate -v /etc/logrotate.conf';;
-			102) aSERVICES[i]='rsyslog';;
-			103) aSERVICES[i]='dietpi-ramlog' aCOMMANDS[i]='/boot/dietpi/func/dietpi-ramlog 1 && /boot/dietpi/func/dietpi-ramlog 0 && findmnt -t tmpfs /var/log';;
-			104) aSERVICES[i]='dropbear' aTCP[i]='22';;
-			105) aSERVICES[i]='ssh' aTCP[i]='22';;
-			106) aSERVICES[i]='lidarr' aTCP[i]='8686';;
-			107) aSERVICES[i]='rtorrent' aTCP[i]='49164' aUDP[i]='6881';;
-			108) (( $arch == 1 )) && aCOMMANDS[i]='/mnt/dietpi_userdata/amiberry/amiberry -h | grep '\''^\$VER: Amiberry '\' || aCOMMANDS[i]='amiberry -h | grep '\''^\$VER: Amiberry '\';;
-			109) aSERVICES[i]='nfs-kernel-server' aTCP[i]='2049';;
-			110) aCOMMANDS[i]='mount.nfs -V';;
-			111) aSERVICES[i]='urbackupsrv' aTCP[i]='55414';;
-			112) aCOMMANDS[i]='/mnt/dietpi_userdata/dxx-rebirth/d1x-rebirth_rpigl -h';;
-			113) aCOMMANDS[i]='chromium --version';;
-			114) aCOMMANDS[i]='sudo -u www-data php /var/www/nextcloud/occ status';;
-			115) aSERVICES[i]='webmin' aTCP[i]='10000';;
-			116) aSERVICES[i]='medusa' aTCP[i]='8081'; (( $emulation )) && aDELAY[i]=30;;
-			#117) :;; # ToDo: Implement automated install via /boot/unattended_pivpn.conf
-			118) aSERVICES[i]='mopidy' aTCP[i]='6680';;
-			119) aCOMMANDS[i]='cava -v';;
-			#120) RealVNC
-			121) aSERVICES[i]='roonbridge' aUDP[i]='9003';;
-			122) aSERVICES[i]='node-red' aTCP[i]='1880'; (( $emulation )) && aDELAY[i]=30;;
-			123) aSERVICES[i]='mosquitto' aTCP[i]='1883';;
-			124) aSERVICES[i]='networkaudiod' aTCP[i]='43210' aUDP[i]='43210';;
-			125) aSERVICES[i]='synapse' aTCP[i]='8008';;
-			126) aSERVICES[i]='adguardhome' aUDP[i]='53' aTCP[i]='8083'; [[ ${aSERVICES[182]} ]] && aUDP[182]='5335' aTCP[182]='5335';; # Unbound uses port 5335 if AdGuard Home is installed
-			127) aSERVICES[i]='birdnet' aTCP[i]='8127';;
-			128) aSERVICES[i]='mpd' aTCP[i]='6600';;
-			#129) O!MPD
-			130) aCOMMANDS[i]='python3 -V';;
-			131) aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $emulation )) && aDELAY[i]=120;;
-			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
-			133) aSERVICES[i]='yacy' aTCP[i]='8090' aDELAY[i]=30; (( $emulation )) && aDELAY[i]=120;;
-			134) aCOMMANDS[i]='docker compose version';;
-			135) aSERVICES[i]='icecast2' aTCP[i]='8000' aCOMMANDS[i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start on GitHub runner as it requires a hardware capture device, and those runners do not provide the dummy audio kernel module
-			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
-			137) aCOMMANDS[i]='/opt/mjpg-streamer/mjpg_streamer -v';; # aSERVICES[i]='mjpg-streamer' aTCP[i]='8082' Service does not start without an actual video device
-			138) aSERVICES[i]='virtualhere' aTCP[i]='7575';;
-			139) aSERVICES[i]='sabnzbd' aTCP[i]='8080'; (( $arch == 10 )) || aDELAY[i]=30;; # ToDo: Solve conflict with Airsonic
-			140) aSERVICES[i]='domoticz' aTCP[i]='8424';;
-			141) aSERVICES[i]='adsb-setup' aTCP[i]='1099' SYSCALLS+=' add_key keyctl bpf'; (( $emulation )) || aSERVICES[i]+=' adsb-docker';; # Container cannot start in QEMU-emulated container. Else, depending on container startup race condition, the Dozzle port can be 9999 (default) or 1094 (changed by internal setup step). I remains 1094 on subsequent restarts, and other ports join depending on manual init setup selections.
+			'webserver') [[ $SOFTWARE =~ (^| )(apache|lighttpd|nginx)( |$) ]] || Process_Software apache;;
+			'adguardhome') aSERVICES[$i]='adguardhome' aUDP[$i]='53' aTCP[$i]='8083'; [[ ${aSERVICES[unbound]} ]] && aUDP[unbound]='5335' aTCP[unbound]='5335';; # Unbound uses port 5335 if AdGuard Home is installed
+			'adsbfeeder') aSERVICES[$i]='adsb-setup' aTCP[$i]='1099' SYSCALLS+=' add_key keyctl bpf'; (( $emulation )) || aSERVICES[$i]+=' adsb-docker';; # Container cannot start in QEMU-emulated container. Else, depending on container startup race condition, the Dozzle port can be 9999 (default) or 1094 (changed by internal setup step). I remains 1094 on subsequent restarts, and other ports join depending on manual init setup selections.
+			'airsonic') (( $emulation )) || aSERVICES[$i]='airsonic' aTCP[$i]='8080' aDELAY[$i]=60;; # Fails in QEMU-emulated containers, probably due to missing device access
+			'alsa') aCOMMANDS[$i]='aplay -l';;
+			'amiberry') (( $arch == 1 )) && aCOMMANDS[$i]='/mnt/dietpi_userdata/amiberry/amiberry -h | grep '\''^\$VER: Amiberry '\' || aCOMMANDS[$i]='amiberry -h | grep '\''^\$VER: Amiberry '\';;
+			'amiberrylite') aCOMMANDS[$i]='amiberry-lite -h | grep '\''^\$VER: Amiberry-Lite '\';;
+			'apache') aSERVICES[$i]='apache2' aTCP[$i]='80';;
+			'aria2') aSERVICES[$i]='aria2' aTCP[$i]='6800';; # aTCP[$i]+=' 6881-6999';; # Listens on random port
+			'avahidaemon') aSERVICES[$i]='avahi-daemon' aUDP[$i]='5353';;
+			'bazarr') aSERVICES[$i]='bazarr' aTCP[$i]='6767'; (( $emulation )) && aDELAY[$i]=120 || aDELAY[$i]=30;;
+			'beets') aCOMMANDS[$i]='beet version';;
+			'birdnetgo') aSERVICES[$i]='birdnet' aTCP[$i]='8127';;
+			'blynkserver') aSERVICES[$i]='blynkserver' aTCP[$i]='9443'; (( $emulation )) && aDELAY[$i]=120;;
+			'box64') aCOMMANDS[$i]='box64 -v';;
+			'box86') aCOMMANDS[$i]='box86 -v';;
+			'cava') aCOMMANDS[$i]='cava -v';;
+			'certbot') aCOMMANDS[$i]='certbot --version';;
+			'chromium') aCOMMANDS[$i]='chromium --version';;
+			'composer') aCOMMANDS[$i]='COMPOSER_ALLOW_SUPERUSER=1 composer -n -V';;
+			'cuberite') aSERVICES[$i]='cuberite' aTCP[$i]='1339' aDELAY[$i]=60;;
+			'cups') aSERVICES[$i]='cups' aTCP[$i]='631';;
+			'deluge') aSERVICES[$i]='deluged deluge-web' aTCP[$i]='8112 58846 6882';;
+			'dietpidashboard') aSERVICES[$i]='dietpi-dashboard-frontend dietpi-dashboard-backend' aTCP[$i]='5252 5253';;
+			'dietpiramlog') aSERVICES[$i]='dietpi-ramlog' aCOMMANDS[$i]='/boot/dietpi/func/dietpi-ramlog 1 && /boot/dietpi/func/dietpi-ramlog 0 && findmnt -t tmpfs /var/log';;
+			'docker') aCOMMANDS[$i]='docker -v' aSERVICES[$i]='containerd' CAPABILITIES+=',CAP_NET_ADMIN'; (( $emulation )) || aSERVICES[$i]+=' docker';; # QEMU: Docker daemon fails with "iptables: Failed to initialize nft: Protocol not supported" and similar error with iptables-legacy
+			'dockercompose') aCOMMANDS[$i]='docker compose version';;
+			'domoticz') aSERVICES[$i]='domoticz' aTCP[$i]='8424';;
+			'dropbear') aSERVICES[$i]='dropbear' aTCP[$i]='22';;
+			'dxxrebirth') aCOMMANDS[$i]='/mnt/dietpi_userdata/dxx-rebirth/d1x-rebirth_rpigl -h';;
+			'emby') aSERVICES[$i]='emby-server' aTCP[$i]='8096';;
+			'fail2ban') aSERVICES[$i]='fail2ban';;
+			'ffmpeg') aCOMMANDS[$i]='ffmpeg -version';;
+			'filebrowser') aSERVICES[$i]='filebrowser' aTCP[$i]='8084';;
+			'firefox') aCOMMANDS[$i]='firefox-esr -v';;
+			'fish') aCOMMANDS[$i]='fish -v';;
+			'foldingathome') aSERVICES[$i]='fahclient' aTCP[$i]='7396';;
+			'forgejo') aSERVICES[$i]='forgejo' aTCP[$i]='3000';;
+			'freshrss') aCOMMANDS[$i]='/opt/FreshRSS/cli/user-info.php';;
+			'frp') aSERVICES[$i]='frps frpc' aTCP[$i]='7000 7400 7500';;
+			'fuguhub') aSERVICES[$i]='bdd' aTCP[$i]='80 443';;
+			'gimp') aCOMMANDS[$i]='gimp -v';;
+			'git') aCOMMANDS[$i]='git -v';;
+			'gitea') aSERVICES[$i]='gitea' aTCP[$i]='3000';;
+			'gmediarender') aSERVICES[$i]='gmediarender';; # DLNA => UPnP high range of ports
+			'gnustep') aCOMMANDS[$i]='gnustep-tests';;
+			'go') aCOMMANDS[$i]='go version';;
+			'gogs') aSERVICES[$i]='gogs' aTCP[$i]='3000';;
+			'grafana') aSERVICES[$i]='grafana-server' aTCP[$i]='3001' aDELAY[$i]=30;;
+			'gzdoom') aCOMMANDS[$i]='gzdoom -norun | grep '\''^GZDoom version '\';;
+			'haproxy') aSERVICES[$i]='haproxy' aTCP[$i]='80 1338';;
+			'homeassistant') aSERVICES[$i]='home-assistant' aTCP[$i]='8123'; (( $emulation )) && aDELAY[$i]=900 || aDELAY[$i]=60;;
+			'homebox') aSERVICES[$i]='homebox' aTCP[$i]='7745' aCOMMANDS[$i]='curl -sSf '\''http://127.0.0.1:7745/api/v1/status'\'' | grep '\''"health":true'\';;
+			'homebridge') aCOMMANDS[$i]='hb-service status' aSERVICES[$i]='homebridge' aTCP[$i]='8581';;
+			'htpcmanager') aSERVICES[$i]='htpc-manager' aTCP[$i]='8085'; (( $emulation )) && aDELAY[$i]=30;;
+			'icecast') aSERVICES[$i]='icecast2' aTCP[$i]='8000' aCOMMANDS[$i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start on GitHub runner as it requires a hardware capture device, and those runners do not provide the dummy audio kernel module
+			'immich') aSERVICES[$i]='immich' aTCP[$i]='2283';;
+			'immichml') aSERVICES[$i]='immich-ml' aTCP[$i]='3003';;
+			'influxdb') aSERVICES[$i]='influxdb' aTCP[$i]='8086 8088';;
+			'jackett') aSERVICES[$i]='jackett' aTCP[$i]='9117';;
+			'javajdk') aCOMMANDS[$i]='javac -version';;
+			'javajre') aCOMMANDS[$i]='java -version';;
+			'jellyfin') aSERVICES[$i]='jellyfin' aTCP[$i]='8097';;
+			'k3s') aCOMMANDS[$i]='k3s -v' aSERVICES[$i]='k3s' aOPTIONS+=('--bind=/dev/kmsg') CAPABILITIES+=',CAP_NET_ADMIN,CAP_SYSLOG' SYSCALLS+=' add_key keyctl bpf';; # /dev/kmsg mount + CAP_SYSLOG: "Error: failed to run Kubelet: failed to create kubelet: open /dev/kmsg: no such file or directory" resp. "...: operation not permitted"
+			'kavita') aSERVICES[$i]='kavita' aTCP[$i]='2036' aDELAY[$i]=30;;
+			'kodi') [[ $arch == 1 && $DISTRO == 'bookworm' ]] || aCOMMANDS[$i]='kodi -v';; # Bookworm RPi repo "kodi" calls fgconsole and chvt which both fails in non-interactive container: "Couldn't get a file descriptor referring to the console."
+			'koel') aSERVICES[$i]='koel' aTCP[$i]='8003'; (( $emulation )) && aDELAY[$i]=30;;
+			'komga') aSERVICES[$i]='komga' aTCP[$i]='2037' aDELAY[$i]=30; (( $emulation )) && aDELAY[$i]=420;;
+			'kubo') aSERVICES[$i]='ipfs' aTCP[$i]='5003 8087';;
+			'lazylibrarian') aSERVICES[$i]='lazylibrarian' aTCP[$i]=5299; (( $emulation )) && aDELAY[$i]=60;;
+			'lidarr') aSERVICES[$i]='lidarr' aTCP[$i]='8686';;
+			'lighttpd') aSERVICES[$i]='lighttpd' aTCP[$i]='80';;
+			'lms') aSERVICES[$i]='lyrionmusicserver' aTCP[$i]='9000';;
+			'logrotate') aCOMMANDS[$i]='logrotate -v /etc/logrotate.conf';;
+			'lxde') aCOMMANDS[$i]='lxsession -h';;
+			'mariadb') aSERVICES[$i]='mariadb' aTCP[$i]='3306';;
+			'mate') aCOMMANDS[$i]='mate-session -h';;
+			'mc') aCOMMANDS[$i]='mc -V';;
+			'medusa') aSERVICES[$i]='medusa' aTCP[$i]='8081'; (( $emulation )) && aDELAY[$i]=30;;
 			# MicroK8s: /run/udev required for snapd update to succeed on first attempt doing a udev trigger; ~@mount + loop devices for snapd snaps=squashfs mounts; /dev/kmsg mount + CAP_SYSLOG: "Error: failed to run Kubelet: failed to create kubelet: open /dev/kmsg: no such file or directory"
-			142) aCOMMANDS[i]='/snap/bin/microk8s status' aSERVICES[i]='snapd snap.microk8s.daemon-containerd' aDELAY[i]=30 CAPABILITIES+=',CAP_NET_ADMIN,CAP_MAC_ADMIN,CAP_SYSLOG' SYSCALLS+=' add_key keyctl bpf ~@mount' aOPTIONS+=('--bind-ro=/run/udev' '--bind=/dev/loop-control' '--bind=/dev/loop'{1,2,3,4,5,6,7} '--bind=/dev/kmsg');;
-			143) aSERVICES[i]='koel' aTCP[i]='8003'; (( $emulation )) && aDELAY[i]=30;;
-			144) (( $arch == 1 )) || aSERVICES[i]='sonarr' aTCP[i]='8989';; # Skip on ARMv6 failing in container with "If you're reading this, the MonoMod.RuntimeDetour selftest failed."
-			145) aSERVICES[i]='radarr' aTCP[i]='7878';;
-			146) aSERVICES[i]='tautulli' aTCP[i]='8181'; (( $emulation )) && aDELAY[i]=60;;
-			147) aSERVICES[i]='jackett' aTCP[i]='9117';;
-			148) aSERVICES[i]='mympd' aTCP[i]='1333';;
-			149) aSERVICES[i]='nzbget' aTCP[i]='6789';;
-			150) aCOMMANDS[i]='mono -V';;
-			151) aSERVICES[i]='prowlarr' aTCP[i]='9696';;
-			152) aSERVICES[i]='avahi-daemon' aUDP[i]='5353';;
-			153) aSERVICES[i]='octoprint' aTCP[i]='5001'; (( $emulation )) && aDELAY[i]=60;;
-			154) aSERVICES[i]='roonserver';; # Listens on a variety of different port ranges
-			155) aSERVICES[i]='htpc-manager' aTCP[i]='8085'; (( $emulation )) && aDELAY[i]=30;;
-			#156) Steam
-			157) aSERVICES[i]='home-assistant' aTCP[i]='8123'; (( $emulation )) && aDELAY[i]=900 || aDELAY[i]=60;;
-			158) aSERVICES[i]='minio' aTCP[i]='9001 9004' aCOMMANDS[i]='bash -ic '\''mc mb local/test'\';;
-			#159) Allo GUI full
-			#160) Allo GUI without dependencies
-			161) aSERVICES[i]='bdd' aTCP[i]='80 443';;
-			162) aCOMMANDS[i]='docker -v' aSERVICES[i]='containerd' CAPABILITIES+=',CAP_NET_ADMIN'; (( $emulation )) || aSERVICES[i]+=' docker';; # QEMU: Docker daemon fails with "iptables: Failed to initialize nft: Protocol not supported" and similar error with iptables-legacy
-			163) aSERVICES[i]='gmediarender';; # DLNA => UPnP high range of ports
-			164) aSERVICES[i]='nukkit' aUDP[i]='19132'; (( $emulation )) && aDELAY[i]=60;;
-			165) aSERVICES[i]='gitea' aTCP[i]='3000';;
-			#166) aSERVICES[i]='pi-spc';; Service cannot reasonably start in container as WirinPi's gpio command fails reading /proc/cpuinfo
-			167) aSERVICES[i]='raspotify';;
-			168) aSERVICES[i]='coturn' aTCP[i]=3478 aUDP[i]=3478;;
-			169) aSERVICES[i]='lazylibrarian' aTCP[i]=5299; (( $emulation )) && aDELAY[i]=60;;
-			170) aCOMMANDS[i]='unrar -V';;
-			171) aSERVICES[i]='frps frpc' aTCP[i]='7000 7400 7500';;
-			172) aCOMMANDS[i]='wg' aSERVICES[i]='wg-quick@wg0' aUDP[i]='51820' CAPABILITIES+=',CAP_NET_ADMIN';;
-			#173) LXQt: all executables strictly require a Qt session, no help or version output possible
-			174) aCOMMANDS[i]='gimp -v';;
-			175) aCOMMANDS[i]='xfce4-power-manager -V';;
-			176) aSERVICES[i]='uptime-kuma' aTCP[i]='3002';;
-			177) aSERVICES[i]='forgejo' aTCP[i]='3000';;
-			178) aSERVICES[i]='jellyfin' aTCP[i]='8097';;
-			179) aSERVICES[i]='komga' aTCP[i]='2037' aDELAY[i]=30; (( $emulation )) && aDELAY[i]=420;;
-			180) aSERVICES[i]='bazarr' aTCP[i]='6767'; (( $emulation )) && aDELAY[i]=120 || aDELAY[i]=30;;
-			181) aSERVICES[i]='papermc' aTCP[i]='25565 25575' aDELAY[i]=60; (( $emulation )) && aDELAY[i]=900;;
-			182) aSERVICES[i]='unbound' aUDP[i]='53' aTCP[i]='53'; [[ ${aSERVICES[126]} ]] && aUDP[i]='5335' aTCP[i]='5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed
-			183) aSERVICES[i]='vaultwarden' aTCP[i]='8001';;
-			184) aSERVICES[i]='tor' aTCP[i]='80 443 9051';;
-			185) aTCP[i]='9002 9442' SYSCALLS+=' add_key keyctl bpf';;
-			186) aSERVICES[i]='ipfs' aTCP[i]='5003 8087';;
-			187) aSERVICES[i]='cups' aTCP[i]='631';;
-			188) aCOMMANDS[i]='go version';;
-			189) aCOMMANDS[i]='sudo -u dietpi codium -v';;
-			190) aCOMMANDS[i]='beet version';;
-			191) aSERVICES[i]='snapserver' aTCP[i]='1704 1780';;
-			192) aSERVICES[i]='snapclient';;
-			193) aCOMMANDS[i]='k3s -v' aSERVICES[i]='k3s' aOPTIONS+=('--bind=/dev/kmsg') CAPABILITIES+=',CAP_NET_ADMIN,CAP_SYSLOG' SYSCALLS+=' add_key keyctl bpf';; # /dev/kmsg mount + CAP_SYSLOG: "Error: failed to run Kubelet: failed to create kubelet: open /dev/kmsg: no such file or directory" resp. "...: operation not permitted"
-			194) aSERVICES[i]='postgresql';;
-			195) aCOMMANDS[i]='yt-dlp --version';;
-			196) aCOMMANDS[i]='java -version';;
-			197) aCOMMANDS[i]='box64 -v';;
-			198) aSERVICES[i]='filebrowser' aTCP[i]='8084';;
-			199) aSERVICES[i]='spotifyd' aUDP[i]='5353';; # + random high TCP port
-			200) aSERVICES[i]='dietpi-dashboard-frontend dietpi-dashboard-backend' aTCP[i]='5252 5253';;
-			201) aSERVICES[i]='zerotier-one' aTCP[i]='9993';;
-			202) aCOMMANDS[i]='rclone version';;
-			203) aSERVICES[i]='readarr' aTCP[i]='8787';;
-			204) aSERVICES[i]='navidrome' aTCP[i]='4533';;
-			#205) Homer
-			206) aSERVICES[i]='openhab' aTCP[i]='8444'; (( $emulation )) && aDELAY[i]=600;;
-			#207) Moonlight (CLI), "moonlight" command
-			#208) Moonlight (GUI), "moonlight-qt" command
-			209) aCOMMANDS[i]='restic version';;
-			#210) MediaWiki
-			211) aCOMMANDS[i]='hb-service status' aSERVICES[i]='homebridge' aTCP[i]='8581';;
-			212) aSERVICES[i]='kavita' aTCP[i]='2036' aDELAY[i]=30;;
-			213) aSERVICES[i]='soju' aTCP[i]='6667';;
-			214) aSERVICES[i]='whodb' aTCP[i]='8091';;
-			215) aSERVICES[i]='immich' aTCP[i]='2283';;
-			216) aSERVICES[i]='immich-ml' aTCP[i]='3003';;
-			217) aCOMMANDS[i]='uv --version';;
-			218) aSERVICES[i]='prometheus' aTCP[i]='9090' aCOMMANDS[i]='curl -sSf '\''http://127.0.0.1:9090/api/v1/query?query=up'\'' | grep '\''"status":"success"'\';;
-			219) aSERVICES[i]='homebox' aTCP[i]='7745' aCOMMANDS[i]='curl -sSf '\''http://127.0.0.1:7745/api/v1/status'\'' | grep '\''"health":true'\';;
-			220) aSERVICES[i]='scrypted' aTCP[i]='10443 11080 10081';; # ports: https (secure), http (insecure), debug
-			*) :;;
+			'microk8s') aCOMMANDS[$i]='/snap/bin/microk8s status' aSERVICES[$i]='snapd snap.microk8s.daemon-containerd' aDELAY[$i]=30 CAPABILITIES+=',CAP_NET_ADMIN,CAP_MAC_ADMIN,CAP_SYSLOG' SYSCALLS+=' add_key keyctl bpf ~@mount' aOPTIONS+=('--bind-ro=/run/udev' '--bind=/dev/loop-control' '--bind=/dev/loop'{1,2,3,4,5,6,7} '--bind=/dev/kmsg');;
+			'mineos') aSERVICES[$i]='mineos' aTCP[$i]='8443';;
+			'minio') aSERVICES[$i]='minio' aTCP[$i]='9001 9004' aCOMMANDS[$i]='bash -ic '\''mc mb local/test'\';;
+			'mjpgstreamer') aCOMMANDS[$i]='/opt/mjpg-streamer/mjpg_streamer -v';; # aSERVICES[$i]='mjpg-streamer' aTCP[$i]='8082' Service does not start without an actual video device
+			'mono') aCOMMANDS[$i]='mono -V';;
+			'mopidy') aSERVICES[$i]='mopidy' aTCP[$i]='6680';;
+			'mosquitto') aSERVICES[$i]='mosquitto' aTCP[$i]='1883';;
+			'motioneye') aSERVICES[$i]='motioneye' aTCP[$i]='8765';;
+			'mpd') aSERVICES[$i]='mpd' aTCP[$i]='6600';;
+			'mumbleserver') aSERVICES[$i]='mumble-server' aTCP[$i]='64738';;
+			'mympd') aSERVICES[$i]='mympd' aTCP[$i]='1333';;
+			'naadaemon') aSERVICES[$i]='networkaudiod' aTCP[$i]='43210' aUDP[$i]='43210';;
+			'navidrome') aSERVICES[$i]='navidrome' aTCP[$i]='4533';;
+			'netdata') aSERVICES[$i]='netdata' aTCP[$i]='19999';;
+			'nextcloud') aCOMMANDS[$i]='sudo -u www-data php /var/www/nextcloud/occ status';;
+			'nextcloudtalk') aSERVICES[$i]='coturn' aTCP[$i]=3478 aUDP[$i]=3478;;
+			'nfsclient') aCOMMANDS[$i]='mount.nfs -V';;
+			'nfsserver') aSERVICES[$i]='nfs-kernel-server' aTCP[$i]='2049';;
+			'nginx') aSERVICES[$i]='nginx' aTCP[$i]='80';;
+			'nodejs') aCOMMANDS[$i]='node -v';;
+			'nodered') aSERVICES[$i]='node-red' aTCP[$i]='1880'; (( $emulation )) && aDELAY[$i]=30;;
+			'nomachine') aSERVICES[$i]='nxserver' aTCP[$i]='4000';;
+			'nukkit') aSERVICES[$i]='nukkit' aUDP[$i]='19132'; (( $emulation )) && aDELAY[$i]=60;;
+			'nzbget') aSERVICES[$i]='nzbget' aTCP[$i]='6789';;
+			'ocis') aSERVICES[$i]='ocis' aTCP[$i]='9200';;
+			'octoprint') aSERVICES[$i]='octoprint' aTCP[$i]='5001'; (( $emulation )) && aDELAY[$i]=60;;
+			'openhab') aSERVICES[$i]='openhab' aTCP[$i]='8444'; (( $emulation )) && aDELAY[$i]=600;;
+			'opensshclient') aCOMMANDS[$i]='ssh -V';;
+			'opensshserver') aSERVICES[$i]='ssh' aTCP[$i]='22';;
+			'opentyrian') aCOMMANDS[$i]='/usr/games/opentyrian/opentyrian -h';;
+			'openvpn') aCOMMANDS[$i]='openvpn --version';; # aSERVICES[$i]='openvpn' aUDP[$i]='1194' GitHub Actions runners do not support the TUN module
+			'papermc') aSERVICES[$i]='papermc' aTCP[$i]='25565 25575' aDELAY[$i]=60; (( $emulation )) && aDELAY[$i]=900;;
+			'php') case $DISTRO in
+				'bookworm') aSERVICES[$i]='php8.2-fpm';;
+				*) aSERVICES[$i]='php8.4-fpm';;
+			esac;;
+			'pihole') aSERVICES[$i]='pihole-FTL' aUDP[$i]='53';;
+			'plex') aSERVICES[$i]='plexmediaserver' aTCP[$i]='32400';;
+			'portainer') aTCP[$i]='9002 9442' SYSCALLS+=' add_key keyctl bpf';;
+			'postgresql') aSERVICES[$i]='postgresql';;
+			'proftpd') aSERVICES[$i]='proftpd' aTCP[$i]='21';;
+			'prometheus') aSERVICES[$i]='prometheus' aTCP[$i]='9090' aCOMMANDS[$i]='curl -sSf '\''http://127.0.0.1:9090/api/v1/query?query=up'\'' | grep '\''"status":"success"'\';;
+			'prometheusnodeexporter') aSERVICES[$i]='node_exporter' aTCP[$i]='9100';;
+			'prowlarr') aSERVICES[$i]='prowlarr' aTCP[$i]='9696';;
+			'python3') aCOMMANDS[$i]='python3 -V';;
+			'qbittorrent') aSERVICES[$i]='qbittorrent' aTCP[$i]='1340 6881';;
+			'radarr') aSERVICES[$i]='radarr' aTCP[$i]='7878';;
+			'raspotify') aSERVICES[$i]='raspotify';;
+			'rclone') aCOMMANDS[$i]='rclone version';;
+			'readarr') aSERVICES[$i]='readarr' aTCP[$i]='8787';;
+			'readymedia') aSERVICES[$i]='minidlna' aTCP[$i]='8200';;
+			'redis') aSERVICES[$i]='redis-server' aTCP[$i]='6379';;
+			'remoteit') aSERVICES[$i]='schannel' aUDP[$i]='5980';; # remoteit@.service service listens on random high UDP port
+			'restic') aCOMMANDS[$i]='restic version';;
+			'roonbridge') aSERVICES[$i]='roonbridge' aUDP[$i]='9003';;
+			'roonextensionmanager') aSERVICES[$i]='roon-extension-manager' SYSCALLS+=' add_key keyctl bpf';;
+			'roonserver') aSERVICES[$i]='roonserver';; # Listens on a variety of different port ranges
+			'rpimonitor') aSERVICES[$i]='rpimonitor' aTCP[$i]='8888';;
+			'rsyslog') aSERVICES[$i]='rsyslog';;
+			'rtorrent') aSERVICES[$i]='rtorrent' aTCP[$i]='49164' aUDP[$i]='6881';;
+			'rustdeskclient') aCOMMANDS[$i]='rustdesk --version';;
+			'rustdeskserver') aSERVICES[$i]='rustdesksignal rustdeskrelay' aTCP[$i]='21115 21116 21117 21118 21119' aUDP[$i]='21116';;
+			'sabnzbd') aSERVICES[$i]='sabnzbd' aTCP[$i]='8080'; (( $arch == 10 )) || aDELAY[$i]=30;; # ToDo: Solve conflict with Airsonic
+			'sambaclient') aCOMMANDS[$i]='smbclient -V';;
+			'sambaserver') aSERVICES[$i]='smbd' aTCP[$i]='139 445' aUDP[$i]='137 138';;
+			'scrypted') aSERVICES[$i]='scrypted' aTCP[$i]='10443 11080 10081';; # ports: https (secure), http (insecure), debug
+			'shairportsync') aSERVICES[$i]='shairport-sync' aTCP[$i]='5000';; # AirPlay 2 would be TCP port 7000
+			'snapcastclient') aSERVICES[$i]='snapclient';;
+			'snapcastserver') aSERVICES[$i]='snapserver' aTCP[$i]='1704 1780';;
+			'soju') aSERVICES[$i]='soju' aTCP[$i]='6667';;
+			'sonarr') (( $arch == 1 )) || aSERVICES[$i]='sonarr' aTCP[$i]='8989';; # Skip on ARMv6 failing in container with "If you're reading this, the MonoMod.RuntimeDetour selftest failed."
+			'spotifyd') aSERVICES[$i]='spotifyd' aUDP[$i]='5353';; # + random high TCP port
+			'sqlite') aCOMMANDS[$i]='sqlite3 -version';;
+			'squeezelite') aSERVICES[$i]='squeezelite';; # Service listens on random high UDP port
+			'synapse') aSERVICES[$i]='synapse' aTCP[$i]='8008';;
+			'syncthing') aSERVICES[$i]='syncthing' aTCP[$i]='8384';;
+			'tailscale') aCOMMANDS[$i]='tailscale version';; # aSERVICES[$i]='tailscaled' aUDP[$i]='41641' GitHub Actions runners do not support the TUN module
+			'tautulli') aSERVICES[$i]='tautulli' aTCP[$i]='8181'; (( $emulation )) && aDELAY[$i]=60;;
+			'tigervncserver') aSERVICES[$i]='vncserver' aTCP[$i]='5901';;
+			'torhotspot') aSERVICES[$i]='tor' aTCP[$i]='9040' aUDP[$i]='53';;
+			'torrelay') aSERVICES[$i]='tor' aTCP[$i]='80 443 9051';;
+			'transmission') aSERVICES[$i]='transmission-daemon' aTCP[$i]='9091 51413' aUDP[$i]='51413';;
+			'ubooquity') aSERVICES[$i]='ubooquity' aTCP[$i]='2038 2039'; (( $emulation )) && aDELAY[$i]=60;;
+			'unbound') aSERVICES[$i]='unbound' aUDP[$i]='53' aTCP[$i]='53'; [[ ${aSERVICES[adguardhome]} ]] && aUDP[$i]='5335' aTCP[$i]='5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed
+			'unrar') aCOMMANDS[$i]='unrar -V';;
+			'uptimekuma') aSERVICES[$i]='uptime-kuma' aTCP[$i]='3002';;
+			'urbackupserver') aSERVICES[$i]='urbackupsrv' aTCP[$i]='55414';;
+			'uv') aCOMMANDS[$i]='uv --version';;
+			'vaultwarden') aSERVICES[$i]='vaultwarden' aTCP[$i]='8001';;
+			'virtualhere') aSERVICES[$i]='virtualhere' aTCP[$i]='7575';;
+			'vscodium') aCOMMANDS[$i]='sudo -u dietpi codium -v';;
+			'vsftpd') aSERVICES[$i]='vsftpd' aTCP[$i]='21';;
+			'webiopi') aSERVICES[$i]='webiopi' aTCP[$i]='8002';;
+			'webmin') aSERVICES[$i]='webmin' aTCP[$i]='10000';;
+			'whodb') aSERVICES[$i]='whodb' aTCP[$i]='8091';;
+			'wifihotspot') aCOMMANDS[$i]='iptables -V' aSERVICES[$i]='isc-dhcp-server' aUDP[$i]='67';; # aSERVICES[$i]='hostapd' fails without actual WiFi interface
+			'wireguard') aCOMMANDS[$i]='wg' aSERVICES[$i]='wg-quick@wg0' aUDP[$i]='51820' CAPABILITIES+=',CAP_NET_ADMIN';;
+			'wiringpi') aCOMMANDS[$i]='gpio -v | grep '\''gpio version'\';;
+			'x11') aCOMMANDS[$i]='X -version';;
+			'xfce') aCOMMANDS[$i]='xfce4-session -h';;
+			'xfcepowermanager') aCOMMANDS[$i]='xfce4-power-manager -V';;
+			'xrdp') aSERVICES[$i]='xrdp' aTCP[$i]='3389';;
+			'yacy') aSERVICES[$i]='yacy' aTCP[$i]='8090' aDELAY[$i]=30; (( $emulation )) && aDELAY[$i]=120;;
+			'ympd') aSERVICES[$i]='ympd' aTCP[$i]='1337';;
+			'ytdlp') aCOMMANDS[$i]='yt-dlp --version';;
+			'zerotier') aSERVICES[$i]='zerotier-one' aTCP[$i]='9993';;
+			# Software titles without further tests
+			# - Software which requires interactive input
+			'microblogpub') :;; # aSERVICES[i]='microblog-pub' aTCP[i]='8007' Service enters a CPU-intense internal error loop until it has been configured interactively via "microblog-pub configure", hence it is not enabled and started anymore after install but instead as part of "microblog-pub configure"
+			'pivpn') :;; # ToDo: Implement automated install via /boot/unattended_pivpn.conf
+			# - Software stacks
+			'alloguifull'|'lasp'|'lamp'|'lesp'|'lemp'|'llsp'|'llmp') :;;
+			# - Software behind regular webservers
+			'allogui'|'ampache'|'baikal'|'homer'|'linuxdash'|'mediawiki'|'ompd'|'phpmyadmin'|'phpbb'|'phpsysinfo'|'sfpg'|'tasmoadmin'|'wordpress') :;;
+			# - Software with hardware requirements
+			'lxqt') :;; # All executables strictly require a Qt session, no help or version output possible
+			'moonlightcli'|'moonlightgui') :;; # aCOMMANDS[$i]='moonlight'|'moonlight-qt' command
+			'pijuice') :;; # (( $arch < 3 )) && aCOMMANDS[i]='/usr/bin/pijuice_cli32 -V' || aCOMMANDS[i]='/usr/bin/pijuice_cli64 -V'; aSERVICES[i]='pijuice' aTCP[i]='????' Service does not start without I2C device, not present in container and CLI command always puts you in interactive console
+			'pispc') :;; # aSERVICES[i]='pi-spc' Service cannot reasonably start in container as WirinPi's gpio command fails reading /proc/cpuinfo
+			'i2c'|'realvncserver'|'rpigpio'|'steam') :;;
+			*) Error_Exit "Unknown software ID \"$i\"";;
 		esac
-		aINSTALL[i]=1
+		aINSTALL[$i]=1
 	done
 }
 for i in $SOFTWARE
 do
 	case $i in
-		205) Process_Software webserver;;
-		27|56|63|64|107|132) Process_Software 89 webserver;;
-		38|48|54|55|57|59|90|160|210) Process_Software 88 89 webserver;;
-		159) Process_Software 36 37 65 88 89 96 121 124 128 129 152 160 163 webserver;;
-		47|114|168) Process_Software 88 89 91 webserver;;
-		8|80|133|164|179|181|206) Process_Software 196;;
-		122) Process_Software 9;;
-		53|131) Process_Software 9 196;;
-		32|148|119) Process_Software 128;;
-		129) Process_Software 88 89 128 webserver;;
-		49|165|177) Process_Software 0 17 88;;
-		61) Process_Software 60;;
-		125) Process_Software 194;;
-		86|134|185) Process_Software 162;;
-		141) Process_Software 17 134 162;;
-		166) Process_Software 70;;
-		180) (( $arch == 10 || $arch == 3 )) || Process_Software 170;;
-		188) Process_Software 17;;
-		213) Process_Software 17 188;;
-		183) Process_Software 87;;
-		215) Process_Software 7 9 91 194;;
-		138|187) Process_Software 152;;
-		75) Process_Software 83 87 89;;
-		76) Process_Software 83 88 89;;
-		78) Process_Software 85 87 89;;
-		79) Process_Software 85 88 89;;
-		81) Process_Software 84 87 89;;
-		82) Process_Software 84 88 89;;
-		23|24|25|26|173|36|118|121|124|135|154|191|192|199|204|108|10|51|112|156|11|189|113|67) Process_Software 5;;
-		31|37|128|163|167) Process_Software 5 152;;
-		33) Process_Software 5 196;;
-		40) Process_Software 5 88 89 webserver;;
+		'homer') Process_Software webserver;;
+		'tasmoadmin'|'sfpg'|'linuxdash'|'phpsysinfo'|'rtorrent'|'aria2') Process_Software php webserver;;
+		'freshrss'|'phpbb'|'wordpress'|'baikal'|'phpmyadmin'|'allogui'|'mediawiki') Process_Software mariadb php webserver;;
+		'alloguifull') Process_Software squeezelite shairportsync netdata mariadb php sambaserver roonbridge naadaemon mpd ompd avahidaemon allogui gmediarender webserver;;
+		'nextcloud'|'nextcloudtalk') Process_Software mariadb php redis webserver;;
+		'javajdk'|'ubooquity'|'yacy'|'nukkit'|'komga'|'papermc'|'openhab') Process_Software javajre;;
+		'nodered') Process_Software nodejs;;
+		'mineos'|'blynkserver') Process_Software nodejs javajre;;
+		'ympd'|'mympd'|'cava') Process_Software mpd;;
+		'ompd') Process_Software mariadb php mpd webserver;;
+		'gogs'|'gitea'|'forgejo') Process_Software opensshclient git mariadb;;
+		'torhotspot') Process_Software wifihotspot;;
+		'synapse') Process_Software postgresql;;
+		'roonextensionmanager'|'dockercompose'|'portainer') Process_Software docker;;
+		'adsbfeeder') Process_Software git dockercompose docker;;
+		'pispc') Process_Software wiringpi;;
+		'bazarr') (( $arch == 10 || $arch == 3 )) || Process_Software unrar;;
+		'go') Process_Software git;;
+		'soju') Process_Software git go;;
+		'vaultwarden') Process_Software sqlite;;
+		'immich') Process_Software ffmpeg nodejs redis postgresql;;
+		'virtualhere'|'cups') Process_Software avahidaemon;;
+		'lasp') Process_Software apache sqlite php;;
+		'lamp') Process_Software apache mariadb php;;
+		'lesp') Process_Software nginx sqlite php;;
+		'lemp') Process_Software nginx mariadb php;;
+		'llsp') Process_Software lighttpd sqlite php;;
+		'llmp') Process_Software lighttpd mariadb php;;
+		'lxde'|'mate'|'xfce'|'gnustep'|'lxqt'|'squeezelite'|'mopidy'|'roonbridge'|'naadaemon'|'icecast'|'roonserver'|'snapcastserver'|'snapcastclient'|'spotifyd'|'navidrome'|'amiberry'|'amiberrylite'|'opentyrian'|'dxxrebirth'|'steam'|'gzdoom'|'vscodium'|'chromium'|'firefox') Process_Software alsa;;
+		'kodi'|'shairportsync'|'mpd'|'gmediarender'|'raspotify') Process_Software alsa avahidaemon;;
+		'airsonic') Process_Software alsa javajre;;
+		'ampache') Process_Software alsa mariadb php webserver;;
 		*) :;;
 	esac
 	Process_Software "$i"
@@ -440,7 +432,7 @@ then
 	# shellcheck disable=SC2016
 	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\G_EXEC sed --follow-symlinks -i '\''s|dietpi.com/downloads/binaries/$G_DISTRO_NAME/|dietpi.com/downloads/binaries/$G_DISTRO_NAME/testing/|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 	# shellcheck disable=SC2016
-	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\G_EXEC sed --follow-symlinks -Ei '\''s@G_AGI "?(amiberry|amiberry-lite|domoticz|gmediarender|gzdoom|shairport-sync\\$airplay2|squeezelite|unbound|vaultwarden|ympd)"?@Download_Install "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/\\1""_$G_HW_ARCH_NAME.deb"@'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\G_EXEC sed --follow-symlinks -Ei '\''s@G_AGI "?(amiberry|amiberry-lite|domoticz|gmediarender|gzdoom|haproxy|shairport-sync\\$airplay2|squeezelite|unbound|vaultwarden|ympd)"?@Download_Install "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/\\1""_$G_HW_ARCH_NAME.deb"@'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 	G_CONFIG_INJECT 'SOFTWARE_DIETPI_DASHBOARD_VERSION=' 'SOFTWARE_DIETPI_DASHBOARD_VERSION=Nightly' rootfs/boot/dietpi.txt
 fi
 
@@ -462,14 +454,14 @@ then
 fi
 
 # Transmission: Workaround for transmission-daemon timing out with container host AppArmor throwing: apparmor="ALLOWED" operation="sendmsg" class="file" info="Failed name lookup - disconnected path" error=-13 profile="transmission-daemon" name="run/systemd/notify"
-if (( ${aINSTALL[44]} )) && (( $dist > 7 )) && systemctl -q is-active apparmor
+if (( ${aINSTALL[transmission]} )) && (( $dist > 7 )) && systemctl -q is-active apparmor
 then
 	G_EXEC sed --follow-symlinks -i '/^profile transmission-daemon/s/flags=(complain)/flags=(complain,attach_disconnected)/' /etc/apparmor.d/transmission
 	G_EXEC_OUTPUT=1 G_EXEC apparmor_parser -r /etc/apparmor.d/transmission
 fi
 
 # rsyslog: Workaround for rsyslogd timing out with container host AppArmor throwing: apparmor="DENIED" operation="sendmsg" class="file" info="Failed name lookup - disconnected path" error=-13 profile="rsyslogd" name="run/systemd/journal/dev-log"
-if (( ${aINSTALL[102]} )) && (( $dist > 7 )) && systemctl -q is-active apparmor
+if (( ${aINSTALL[rsyslog]} )) && (( $dist > 7 )) && systemctl -q is-active apparmor
 then
 	G_EXEC sed --follow-symlinks -i '/^profile rsyslogd/s/{$/flags=(attach_disconnected) {/' /etc/apparmor.d/usr.sbin.rsyslogd
 	G_EXEC_OUTPUT=1 G_EXEC apparmor_parser -r /etc/apparmor.d/usr.sbin.rsyslogd
@@ -489,7 +481,7 @@ G_EXEC rm rootfs/root/.ssh/known_hosts
 for i in $SOFTWARE; do G_CONFIG_INJECT "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" rootfs/boot/dietpi.txt; done
 
 # PaperMC: Enable unattended install
-if (( ${aINSTALL[181]} ))
+if (( ${aINSTALL[papermc]} ))
 then
 	G_EXEC mkdir -p rootfs/mnt/dietpi_userdata/papermc/plugins
 	G_EXEC eval 'echo '\''eula=true'\'' > rootfs/mnt/dietpi_userdata/papermc/eula.txt'
@@ -537,39 +529,36 @@ fi
 # ARMv6: Workaround for ARMv7 Rust toolchain selected in containers with newer host/emulated ARM version
 (( $arch == 1 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/--profile minimal .*$/--profile minimal --default-host arm-unknown-linux-gnueabihf/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
-# ARMv6/7: Workaround for "deprecated CP15 Barrier instruction" on ARMv8 host: https://github.com/MichaIng/DietPi/issues/6306#issuecomment-1515303702
+# ARMv6/7: Workaround for "deprecated CP15 Barrier instruction" on ARMv8 host: https://github.com/llvm/llvm-project/issues/41201
 (( $arch < 3 && $G_HW_ARCH == 3 )) && G_EXEC sysctl -w 'abi.cp15_barrier=2'
 
 # WiFi Hotspot
-if (( ${aINSTALL[60]} ))
+if (( ${aINSTALL[wifihotspot]} ))
 then
-	# Create dummy network config for sed to succeed
-	G_EXEC mkdir -p rootfs/etc/network
-	G_EXEC eval '>> rootfs/etc/network/interfaces'
-	# Replace dedicated hotspot interface with default route interface, for the DHCP server and in case Tor have a valid interface and IP to listen on
+	# Use the host's default route interface and subnet for DHCP server and in case Tor to start
 	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i '/INTERFACESv4/s/\$wifi_iface/$(G_GET_NET iface)/' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
-	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i '/192\.168\.42\.10/! s/192\.168\.42\.1/$(G_GET_NET ip)/' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
+	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i 's/192\.168\.42\.1/$(G_GET_NET ip)/' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
 	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i 's/192\.168\.42\./$(G_GET_NET ip | sed 's/[0-9]*$//')/g' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
 fi
 
 # Workaround for Apache on emulated RISC-V system
-if (( ${aINSTALL[83]} )) && (( $emulation && $arch == 11 ))
+if (( ${aINSTALL[apache]} )) && (( $emulation && $arch == 11 ))
 then
 	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/i\sed -i '\''/^DocumentRoot/a\Mutex posixsem'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 fi
 
 # Workaround for Readarr/Kavita explicitly calling uname without shell, breaking our ARM workaround
-if (( ${aINSTALL[203]} )) || (( ${aINSTALL[212]} )) && [[ -f 'rootfs/usr/local/bin/uname' ]]
+if (( ${aINSTALL[readarr]} )) || (( ${aINSTALL[kavita]} )) && [[ -f 'rootfs/usr/local/bin/uname' ]]
 then
 	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/i\sed -i '\''/# Custom 1st run script/i\\rm /usr/local/bin/uname'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 fi
 
 # Workaround for Snapcast Client, using file output where no ALSA device is available
 # shellcheck disable=SC2016
-(( ${aINSTALL[192]} )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/i\sed -i '\''s/-p \$snapcast_server_port/-p \$snapcast_server_port --player file/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+(( ${aINSTALL[snapcastclient]} )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/i\sed -i '\''s/-p \$snapcast_server_port/-p \$snapcast_server_port --player file/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # ADS-B Feeder/Portainer/K3s
-if (( ${aINSTALL[141]} )) || (( ${aINSTALL[185]} )) || (( ${aINSTALL[193]} ))
+if (( ${aINSTALL[adsbfeeder]} )) || (( ${aINSTALL[portainer]} )) || (( ${aINSTALL[k3s]} ))
 then
 	# Unmount R/O /proc/sys created by systemd-nspawn: "failed to disable IPv6 on container's interface eth0" resp. "open /proc/sys/foo/bar: read-only file system"
 	# - systemd-journald restart fixes missing "journalctl -e/-u" outputs
@@ -581,7 +570,7 @@ _EOF_'
 fi
 
 # MicroK8s
-if (( ${aINSTALL[142]} ))
+if (( ${aINSTALL[microk8s]} ))
 then
 	# Unmount R/O /proc/sys created by systemd-nspawn: "open /proc/sys/...: read-only file system"
 	# - systemd-journald restart fixes missing "journalctl -e/-u" outputs
@@ -607,7 +596,7 @@ G_EXEC eval "echo -e '#!/bin/dash\nexit_code=0; /boot/dietpi/dietpi-services sta
 # - Loop through software IDs to test
 printf '%s\n' "${!aSERVICES[@]}" "${!aTCP[@]}" "${!aUDP[@]}" "${!aCOMMANDS[@]}" | sort -u | while read -r i
 do
-	[[ ${aSERVICES[i]}${aTCP[i]}${aUDP[i]}${aCOMMANDS[i]} ]] || continue
+	[[ ${aSERVICES[$i]}${aTCP[$i]}${aUDP[$i]}${aCOMMANDS[$i]} ]] || continue
 
 	# Check whether ID really got installed, to skip software unsupported on hardware or distro
 	cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
@@ -615,34 +604,34 @@ if grep -q '^aSOFTWARE_INSTALL_STATE\[$i\]=2$' /boot/dietpi/.installed
 then
 _EOF_
 	# Check service status
-	[[ ${aSERVICES[i]} ]] && for j in ${aSERVICES[i]}; do cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
+	[[ ${aSERVICES[$i]} ]] && for j in ${aSERVICES[$i]}; do cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 echo -n '\e[33m[ INFO ] Checking $j service status:\e[0m '
 systemctl is-active '$j' || { journalctl -u '$j'; exit_code=1; }
 _EOF_
 	done
 	# Check TCP ports
-	[[ ${aTCP[i]} ]] && for j in ${aTCP[i]}; do cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
+	[[ ${aTCP[$i]} ]] && for j in ${aTCP[$i]}; do cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 echo '\e[33m[ INFO ] Checking TCP port $j status:\e[0m'
 ss -tlpn | grep ':${j}[[:blank:]]' 2> /dev/null || { echo '\e[31m[FAILED] TCP port ${j} not active\e[0m'; exit_code=1; }
 _EOF_
 	done
 	# Check UDP ports
-	[[ ${aUDP[i]} ]] && for j in ${aUDP[i]}; do cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
+	[[ ${aUDP[$i]} ]] && for j in ${aUDP[$i]}; do cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 echo '\e[33m[ INFO ] Checking UDP port $j status:\e[0m'
 ss -ulpn | grep ':${j}[[:blank:]]' 2> /dev/null || { echo '\e[31m[FAILED] UDP port ${j} not active\e[0m'; exit_code=1; }
 _EOF_
 	done
 	# Check commands
-	[[ ${aCOMMANDS[i]} ]] && cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
-echo '\e[33m[ INFO ] Testing command "${aCOMMANDS[i]}":\e[0m'
-${aCOMMANDS[i]} || { echo '\e[31m[FAILED] Command returned error code\e[0m'; exit_code=1; }
+	[[ ${aCOMMANDS[$i]} ]] && cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
+echo '\e[33m[ INFO ] Testing command "${aCOMMANDS[$i]}":\e[0m'
+${aCOMMANDS[$i]} || { echo '\e[31m[FAILED] Command returned error code\e[0m'; exit_code=1; }
 _EOF_
 	G_EXEC eval 'echo fi >> rootfs/boot/Automation_Custom_Script.sh'
 done
 
 # Success flag and shutdown
 # shellcheck disable=SC2016
-G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success || { journalctl -n 50; ss -tulpn; df -h; free -h; }; systemctl start poweroff.target; exit $?'\'' >> rootfs/boot/Automation_Custom_Script.sh'
+G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success || { journalctl -n 50; ss -tulpn; df -h; free -h; }; systemctl start poweroff.target; exit "$exit_code"'\'' >> rootfs/boot/Automation_Custom_Script.sh'
 
 # Shutdown as well on failures before the custom script is executed
 G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; systemctl start poweroff.target; exit 1; }|' rootfs/boot/dietpi/dietpi-login

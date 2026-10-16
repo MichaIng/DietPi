@@ -2605,14 +2605,53 @@ Patch_10_7()
 			[[ -f /boot/firmware/$f ]] && G_EXEC rm "/boot/firmware/$f"
 		done
 	fi
+}
+
+Patch_10_8()
+{
+	# ROCK Pi S
+	if (( $G_HW_MODEL == 73 ))
+	then
+		if ! dpkg-query -s 'alsa-utils' 2> /dev/null | grep -q '^Status: install ok installed$'
+		then
+			G_DIETPI-NOTIFY 2 'Blacklisting audio driver, as the ROCK Pi S has no audio jack and no HDMI'
+			G_EXEC eval 'echo -e '\''blacklist snd_soc_rk3308\nblacklist snd_soc_simple_card\nblacklist snd_soc_rockchip_i2s_tdm'\'' > /etc/modprobe.d/dietpi-disable_audio.conf'
+		fi
+	fi
+
+	if dpkg-query -l | grep -Eq '^ii[[:blank:]]*linux-image-.*-(rockchip64|rk35xx|sun60iw2)[[:blank:]:]'
+	then
+		G_DIETPI-NOTIFY 2 'Blacklisting AIC8800 BSP driver, autoloaded for some reason on some SBCs'
+		G_EXEC eval 'echo '\''blacklist aic8800_bsp'\'' > /etc/modprobe.d/dietpi-disable_aic8800_bsp.conf'
+	fi
+
+	# Remove dangling symlink which was created on image creation by a second base-files postinst run: https://github.com/MichaIng/DietPi/issues/8329
+	if [[ -L '/usr/local/share/man/man' && $(readlink /usr/local/share/man/man) == 'share/man' ]]
+	then
+		G_DIETPI-NOTIFY 2 'Removing dangling /usr/local/share/man/man symlink'
+		G_EXEC rm /usr/local/share/man/man
+	fi
 
 	# Software updates, migrations and patches
 	if [[ -f '/boot/dietpi/.installed' ]]
 	then
+		# HAProxy
+		if grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(98|haproxy)\]=2' /boot/dietpi/.installed
+		then
+			G_DIETPI-NOTIFY 2 'Migrating to HAProxy APT package'
+			G_EXEC rm -Rf /usr/local/{doc,sbin}/haproxy* /usr/local/share/man/man1/haproxy.1
+			[[ -d '/usr/local/share/man/man1' ]] && G_EXEC rmdir -p --ignore-fail-on-non-empty /usr/local/share/man/man1
+			G_AGI haproxy
+
+			G_DIETPI-NOTIFY 2 'Patching HAProxy config to run workers as "haproxy" user'
+			G_CONFIG_INJECT 'user[[:blank:]]' '	user haproxy' /etc/haproxy/haproxy.cfg 'global'
+			G_CONFIG_INJECT 'group[[:blank:]]' '	group haproxy' /etc/haproxy/haproxy.cfg 'global'
+		fi
+
 		# Pi-hole v6 migration
 		# - /etc/pihole/pihole.toml indicates that Pi-hole has been upgraded to v6 already.
 		# - The /var/www/pihole symlink indicates that an instance installed via dietpi-software has not been migrated yet.
-		if [[ -f '/etc/pihole/pihole.toml' && -L '/var/www/pihole' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[93\]=2' /boot/dietpi/.installed
+		if [[ -f '/etc/pihole/pihole.toml' && -L '/var/www/pihole' ]] && grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(93|pihole)\]=2' /boot/dietpi/.installed
 		then
 			# Remove DietPi specific v5 files
 			# - Symlinks
@@ -2639,18 +2678,18 @@ Patch_10_7()
 
 			# Offer to uninstall webserver and PHP if no dependant is installed
 			# - If only PHP or only a webserver is installed, one has been uninstalled already, and the other is assumed to be still needed for something else.
-			if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[89\]=2' /boot/dietpi/.installed && grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(83|84|85)\]=2' /boot/dietpi/.installed
+			if grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(89|php)\]=2' /boot/dietpi/.installed && grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(83|apache|84|lighttpd|85|nginx)\]=2' /boot/dietpi/.installed
 			then
 				G_WHIP_CHECKLIST_ARRAY=()
 				# - webserver
 				if ! /boot/dietpi/dietpi-software list | grep -q '| =2 |.*+webserver'
 				then
-					grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[83\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(83 'Apache webserver' off)
-					grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[84\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(84 'Lighttpd webserver' off)
-					grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[85\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(85 'Nginx webserver' off)
+					grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(83|apache)\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(apache 'Apache webserver' off)
+					grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(84|lighttpd)\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(lighttpd 'Lighttpd webserver' off)
+					grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(85|nginx)\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(nginx 'Nginx webserver' off)
 				fi
 				# - PHP: Exclude webserver stacks which are meta selections only
-				/boot/dietpi/dietpi-software list | grep '| =2 |.*+PHP' | grep -vEq '^.\[32mID (75|76|78|79|81|82)' || G_WHIP_CHECKLIST_ARRAY+=(89 'PHP server' off)
+				/boot/dietpi/dietpi-software list | grep '| =2 |.*+PHP' | grep -vEq '^.\[32mID (lasp|lamp|lesp|lemp|llsp|llmp) ' || G_WHIP_CHECKLIST_ARRAY+=(php 'PHP server' off)
 				if (( ${#G_WHIP_CHECKLIST_ARRAY[@]} ))
 				then
 					G_WHIP_BUTTON_CANCEL_TEXT='Skip'
@@ -2662,6 +2701,236 @@ Patch_10_7()
 				fi
 			fi
 		fi
+
+		# Migrate software IDs in install states file from numeric to named IDs
+		G_DIETPI-NOTIFY 2 'Migrating software IDs in /boot/dietpi/.installed to named IDs'
+		mawk '
+FILENAME == "-" { name[$1] = $2; next }
+
+/^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[[0-9]+\]=2([[:blank:]]|$)/ {
+	id = $0
+	sub(/^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[/, "", id)
+	sub(/\]=.*$/, "", id)
+	if (id in name) { $0 = "aSOFTWARE_INSTALL_STATE[" name[id] "]=2" }
+}
+
+{ print }' - /boot/dietpi/.installed << '_EOF_' > .installed || exit 1
+0 opensshclient
+1 sambaclient
+2 foldingathome
+3 mc
+4 fish
+5 alsa
+6 x11
+7 ffmpeg
+8 javajdk
+9 nodejs
+10 amiberrylite
+11 gzdoom
+12 rustdeskserver
+13 rustdeskclient
+16 microblogpub
+17 git
+23 lxde
+24 mate
+25 xfce
+26 gnustep
+27 tasmoadmin
+28 tigervncserver
+29 xrdp
+30 nomachine
+31 kodi
+32 ympd
+33 airsonic
+34 composer
+35 lms
+36 squeezelite
+37 shairportsync
+38 freshrss
+39 readymedia
+40 ampache
+41 emby
+42 plex
+43 mumbleserver
+44 transmission
+45 deluge
+46 qbittorrent
+47 ocis
+49 gogs
+50 syncthing
+51 opentyrian
+52 cuberite
+53 mineos
+54 phpbb
+55 wordpress
+56 sfpg
+57 baikal
+58 tailscale
+60 wifihotspot
+61 torhotspot
+62 box86
+63 linuxdash
+64 phpsysinfo
+65 netdata
+66 rpimonitor
+67 firefox
+68 remoteit
+69 rpigpio
+70 wiringpi
+71 webiopi
+72 i2c
+73 fail2ban
+74 influxdb
+75 lasp
+76 lamp
+77 grafana
+78 lesp
+79 lemp
+80 ubooquity
+81 llsp
+82 llmp
+83 apache
+84 lighttpd
+85 nginx
+86 roonextensionmanager
+87 sqlite
+88 mariadb
+89 php
+90 phpmyadmin
+91 redis
+92 certbot
+93 pihole
+94 proftpd
+95 vsftpd
+96 sambaserver
+97 openvpn
+98 haproxy
+99 prometheusnodeexporter
+100 pijuice
+101 logrotate
+102 rsyslog
+103 dietpiramlog
+104 dropbear
+105 opensshserver
+106 lidarr
+107 rtorrent
+108 amiberry
+109 nfsserver
+110 nfsclient
+111 urbackupserver
+112 dxxrebirth
+113 chromium
+114 nextcloud
+115 webmin
+116 medusa
+117 pivpn
+118 mopidy
+119 cava
+120 realvncserver
+121 roonbridge
+122 nodered
+123 mosquitto
+124 naadaemon
+125 synapse
+126 adguardhome
+127 birdnetgo
+128 mpd
+129 ompd
+130 python3
+131 blynkserver
+132 aria2
+133 yacy
+134 dockercompose
+135 icecast
+136 motioneye
+137 mjpgstreamer
+138 virtualhere
+139 sabnzbd
+140 domoticz
+141 adsbfeeder
+142 microk8s
+143 koel
+144 sonarr
+145 radarr
+146 tautulli
+147 jackett
+148 mympd
+149 nzbget
+150 mono
+151 prowlarr
+152 avahidaemon
+153 octoprint
+154 roonserver
+155 htpcmanager
+156 steam
+157 homeassistant
+158 minio
+159 alloguifull
+160 allogui
+161 fuguhub
+162 docker
+163 gmediarender
+164 nukkit
+165 gitea
+166 pispc
+167 raspotify
+168 nextcloudtalk
+169 lazylibrarian
+170 unrar
+171 frp
+172 wireguard
+173 lxqt
+174 gimp
+175 xfcepowermanager
+176 uptimekuma
+177 forgejo
+178 jellyfin
+179 komga
+180 bazarr
+181 papermc
+182 unbound
+183 vaultwarden
+184 torrelay
+185 portainer
+186 kubo
+187 cups
+188 go
+189 vscodium
+190 beets
+191 snapcastserver
+192 snapcastclient
+193 k3s
+194 postgresql
+195 ytdlp
+196 javajre
+197 box64
+198 filebrowser
+199 spotifyd
+200 dietpidashboard
+201 zerotier
+202 rclone
+203 readarr
+204 navidrome
+205 homer
+206 openhab
+207 moonlightcli
+208 moonlightgui
+209 restic
+210 mediawiki
+211 homebridge
+212 kavita
+213 soju
+214 whodb
+215 immich
+216 immichml
+217 uv
+218 prometheus
+219 homebox
+220 scrypted
+_EOF_
+		# Remove left legacy numeric index states, e.g. from removed software titles, or DietPi-RAMlog and Dropbear =0 states
+		G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[[0-9]*\]=/d' .installed
+		G_EXEC mv .installed /boot/dietpi/.installed
 	fi
 }
 

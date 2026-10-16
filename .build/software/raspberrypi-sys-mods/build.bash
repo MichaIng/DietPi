@@ -32,7 +32,7 @@ while :; do
 	if grep -q "alias $SUBSYSTEM:$comp " "$ALIASES"; then
 		modprobe "$SUBSYSTEM:$comp" && exit 0
 	fi
-	n=$(expr "$n" + 1)
+	n=$(( $n + 1 ))
 done
 modprobe "$MODALIAS" || modprobe "of:N${OF_NAME}T<NULL>C$OF_COMPATIBLE_0"
 _EOF_
