@@ -121,6 +121,7 @@ PROXY_PASSWORD=
 REGEX_IPV4='((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
 REGEX_CIDR='(3[0-2]|[12][0-9]|[1-9])'
 REGEX_HOTSPOT_KEY='^[[:print:]]{8,63}$'
+REGEX_HOTSPOT_SSID='^[^[:cntrl:]]{1,32}$'
 REGEX_IFACE='^[[:alnum:]][[:alnum:]_.-]{0,14}$'
 ETH_INTERFACES=()
 WIFI_INTERFACES=()
@@ -1168,7 +1169,13 @@ Menu_Interface()
 			'Remove') G_EXEC_NOEXIT=1 G_EXEC systemctl disable --now dietpi-wifi-monitor; Remove_Interface_Config "$iface"; Return_From_Submenu "iface:$iface";;
 			'Save') Apply_Current_Interface;;
 			'Apply') Apply_Current_Interface 1;;
-			'SSID') G_WHIP_DEFAULT_ITEM=$HOTSPOT_SSID; G_WHIP_INPUTBOX 'Please enter an SSID for your WiFi hotspot:' && HOTSPOT_SSID=$G_WHIP_RETURNED_VALUE;;
+			'SSID')
+				G_WHIP_INPUTBOX_REGEX=$REGEX_HOTSPOT_SSID
+				G_WHIP_INPUTBOX_REGEX_TEXT='be 1 to 32 characters long'
+				G_WHIP_DEFAULT_ITEM=$HOTSPOT_SSID
+				G_WHIP_INPUTBOX 'Please enter an SSID for your WiFi hotspot:' || return 0
+				HOTSPOT_SSID=$G_WHIP_RETURNED_VALUE
+			;;
 			'Key')
 				G_WHIP_INPUTBOX_REGEX=$REGEX_HOTSPOT_KEY
 				G_WHIP_INPUTBOX_REGEX_TEXT='be 8 to 63 printable ASCII characters long'
@@ -1237,15 +1244,11 @@ Input()
 				COMMAND='apply'
 				shift
 				APPLY_IFACE=$1
-				[[ $APPLY_IFACE ]] || Error "Missing interface name for 'apply'.$USAGE"
-				[[ $APPLY_IFACE =~ $REGEX_IFACE ]] || Error "Invalid interface name ($APPLY_IFACE)."
 			;;
 			'remove')
 				COMMAND='remove'
 				shift
 				ACTION_VALUE=$1
-				[[ $ACTION_VALUE ]] || Error "Missing interface name for 'remove'.$USAGE"
-				[[ $ACTION_VALUE =~ $REGEX_IFACE ]] || Error "Invalid interface name ($ACTION_VALUE)."
 			;;
 			'--enable') APPLY_ENABLE=1;;
 			'--disable') APPLY_ENABLE=0;;
@@ -1282,26 +1285,10 @@ Input()
 	done
 }
 
-Validate_CLI_Input()
-{
-	[[ $APPLY_IP =~ ^$REGEX_IPV4(/$REGEX_CIDR)?$ || ! $APPLY_IP ]] || Error "Invalid IPv4 address ($APPLY_IP). Use e.g. 192.168.0.100 or 192.168.0.100/24."
-	[[ $APPLY_GATEWAY =~ ^$REGEX_IPV4$ || ! $APPLY_GATEWAY ]] || Error "Invalid IPv4 gateway address ($APPLY_GATEWAY)."
-	[[ $APPLY_DNS =~ ^$REGEX_IPV4(\ $REGEX_IPV4)?$ || ! $APPLY_DNS ]] || Error "Invalid DNS server list ($APPLY_DNS). Use one or two space-separated IPv4 addresses."
-	[[ $APPLY_FREQ == '2.4' || $APPLY_FREQ == '5' || ! $APPLY_FREQ ]] || Error "Invalid WiFi frequency band ($APPLY_FREQ). Use 2.4 or 5."
-	local opt
-	for opt in "$APPLY_WIFI4" "$APPLY_WIFI5" "$APPLY_WIFI6"
-	do
-		[[ $opt == [01] || ! $opt ]] || Error "Invalid WiFi standard switch ($opt). Use 0 or 1."
-	done
-	local LC_ALL=C # count bytes instead of characters, as the SSID limit is 32 bytes
-	[[ ! $APPLY_SSID ]] || { (( ${#APPLY_SSID} < 33 )) && [[ $APPLY_SSID != *[[:cntrl:]]* ]]; } || Error 'Invalid WiFi SSID. It must be 1 to 32 bytes long and must not contain control characters.'
-	[[ $APPLY_KEY =~ $REGEX_HOTSPOT_KEY || ! $APPLY_KEY ]] || Error 'Invalid WiFi key. It must be 8 to 63 printable ASCII characters long.'
-}
-
 Apply_From_CLI()
 {
 	[[ $APPLY_IFACE ]] || Error "Missing interface name for 'apply'.$USAGE"
-	Validate_CLI_Input
+	[[ $APPLY_IFACE =~ $REGEX_IFACE ]] || Error "Invalid interface name ($APPLY_IFACE)."
 	(( $APPLY_FORCE )) || [[ -d /sys/class/net/$APPLY_IFACE ]] || Error "Network interface '$APPLY_IFACE' was not detected."
 	Load_Interface_State "$APPLY_IFACE"
 	[[ $APPLY_ENABLE ]] && CURRENT_IFACE_ENABLED=$APPLY_ENABLE
@@ -1310,11 +1297,20 @@ Apply_From_CLI()
 	(( $APPLY_COPY_CURRENT )) && Copy_Current_To_Static
 	if [[ $APPLY_IP ]]
 	then
+		[[ $APPLY_IP =~ ^$REGEX_IPV4(/$REGEX_CIDR)?$ ]] || Error "Invalid IPv4 address ($APPLY_IP). Use e.g. 192.168.0.100 or 192.168.0.100/24."
 		CURRENT_IFACE_IP_STATIC=$APPLY_IP
 		[[ $CURRENT_IFACE_IP_STATIC == */* ]] || CURRENT_IFACE_IP_STATIC+='/24'
 	fi
-	[[ $APPLY_GATEWAY ]] && CURRENT_IFACE_GATEWAY_STATIC=$APPLY_GATEWAY
-	[[ $APPLY_DNS ]] && CURRENT_IFACE_DNS_STATIC=$APPLY_DNS
+	if [[ $APPLY_GATEWAY ]]
+	then
+		[[ $APPLY_GATEWAY =~ ^$REGEX_IPV4$ ]] || Error "Invalid IPv4 gateway address ($APPLY_GATEWAY)."
+		CURRENT_IFACE_GATEWAY_STATIC=$APPLY_GATEWAY
+	fi
+	if [[ $APPLY_DNS ]]
+	then
+		[[ $APPLY_DNS =~ ^$REGEX_IPV4(\ $REGEX_IPV4)?$ ]] || Error "Invalid DNS server list ($APPLY_DNS). Use one or two space-separated IPv4 addresses."
+		CURRENT_IFACE_DNS_STATIC=$APPLY_DNS
+	fi
 	if [[ $CURRENT_IFACE_TYPE == 'wifi' && $APPLY_ROLE ]]
 	then
 		if [[ $APPLY_ROLE == 'hotspot' ]]
@@ -1327,8 +1323,12 @@ Apply_From_CLI()
 			CURRENT_IFACE_HOTSPOT=0
 		fi
 	fi
-	[[ $APPLY_SSID ]] && HOTSPOT_SSID=$APPLY_SSID
-	[[ $APPLY_KEY ]] && HOTSPOT_KEY=$APPLY_KEY
+	if [[ $APPLY_SSID ]]
+	then
+		[[ $APPLY_SSID =~ $REGEX_HOTSPOT_SSID ]] || Error 'Invalid WiFi SSID. It must be 1 to 32 characters long and must not contain control characters.'
+		HOTSPOT_SSID=$APPLY_SSID
+	fi
+	[[ $APPLY_KEY ]] && HOTSPOT_KEY=$APPLY_KEY # validated in Apply_Current_Interface
 	if [[ $APPLY_FREQ == '5' ]]
 	then
 		HOTSPOT_5G=1
@@ -1336,6 +1336,10 @@ Apply_From_CLI()
 	elif [[ $APPLY_FREQ == '2.4' ]]
 	then
 		HOTSPOT_5G=0
+
+	elif [[ $APPLY_FREQ ]]
+	then
+		Error "Invalid WiFi frequency band ($APPLY_FREQ). Use 2.4 or 5."
 	fi
 	if [[ $APPLY_CHANNEL ]]
 	then
@@ -1348,9 +1352,21 @@ Apply_From_CLI()
 			HOTSPOT_CHANNEL=$APPLY_CHANNEL
 		fi
 	fi
-	[[ $APPLY_WIFI4 == [01] ]] && HOTSPOT_WIFI4=$APPLY_WIFI4
-	[[ $APPLY_WIFI5 == [01] ]] && HOTSPOT_WIFI5=$APPLY_WIFI5
-	[[ $APPLY_WIFI6 == [01] ]] && HOTSPOT_WIFI6=$APPLY_WIFI6
+	if [[ $APPLY_WIFI4 ]]
+	then
+		[[ $APPLY_WIFI4 == [01] ]] || Error "Invalid --wifi4 value ($APPLY_WIFI4). Use 0 or 1."
+		HOTSPOT_WIFI4=$APPLY_WIFI4
+	fi
+	if [[ $APPLY_WIFI5 ]]
+	then
+		[[ $APPLY_WIFI5 == [01] ]] || Error "Invalid --wifi5 value ($APPLY_WIFI5). Use 0 or 1."
+		HOTSPOT_WIFI5=$APPLY_WIFI5
+	fi
+	if [[ $APPLY_WIFI6 ]]
+	then
+		[[ $APPLY_WIFI6 == [01] ]] || Error "Invalid --wifi6 value ($APPLY_WIFI6). Use 0 or 1."
+		HOTSPOT_WIFI6=$APPLY_WIFI6
+	fi
 	Apply_Current_Interface "$APPLY_RESTART" || exit 1
 }
 
@@ -1363,7 +1379,12 @@ Remove_Interface_Config()
 	return 0
 }
 
-Remove_From_CLI(){ Remove_Interface_Config "$ACTION_VALUE"; }
+Remove_From_CLI()
+{
+	[[ $ACTION_VALUE ]] || Error "Missing interface name for 'remove'.$USAGE"
+	[[ $ACTION_VALUE =~ $REGEX_IFACE ]] || Error "Invalid interface name ($ACTION_VALUE)."
+	Remove_Interface_Config "$ACTION_VALUE"
+}
 
 Proxy_From_CLI()
 {
