@@ -1473,6 +1473,14 @@ Names are accepted as well, e.g. "Node-RED". Legacy numeric IDs are still suppor
 		# - ARMv6/RISC-V: https://github.com/louislam/node-sqlite3/releases
 		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=0
 		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,11]=0
+		#------------------
+		software_id='solidping'
+		aSOFTWARE_NAME[$software_id]='SolidPing'
+		aSOFTWARE_DESC[$software_id]='self-hosted uptime monitoring with status pages and alerting'
+		aSOFTWARE_CATX[$software_id]=8
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/system_stats/#solidping'
+		# - ARMv6/ARMv7/RISC-V: https://github.com/fclairamb/solidping/releases
+		(( $G_HW_ARCH == 3 || $G_HW_ARCH == 10 )) || aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,$G_HW_ARCH]=0
 
 		# Remote Access
 		#--------------------------------------------------------------------------------
@@ -12951,6 +12959,86 @@ WantedBy=multi-user.target
 _EOF_
 			unset -v mnt opt
 		fi
+
+		if To_Install solidping solidping
+		then
+			case $G_HW_ARCH in
+				3) local arch='arm64';;
+				*) local arch='amd64';;
+			esac
+
+			# Download
+			local fallback_url="https://github.com/fclairamb/solidping/releases/download/v0.38.3/solidping-linux-$arch.gz"
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/fclairamb/solidping/releases/latest' | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/solidping-linux-$arch\.gz(?=\")")" /opt/solidping/solidping
+			G_EXEC chmod +x /opt/solidping/solidping
+
+			# User
+			Create_User -d /mnt/dietpi_userdata/solidping solidping
+
+			# Data dir
+			G_EXEC mkdir -p /mnt/dietpi_userdata/solidping/files
+			G_EXEC chown -R solidping:solidping /mnt/dietpi_userdata/solidping
+
+			# Config: Create on first install only, to preserve the encryption key on reinstall
+			if [[ ! -f '/mnt/dietpi_userdata/solidping/solidping.env' ]]
+			then
+				G_EXEC install -o solidping -g solidping -m 0600 /dev/null /mnt/dietpi_userdata/solidping/solidping.env
+				cat << _EOF_ > /mnt/dietpi_userdata/solidping/solidping.env || exit 1
+# SolidPing configuration, for all options see: https://docs.solidping.io/docs/configuration/
+# Web interface and API port
+SP_SERVER_LISTEN=:4002
+
+# Public URL, used in links of notifications and status pages. Adjust it when using a reverse proxy or domain.
+SP_BASE_URL=http://$(G_GET_NET ip):4002
+
+# SQLite database and uploaded files
+SP_DB_TYPE=sqlite
+SP_DB_DIR=/mnt/dietpi_userdata/solidping
+SP_FILESTORAGE_LOCAL_ROOT=/mnt/dietpi_userdata/solidping/files
+
+# Key to encrypt stored check and integration credentials. Keep a backup, they cannot be decrypted without it.
+SP_ENCRYPTION_MASTER_KEY=$(openssl rand -base64 32)
+_EOF_
+			fi
+
+			# Service
+			cat << '_EOF_' > /etc/systemd/system/solidping.service || exit 1
+[Unit]
+Description=SolidPing (DietPi)
+Documentation=https://docs.solidping.io/
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+User=solidping
+WorkingDirectory=/mnt/dietpi_userdata/solidping
+# Workaround for failing systemd.automount: https://dietpi.com/forum/t/17463/22
+EnvironmentFile=-/mnt/dietpi_userdata/solidping/solidping.env
+ExecStartPre=/bin/test -e /mnt/dietpi_userdata/solidping/solidping.env
+ExecStart=/opt/solidping/solidping serve
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=1
+PrivateUsers=1
+PrivateTmp=1
+PrivateDevices=1
+ProtectKernelTunables=1
+ProtectControlGroups=1
+ProtectKernelModules=1
+ProtectKernelLogs=1
+ProtectClock=1
+NoNewPrivileges=1
+ReadWritePaths=-/mnt/dietpi_userdata/solidping
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+		fi
 	}
 
 	# $1: 0=None 23=LXDE 24=MATE 25=Xfce 26=GNUstep 173=LXQt
@@ -15147,6 +15235,13 @@ _EOF_
 			Remove_Service uptime-kuma 1 1
 			G_EXEC rm -Rf /opt/uptime-kuma
 			G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO "Shall all ${aSOFTWARE_NAME[$software_id]} data at /mnt/dietpi_userdata/uptime-kuma be removed as well?" && G_EXEC rm -Rf /mnt/dietpi_userdata/uptime-kuma
+		fi
+
+		if To_Uninstall solidping
+		then
+			Remove_Service solidping 1 1
+			G_EXEC rm -Rf /opt/solidping
+			G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO "Shall all ${aSOFTWARE_NAME[$software_id]} data at /mnt/dietpi_userdata/solidping be removed as well?" && G_EXEC rm -Rf /mnt/dietpi_userdata/solidping
 		fi
 
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Finalising uninstall'

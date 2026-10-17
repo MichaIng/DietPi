@@ -423,6 +423,14 @@ aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"
 aARCH[$software_id]='armv6 armv7 arm64 amd64 riscv64'
 aREGEX[$software_id]='https://github\.com/prometheus/prometheus/releases/download/.*/prometheus-[0-9][^/]*\.linux-\$arch\.tar\.gz'
 
+# SolidPing
+software_id='solidping'
+aURL[$software_id]='https://api.github.com/repos/fclairamb/solidping/releases/latest'
+aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/solidping-linux-$arch\.gz(?=\")"'
+aARCH[$software_id]='arm64 amd64'
+aARCH_CHECK[$software_id]='armv7 riscv64'
+aREGEX[$software_id]='https://github\.com/fclairamb/solidping/releases/download/.*/solidping-linux-\$arch\.gz'
+
 ### URL check loop ###
 
 for i in "${!aCHECK[@]}"
