@@ -189,7 +189,7 @@ Process_Software()
 			'mariadb') aSERVICES[$i]='mariadb' aTCP[$i]='3306';;
 			'mate') aCOMMANDS[$i]='mate-session -h';;
 			'mc') aCOMMANDS[$i]='mc -V';;
-			'medusa') aSERVICES[$i]='medusa' aTCP[$i]='8081'; (( $emulation )) && aDELAY[$i]=30;;
+			'medusa') aSERVICES[$i]='medusa' aTCP[$i]='8081'; (( $emulation )) && aDELAY[$i]=60;;
 			# MicroK8s: /run/udev required for snapd update to succeed on first attempt doing a udev trigger; ~@mount + loop devices for snapd snaps=squashfs mounts; /dev/kmsg mount + CAP_SYSLOG: "Error: failed to run Kubelet: failed to create kubelet: open /dev/kmsg: no such file or directory"
 			'microk8s') aCOMMANDS[$i]='/snap/bin/microk8s status' aSERVICES[$i]='snapd snap.microk8s.daemon-containerd' aDELAY[$i]=30 CAPABILITIES+=',CAP_NET_ADMIN,CAP_MAC_ADMIN,CAP_SYSLOG' SYSCALLS+=' add_key keyctl bpf ~@mount' aOPTIONS+=('--bind-ro=/run/udev' '--bind=/dev/loop-control' '--bind=/dev/loop'{1,2,3,4,5,6,7} '--bind=/dev/kmsg');;
 			'mineos') aSERVICES[$i]='mineos' aTCP[$i]='8443';;
