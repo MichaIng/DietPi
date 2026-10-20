@@ -662,12 +662,49 @@ For example: "/mnt/*" or "re:^/mnt/.*/*$"'
 
 		local -a mount_order=() mount_lines
 		declare -A mount_used mount_size mount_perc mount_name
-		local line mnt_target used size perc name
+		local line mnt_target used size perc name findmnt_out
 
-		# Pull all mounts once (-D -n -r) in bytes (-b). Rebuild TARGET safely
-		# (handles spaces) and compute USE% with one decimal using mawk from USED/SIZE.
+		# Trixie+: Pre-select mounts via findmnt's --filter option (util-linux 2.40+). It evaluates the filter before gathering
+		# other column data, hence statfs() for USED/SIZE is called for matching mounts only, and an offline network share which
+		# is not shown in the banner cannot block it: https://github.com/MichaIng/DietPi/issues/8288
+		# - This is a pre-selection only, the actual matching is done below as before. Hence it may be broader, but never narrower than the patterns.
+		# - Exact mounts are matched as is. For globs, the literal prefix up to the first wildcard is matched. "re:" patterns are passed as is.
+		# - findmnt -r escapes special characters like spaces as \xHH, while the filter matches the raw TARGET, hence exact mounts and globs are decoded via "printf %b".
+		# - The filter is skipped if any pattern contains a double quote, which cannot be used within filter strings, or a regex contains "\x", which cannot be decoded safely.
+		local filter='' p prefix
+		if (( $G_DISTRO > 7 ))
+		then
+			for p in "${aDISK_SPACE_MOUNTS[@]}"
+			do
+				[[ $p ]] || continue
+				[[ $p == *'"'* ]] && { filter=; break; }
+				filter+="${filter:+ || }TARGET == \"$(printf '%b' "$p")\""
+			done
+			(( ${aENABLED[disk_patterns]} == 1 )) && for p in "${aDISK_SPACE_PATTERNS[@]}"
+			do
+				[[ $p == *'"'* || $p == 're:'*'\x'* ]] && { filter=; break; }
+				if [[ $p == 're:'* ]]
+				then
+					filter+="${filter:+ || }TARGET =~ \"${p#re:}\""
+				else
+					prefix=$(printf '%b' "${p%%[*?[\\]*}" | sed 's/[][\.^$*+?(){}|]/\\&/g')
+					filter+="${filter:+ || }TARGET =~ \"^$prefix\""
+				fi
+			done
+		fi
+
+		# Pull matching mounts (or all on Bookworm) once (-n -r) in bytes (-b).
+		# If findmnt fails with an error message, e.g. due to an invalid filter regex, fall back to all mounts.
+		if [[ $filter ]]
+		then
+			findmnt_out=$(findmnt -bnro TARGET,USED,SIZE --real -Q "$filter" 2>&1) || { [[ $findmnt_out ]] && findmnt_out=$(findmnt -bnro TARGET,USED,SIZE --real); }
+		else
+			findmnt_out=$(findmnt -bnro TARGET,USED,SIZE --real)
+		fi
+
+		# Rebuild TARGET safely (handles spaces) and compute USE% with one decimal using mawk from USED/SIZE.
 		# Use ASCII Unit Separator (0x1F) as a safe field delimiter to avoid collisions with mount names
-		mapfile -t mount_lines < <(findmnt -bnro TARGET,USED,SIZE --real | mawk -v SEP="$(printf '\037')" '{used=$(NF-1); size=$NF; target=$1; for(i=2;i<=NF-2;i++) target=target" "$i; perc=(size>0? used/size*100 : 0); printf "%s%s%s%s%s%s%s\n", target, SEP, used, SEP, size, SEP, sprintf("%.1f%%", perc)}')
+		[[ $findmnt_out ]] && mapfile -t mount_lines < <(mawk -v SEP="$(printf '\037')" '{used=$(NF-1); size=$NF; target=$1; for(i=2;i<=NF-2;i++) target=target" "$i; perc=(size>0? used/size*100 : 0); printf "%s%s%s%s%s%s%s\n", target, SEP, used, SEP, size, SEP, sprintf("%.1f%%", perc)}' <<< "$findmnt_out")
 
 		# Keep mount_order[] to preserve findmnt's (consistent) order and aDISK_SPACE_PATTERNS' order.
 		for line in "${mount_lines[@]}"
