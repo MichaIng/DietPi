@@ -2,6 +2,11 @@
 {
 . /boot/dietpi/func/dietpi-globals
 grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l'
+Error_Exit(){ G_DIETPI-NOTIFY 1 "$1, aborting ..."; exit 1; }
+
+# Apply GitHub token if set
+header=()
+[[ $GH_TOKEN ]] && header=('-H' "Authorization: token $GH_TOKEN")
 
 # Dependencies
 adeps_build=('automake' 'pkg-config' 'make' 'g++' 'libpopt-dev' 'libconfig-dev' 'libssl-dev' 'libsoxr-dev' 'libavahi-client-dev' 'libasound2-dev' 'libglib2.0-dev' 'libmosquitto-dev' 'avahi-daemon' 'git' 'libplist-dev' 'libsodium-dev' 'libgcrypt20-dev' 'libavformat-dev' 'xxd' 'libplist-utils')
@@ -10,7 +15,7 @@ adeps2=('libgcrypt20')
 case $G_DISTRO in
 	7) adeps+=('libasound2' 'libssl3' 'libconfig9' 'libglib2.0-0' 'libavcodec59') adeps2+=('libsodium23' 'libplist3');;
 	8) adeps+=('libasound2t64' 'libssl3t64' 'libconfig11' 'libglib2.0-0t64' 'libavcodec61') adeps2+=('libsodium23' 'libplist-2.0-4') adeps_build+=('systemd-dev');;
-	9) adeps+=('libasound2t64' 'libssl3t64' 'libglib2.0-0t64') adeps2+=('libplist-2.0-4') adeps_build+=('systemd-dev'); [[ $G_HW_ARCH_NAME == 'armv6l' ]] && adeps+=('libconfig11' 'libavcodec62') adeps2+=('libsodium23') || adeps+=('libconfig15' 'libavcodec63') adeps2+=('libsodium26');;
+	9) adeps+=('libasound2t64' 'libssl3t64' 'libconfig15' 'libglib2.0-0t64') adeps2+=('libplist-2.0-4') adeps_build+=('systemd-dev'); [[ $G_HW_ARCH_NAME == 'armv6l' ]] && adeps+=('libavcodec62') adeps2+=('libsodium23') || adeps+=('libavcodec63') adeps2+=('libsodium26');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 G_AGUP
@@ -30,8 +35,8 @@ done
 NAME='shairport-sync'
 PRETTY='Shairport Sync'
 repo='https://github.com/mikebrady/shairport-sync'
-version=$(curl -sSf 'https://api.github.com/repos/mikebrady/shairport-sync/releases/latest' | grep -Po '"tag_name": *"\K[^"]+(?=")')
-[[ $version ]] || { G_DIETPI-NOTIFY 1 "No latest $PRETTY version found, aborting ..."; exit 1; }
+version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/mikebrady/shairport-sync/releases/latest' | grep -Po '"tag_name": *"\K[^"]+(?=")')
+[[ $version ]] || Error_Exit "No latest $PRETTY version found"
 
 # Download
 G_DIETPI-NOTIFY 2 "Downloading $PRETTY version \e[33m$version"
