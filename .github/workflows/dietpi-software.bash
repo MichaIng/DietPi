@@ -205,7 +205,7 @@ Process_Software()
 			'naadaemon') aSERVICES[$i]='networkaudiod' aTCP[$i]='43210' aUDP[$i]='43210';;
 			'navidrome') aSERVICES[$i]='navidrome' aTCP[$i]='4533';;
 			'netdata') aSERVICES[$i]='netdata' aTCP[$i]='19999';;
-			'nextcloud') aCOMMANDS[$i]='sudo -u www-data php /var/www/nextcloud/occ status';;
+			'nextcloud') aCOMMANDS[$i]='sudo -u www-data php /var/www/nextcloud/occ status; curl -sSf '\''http://127.0.0.1/nextcloud/status.php'\''; echo;';;
 			'nextcloudtalk') aSERVICES[$i]='coturn' aTCP[$i]=3478 aUDP[$i]=3478;;
 			'nfsclient') aCOMMANDS[$i]='mount.nfs -V';;
 			'nfsserver') aSERVICES[$i]='nfs-kernel-server' aTCP[$i]='2049';;
