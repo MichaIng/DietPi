@@ -210,7 +210,7 @@ Process_Software()
 			'nfsclient') aCOMMANDS[$i]='mount.nfs -V';;
 			'nfsserver') aSERVICES[$i]='nfs-kernel-server' aTCP[$i]='2049';;
 			'nginx') aSERVICES[$i]='nginx' aTCP[$i]='80';;
-			'nodejs') aCOMMANDS[$i]='node -v && echo -n '\''npm: '\'' && npm -v;;
+			'nodejs') aCOMMANDS[$i]='node -v && npm -v;;
 			'nodered') aSERVICES[$i]='node-red' aTCP[$i]='1880'; (( $emulation )) && aDELAY[$i]=30;;
 			'nomachine') aSERVICES[$i]='nxserver' aTCP[$i]='4000';;
 			'nukkit') aSERVICES[$i]='nukkit' aUDP[$i]='19132'; (( $emulation )) && aDELAY[$i]=60;;
