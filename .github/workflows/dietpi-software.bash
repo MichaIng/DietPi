@@ -325,7 +325,7 @@ do
 		'alloguifull') Process_Software squeezelite shairportsync netdata mariadb php sambaserver roonbridge naadaemon mpd ompd avahidaemon allogui gmediarender webserver;;
 		'nextcloud'|'nextcloudtalk') Process_Software mariadb php redis webserver;;
 		'javajdk'|'ubooquity'|'yacy'|'nukkit'|'komga'|'papermc'|'openhab') Process_Software javajre;;
-		'nodered') Process_Software nodejs;;
+		'nodered'|'uptimekuma'|'scrypted') Process_Software nodejs;;
 		'mineos'|'blynkserver') Process_Software nodejs javajre;;
 		'ympd'|'mympd'|'cava') Process_Software mpd;;
 		'ompd') Process_Software mariadb php mpd webserver;;
