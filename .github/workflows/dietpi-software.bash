@@ -195,7 +195,6 @@ Process_Software()
 			'mineos') aSERVICES[$i]='mineos' aTCP[$i]='8443';;
 			'minio') aSERVICES[$i]='minio' aTCP[$i]='9001 9004' aCOMMANDS[$i]='bash -ic '\''mc mb local/test'\';;
 			'mjpgstreamer') aCOMMANDS[$i]='/opt/mjpg-streamer/mjpg_streamer -v';; # aSERVICES[$i]='mjpg-streamer' aTCP[$i]='8082' Service does not start without an actual video device
-			'mono') aCOMMANDS[$i]='mono -V';;
 			'mopidy') aSERVICES[$i]='mopidy' aTCP[$i]='6680';;
 			'mosquitto') aSERVICES[$i]='mosquitto' aTCP[$i]='1883';;
 			'motioneye') aSERVICES[$i]='motioneye' aTCP[$i]='8765';;
@@ -240,7 +239,6 @@ Process_Software()
 			'radarr') aSERVICES[$i]='radarr' aTCP[$i]='7878';;
 			'raspotify') aSERVICES[$i]='raspotify';;
 			'rclone') aCOMMANDS[$i]='rclone version';;
-			'readarr') aSERVICES[$i]='readarr' aTCP[$i]='8787';;
 			'readymedia') aSERVICES[$i]='minidlna' aTCP[$i]='8200';;
 			'redis') aSERVICES[$i]='redis-server' aTCP[$i]='6379';;
 			'remoteit') aSERVICES[$i]='schannel' aUDP[$i]='5980';; # remoteit@.service service listens on random high UDP port
@@ -261,7 +259,7 @@ Process_Software()
 			'snapcastclient') aSERVICES[$i]='snapclient';;
 			'snapcastserver') aSERVICES[$i]='snapserver' aTCP[$i]='1704 1780';;
 			'soju') aSERVICES[$i]='soju' aTCP[$i]='6667';;
-			'sonarr') (( $arch == 1 )) || aSERVICES[$i]='sonarr' aTCP[$i]='8989';; # Skip on ARMv6 failing in container with "If you're reading this, the MonoMod.RuntimeDetour selftest failed."
+			'sonarr') aSERVICES[$i]='sonarr' aTCP[$i]='8989';;
 			'spotifyd') aSERVICES[$i]='spotifyd' aUDP[$i]='5353';; # + random high TCP port
 			'sqlite') aCOMMANDS[$i]='sqlite3 -version';;
 			'squeezelite') aSERVICES[$i]='squeezelite';; # Service listens on random high UDP port
@@ -547,8 +545,8 @@ then
 	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/i\sed -i '\''/^DocumentRoot/a\Mutex posixsem'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 fi
 
-# Workaround for Readarr/Kavita explicitly calling uname without shell, breaking our ARM workaround
-if (( ${aINSTALL[readarr]} )) || (( ${aINSTALL[kavita]} )) && [[ -f 'rootfs/usr/local/bin/uname' ]]
+# Workaround for Kavita explicitly calling uname without shell, breaking our ARM workaround
+if (( ${aINSTALL[kavita]} )) && [[ -f 'rootfs/usr/local/bin/uname' ]]
 then
 	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/i\sed -i '\''/# Custom 1st run script/i\\rm /usr/local/bin/uname'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 fi
