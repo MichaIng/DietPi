@@ -159,7 +159,7 @@ aREGEX[$software_id]='https://github.com/Radarr/Radarr/releases/download/v[^3].*
 software_id='jackett'
 aURL[$software_id]='https://api.github.com/repos/Jackett/Jackett/releases/latest'
 aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/Jackett\.Binaries\.$arch\.tar\.gz(?=\")"'
-aARCH[$software_id]='Mono LinuxARM32 LinuxARM64 LinuxAMDx64'
+aARCH[$software_id]='LinuxARM32 LinuxARM64 LinuxAMDx64'
 aARCH_CHECK[$software_id]='LinuxRISCV64'
 aREGEX[$software_id]='https://github.com/Jackett/Jackett/releases/download/.*/Jackett.Binaries.$arch.tar.gz'
 
@@ -275,13 +275,6 @@ aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"
 aARCH[$software_id]='arm-v6 arm-v7 arm64 amd64'
 aARCH_CHECK[$software_id]='riscv64'
 aREGEX[$software_id]='https://github.com/rclone/rclone/releases/download/.*/rclone-.*-linux-\$arch\.deb'
-
-software_id='readarr'
-aURL[$software_id]='https://api.github.com/repos/Readarr/Readarr/releases'
-aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*linux-core-$arch\.tar\.gz(?=\")" | head -1'
-aARCH[$software_id]='arm arm64 x64'
-aARCH_CHECK[$software_id]='riscv64'
-aREGEX[$software_id]='https://github.com/Readarr/Readarr/releases/download/.*/Readarr.develop\..*\.linux-core-\$arch\.tar\.gz'
 
 software_id='navidrome'
 aURL[$software_id]='https://api.github.com/repos/navidrome/navidrome/releases/latest'
