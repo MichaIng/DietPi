@@ -1,0 +1,165 @@
+#!/bin/bash
+{
+# Import DietPi-Globals ---------------------------------------------------------------
+. /boot/dietpi/func/dietpi-globals
+readonly G_PROGRAM_NAME='dietpi-forky-upgrade'
+[[ $G_DISTRO == [89] ]] || { G_DIETPI-NOTIFY 1 'You must run a Debian Trixie system to run this script!'; exit 1; }
+G_CHECK_ROOT_USER "$@"
+G_CHECK_ROOTFS_RW
+G_INIT
+# Import DietPi-Globals ---------------------------------------------------------------
+
+# Warn about incompatible installed software titles
+alist=()
+# NB: IDs are numeric as long as dietpi-update did not migrate the install states file yet
+while read -r id
+do
+	case $id in
+		*) :;;
+	esac
+done < <(sed -nE 's/^aSOFTWARE_INSTALL_STATE\[([[:alnum:]]+)\]=2$/\1/p' /boot/dietpi/.installed)
+(( ! ${#alist[@]} )) || G_WHIP_BUTTON_OK_TEXT='Continue' G_WHIP_BUTTON_CANCEL_TEXT='Exit' G_WHIP_YESNO "[WARNING] Incompatible software titles found
+\nThe following installed software titles are not (yet) compatible with Debian Forky on your system:
+${alist[*]}
+\nDo you want to continue regardless?\n" || exit 0
+
+# Offer a backup before doing any changes to the system
+G_PROMPT_BACKUP
+
+G_DIETPI-NOTIFY 2 'Upgrading APT packages to latest versions provided by Debian Trixie'
+/boot/dietpi/dietpi-services stop
+G_AGUP
+G_AGDUG
+G_AGA
+
+G_CHECK_KERNEL || { G_WHIP_YESNO '[ INFO ] Reboot required, then rerun this script
+\nYour system needs to be rebootet to apply a recent kernel upgrade. Please do this first and then rerun this script to proceed with the Forky upgrade.
+\nShall we reboot your system now?' && reboot; exit 0; }
+
+G_DIETPI-NOTIFY 2 'Updating DietPi to latest version'
+/boot/dietpi/dietpi-update 1
+
+mapfile -t apackages < <(apt-mark showhold)
+[[ ${apackages[0]} ]] && G_EXEC_DESC='Unholding all packages' G_EXEC apt-mark unhold "${apackages[@]}"
+unset -v apackages
+
+G_DIETPI-NOTIFY 2 'Migrating package lists to Forky suite'
+G_EXEC sed --follow-symlinks -i 's/trixie/forky/g' /etc/apt/sources.list
+for i in /etc/apt/sources.list.d/*.list
+do
+	[[ $i == '/etc/apt/sources.list.d/*.list' ]] && break
+	G_EXEC sed --follow-symlinks -i 's/trixie/forky/g' "$i"
+	G_EXEC sed --follow-symlinks -i '/download\.opensuse\.org/s/Debian_13/Debian_Testing/' "$i"
+	#G_EXEC sed --follow-symlinks -i '/download\.opensuse\.org/s/Raspbian_13/Raspbian_14/' "$i"
+done
+
+G_DIETPI-NOTIFY 2 'Reverting some package lists to Trixie which have no Forky suite (yet)'
+for i in dietpi-influxdb docker dietpi-moonlight dietpi-moonlight-qt
+do
+	[[ -f /etc/apt/sources.list.d/$i.list ]] || continue
+	G_EXEC sed --follow-symlinks -i 's/forky/trixie/g' "/etc/apt/sources.list.d/$i.list"
+done
+
+G_AGUG_ARGS=()
+G_AGDUG_ARGS=()
+
+G_DIETPI-NOTIFY 2 'Applying the actual upgrade to Debian Forky'
+/boot/dietpi/dietpi-services stop
+G_AGUP
+G_AGUG "${G_AGUG_ARGS[@]}"; unset -v G_AGUG_ARGS
+G_AGDUG "${G_AGDUG_ARGS[@]}"; unset -v G_AGDUG_ARGS
+
+/boot/dietpi/func/dietpi-obtain_hw_model
+. /boot/dietpi/.hw_model
+
+G_DIETPI-NOTIFY 0 'Congratulations, you are now on Forky:'
+head -4 /etc/os-release
+echo
+read -rp 'Next, some migrations are done for all software to run nicely on Forky. This can include dietpi-software reinstalls. Press ENTER to continue or CTRL+C to abort ...'
+
+G_DIETPI-NOTIFY 2 'Running post upgrade migrations'
+/boot/dietpi/dietpi-services stop
+
+# We do not want G_AGP to purge the old kernel package yet!
+eval "$(declare -f G_AGP | sed 's/autopurge/purge/')"
+
+if apt-mark showmanual | grep -q '^libicu76$'
+then
+	G_DIETPI-NOTIFY 2 'Migrating from libicu76 to libicu78'
+	G_AGI libicu78
+	G_EXEC apt-mark auto libicu76
+fi
+
+# Purge PHP 8.4 packages, obsolete after PHP 8.6 install
+#G_AGP '*php8.4*'
+
+# Update PHP-related webserver drop-ins
+for i in apache2 nginx lighttpd
+do
+	[[ -f /etc/systemd/system/$i.service.d/dietpi.conf ]] || continue
+	G_EXEC eval "echo -e '[Unit]\nAfter=php$PHP_VERSION-fpm.service' > '/etc/systemd/system/$i.service.d/dietpi.conf'"
+fi
+
+# Update Coturn settings
+if [[ -f '/etc/turnserver.conf' ]]
+then
+	G_DIETPI-NOTIFY 2 'Updating deprecated Coturn settings'
+	G_EXEC sed --follow-symlinks -i\
+		-e '/^[[:blank:]]*no-dtls/c\#dtls'\
+		-e '/^[[:blank:]]*no-stun-backward-compatibility/c\#stun-backward-compatibility'\
+		-e '/^[[:blank:]]*no-cli/c\#cli'\
+		/etc/turnserver.conf
+fi
+
+# Remove obsolete PHP 8.4 configs and Python 3.13 modules, obsolete after Python 3.14 install
+# /etc/php/8.4
+G_EXEC rm -Rf /usr/local/lib/python3.13 /usr/local/bin/pip3*
+
+# PostgreSQL migration
+if dpkg-query -s 'postgresql' 2> /dev/null | grep -q '^Status: install ok installed$'
+then
+	G_DIETPI-NOTIFY 2 'Migrating PostgreSQL 17 clusters to v18'
+	mapfile -t clusters < <(pg_lsclusters | mawk '$1 == "17" {print $2}')
+	skipped=0
+	G_EXEC systemctl start postgresql
+	for cluster in "${clusters[@]}"
+	do
+		[[ -d /var/lib/postgresql/18/$cluster ]] && { G_DIETPI-NOTIFY 2 "PostgreSQL 18 cluster \"$cluster\" exists already, skipping migration"; skipped=1; continue; }
+		G_DIETPI-NOTIFY 2 "Found PostgreSQL 17 cluster \"$cluster\", starting migration ...";
+		G_EXEC pg_upgradecluster 17 "$cluster"
+		G_EXEC pg_dropcluster 17 "$cluster"
+	done
+	if (( $skipped ))
+	then
+		G_WHIP_MSG '[ INFO ] PostgreSQL 17 to v18 migration incomplete
+\nFor some PostgreSQL 17 cluster(s), the respective v18 cluster existed already, and the migration has hence been skipped.
+\nPlease review those left clusters and in case remove or migrate them to v18 manually. PostgreSQL 17 is kept installed for that. Once all needed clusters have been migrated, purge PostgreSQL 15 with the following commands:
+\nsudo rm /etc/apt/apt.conf.d/02autoremove-postgresql
+sudo apt autopurge'
+	else
+		G_EXEC rm /etc/apt/apt.conf.d/02autoremove-postgresql
+	fi
+fi
+
+# Reinstalls:
+# - Python and all Python applications which require pip installs: mopidy sabnzbd bazarr htpcmanager lazylibrarian immichml synapse motioneye octoprint
+# - Medusa to assure Python 3.14 compatible version
+extra=()
+# - UnRAR on non-ARMv6 Raspbian systems, for which we host the respective Debian packages on our server
+(( $G_HW_MODEL != 1 )) && (( $G_RASPBIAN )) && extra+=(unrar)
+G_PROMPT_BACKUP_DISABLED=1 /boot/dietpi/dietpi-software reinstall python3 mopidy sabnzbd bazarr htpcmanager lazylibrarian immichml synapse motioneye octoprint medusa "${extra[@]}"
+
+G_DIETPI-NOTIFY 2 'Purging left config files from packages which were removed before already'
+mapfile -t packages < <(dpkg -l | mawk '$1=="rc"{print $2}')
+G_AGP "${packages[@]}"
+
+cat << '_EOF_' > /etc/bashrc.d/zz-dietpi-autopurge.bash
+{
+G_DIETPI-NOTIFY 2 'Autoremoving leftover packages from Forky upgrade...'
+G_EXEC_NOHALT=1 G_SUDO G_EXEC rm /etc/bashrc.d/zz-dietpi-autopurge.bash
+G_AGA
+}
+_EOF_
+
+G_WHIP_YESNO 'All finished!\n\nWe highly recommend to reboot, shall we reboot now?\n\nNB: To have obsolete leftover packages autoremoved, login as root user once after reboot, or run "sudo apt autopurge".' && reboot
+}
