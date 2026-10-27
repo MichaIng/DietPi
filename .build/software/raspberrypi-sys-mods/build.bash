@@ -45,7 +45,7 @@ G_EXEC curl -sSfo usr/lib/udev/rules.d/61-drm.rules 'https://raw.githubuserconte
 G_EXEC curl -sSfo usr/lib/raspberrypi-sys-mods/serial-alias-helper 'https://raw.githubusercontent.com/RPi-Distro/raspberrypi-sys-mods/pios/trixie/usr/lib/raspberrypi-sys-mods/serial-alias-helper'
 G_EXEC chmod +x usr/lib/raspberrypi-sys-mods/serial-alias-helper
 # - The original rules use the "strings" command from binutils, which we do not want to have pre-installed (it is huge!). So we use "cat", which works for the values expected here.
-G_EXEC sed --follow-symlinks -i 's/(strings/(cat/g'u sr/lib/raspberrypi-sys-mods/serial-alias-helper
+G_EXEC sed --follow-symlinks -i 's/(strings/(cat/g' usr/lib/raspberrypi-sys-mods/serial-alias-helper
 G_EXEC curl -sSfo usr/lib/udev/rules.d/99-com.rules 'https://raw.githubusercontent.com/RPi-Distro/raspberrypi-sys-mods/pios/trixie/usr/lib/udev/rules.d/99-com.rules'
 
 ### control files
