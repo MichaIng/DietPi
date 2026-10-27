@@ -118,7 +118,9 @@ G_EXEC cd "$NAME-$version"
 # shellcheck disable=SC2015
 grep -q '^include(GNUInstallDirs)$' CMakeLists.txt && G_EXEC sed --follow-symlinks -i "/^include(GNUInstallDirs)$/a\set(CMAKE_INSTALL_RPATH \"\${CMAKE_INSTALL_FULL_LIBDIR}/$NAME\")" CMakeLists.txt || Error_Exit 'CMakeLists.txt does not contain "include(GNUInstallDirs)" line anymore'
 export CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3'
-G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH='/tmp/deps' -DCMAKE_INSTALL_PREFIX='/usr' -DUSE_{PCEM,UAENET_PCAP,GPIOD,DBUS,OPENGL}=0 -DUSE_{MPG123,LIBSERIALPORT,PORTMIDI,LIBENET,ZSTD}=1 -DWITH_LTO=1
+# - Skip LTO on Bookworm, as it fails there
+(( $G_DISTRO < 8 )) && LTO=('-DWITH_LTO=0') || LTO=('-DWITH_LTO=1')
+G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH='/tmp/deps' -DCMAKE_INSTALL_PREFIX='/usr' -DUSE_{PCEM,UAENET_PCAP,GPIOD,DBUS,OPENGL}=0 -DUSE_{MPG123,LIBSERIALPORT,PORTMIDI,LIBENET,ZSTD}=1 "${LTO[@]}"
 G_EXEC_OUTPUT=1 G_EXEC cmake --build build
 G_EXEC strip --remove-section=.comment --remove-section=.note "build/$NAME"
 
