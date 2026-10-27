@@ -25,13 +25,13 @@ adeps_build+=('libpng-dev') adeps+=()
 # - SDL2_ttf
 adeps_build+=('libfreetype-dev') adeps+=('libfreetype6')
 # - Amiberry
-adeps_build+=('cmake' 'g++' 'libflac-dev' 'libmpg123-dev' 'libpcap0.8-dev' 'nlohmann-json3-dev' 'libserialport-dev' 'libportmidi-dev' 'libmpeg2-4-dev' 'libenet-dev' 'libzstd-dev')
+adeps_build+=('cmake' 'g++' 'libflac-dev' 'libmpg123-dev' 'nlohmann-json3-dev' 'libserialport-dev' 'libportmidi-dev' 'libmpeg2-4-dev' 'libenet-dev' 'libzstd-dev')
 adeps+=('libserialport0' 'libmpeg2-4' 'libenet7' 'libzstd1')
 # - Distro-specific package names
 case $G_DISTRO in
-	7) adeps+=('libasound2' 'libpng16-16' 'libflac12' 'libmpg123-0' 'libpcap0.8' 'libportmidi0');;
-	8) adeps+=('libasound2t64' 'libpng16-16t64' 'libflac14' 'libmpg123-0t64' 'libpcap0.8t64' 'libportmidi0');;
-	9) adeps+=('libasound2t64' 'libpng16-16t64' 'libflac14' 'libmpg123-0t64' 'libpcap0.8t64' 'libportmidi2');;
+	7) adeps+=('libasound2' 'libpng16-16' 'libflac12' 'libmpg123-0' 'libportmidi0');;
+	8) adeps+=('libasound2t64' 'libpng16-16t64' 'libflac14' 'libmpg123-0t64' 'libportmidi0');;
+	9) adeps+=('libasound2t64' 'libpng16-16t64' 'libflac14' 'libmpg123-0t64' 'libportmidi2');;
 	*) Error_Exit "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)";;
 esac
 # - kbd: For "chvt" used in systemd service
@@ -118,7 +118,7 @@ G_EXEC cd "$NAME-$version"
 # shellcheck disable=SC2015
 grep -q '^include(GNUInstallDirs)$' CMakeLists.txt && G_EXEC sed --follow-symlinks -i "/^include(GNUInstallDirs)$/a\set(CMAKE_INSTALL_RPATH \"\${CMAKE_INSTALL_FULL_LIBDIR}/$NAME\")" CMakeLists.txt || Error_Exit 'CMakeLists.txt does not contain "include(GNUInstallDirs)" line anymore'
 export CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3'
-G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH='/tmp/deps' -DCMAKE_INSTALL_PREFIX='/usr' -DUSE_{PCEM,GPIOD,DBUS,OPENGL}=0 -DUSE_{MPG123,UAENET_PCAP,LIBSERIALPORT,PORTMIDI,LIBENET,ZSTD}=1 -DWITH_LTO=1
+G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH='/tmp/deps' -DCMAKE_INSTALL_PREFIX='/usr' -DUSE_{PCEM,UAENET_PCAP,GPIOD,DBUS,OPENGL}=0 -DUSE_{MPG123,LIBSERIALPORT,PORTMIDI,LIBENET,ZSTD}=1 -DWITH_LTO=1
 G_EXEC_OUTPUT=1 G_EXEC cmake --build build
 G_EXEC strip --remove-section=.comment --remove-section=.note "build/$NAME"
 
