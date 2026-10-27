@@ -22,20 +22,7 @@ G_EXEC curl -sSfo usr/share/doc/raspberrypi-sys-mods/copyright 'https://raw.gith
 G_EXEC curl -sSfo usr/lib/udev/rules.d/10-vc.rules 'https://raw.githubusercontent.com/RPi-Distro/raspberrypi-sys-mods/pios/trixie/usr/lib/udev/rules.d/10-vc.rules'
 
 # Automatically load kernel modules for attached I2C and SPI devices
-cat << '_EOF_' > usr/lib/raspberrypi-sys-mods/i2cprobe
-#!/bin/dash
-ALIASES="/lib/modules/$(uname -r)/modules.alias"
-n=0
-while :; do
-	eval "comp=\"\${OF_COMPATIBLE_$n##*,}\""
-	[ -n "$comp" ] || break
-	if grep -q "alias $SUBSYSTEM:$comp " "$ALIASES"; then
-		modprobe "$SUBSYSTEM:$comp" && exit 0
-	fi
-	n=$(( $n + 1 ))
-done
-modprobe "$MODALIAS" || modprobe "of:N${OF_NAME}T<NULL>C$OF_COMPATIBLE_0"
-_EOF_
+G_EXEC curl -sSfo usr/lib/raspberrypi-sys-mods/i2cprobe 'https://raw.githubusercontent.com/RPi-Distro/raspberrypi-sys-mods/pios/trixie/usr/lib/raspberrypi-sys-mods/i2cprobe'
 G_EXEC chmod +x usr/lib/raspberrypi-sys-mods/i2cprobe
 G_EXEC curl -sSfo usr/lib/udev/rules.d/15-i2c-modprobe.rules 'https://raw.githubusercontent.com/RPi-Distro/raspberrypi-sys-mods/pios/trixie/usr/lib/udev/rules.d/15-i2c-modprobe.rules'
 
@@ -55,9 +42,11 @@ G_EXEC curl -sSfo usr/lib/udev/rules.d/60-piolib.rules 'https://raw.githubuserco
 G_EXEC curl -sSfo usr/lib/udev/rules.d/61-drm.rules 'https://raw.githubusercontent.com/RPi-Distro/raspberrypi-sys-mods/pios/trixie/usr/lib/udev/rules.d/61-drm.rules'
 
 # Further GPIO/I2C/SPI/VideoCore group permissions and serial device symlinks
-G_EXEC curl -sSfo usr/lib/udev/rules.d/99-com.rules 'https://raw.githubusercontent.com/RPi-Distro/raspberrypi-sys-mods/pios/trixie/usr/lib/udev/rules.d/99-com.rules'
+G_EXEC curl -sSfo usr/lib/raspberrypi-sys-mods/serial-alias-helper 'https://raw.githubusercontent.com/RPi-Distro/raspberrypi-sys-mods/pios/trixie/usr/lib/raspberrypi-sys-mods/serial-alias-helper'
+G_EXEC chmod +x usr/lib/raspberrypi-sys-mods/serial-alias-helper
 # - The original rules use the "strings" command from binutils, which we do not want to have pre-installed (it is huge!). So we use "cat", which works for the values expected here.
-G_EXEC sed --follow-symlinks -i 's/(strings/(cat/g' usr/lib/udev/rules.d/99-com.rules
+G_EXEC sed --follow-symlinks -i 's/(strings/(cat/g'u sr/lib/raspberrypi-sys-mods/serial-alias-helper
+G_EXEC curl -sSfo usr/lib/udev/rules.d/99-com.rules 'https://raw.githubusercontent.com/RPi-Distro/raspberrypi-sys-mods/pios/trixie/usr/lib/udev/rules.d/99-com.rules'
 
 ### control files
 
@@ -75,7 +64,7 @@ G_EXEC chmod +x DEBIAN/preinst
 
 cat << _EOF_ > DEBIAN/control
 Package: raspberrypi-sys-mods
-Version: 2:20251027-dietpi1
+Version: 2:20260914-dietpi1
 Architecture: all
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -uR)

@@ -4,10 +4,8 @@ if [[ -f '/boot/dietpi/func/dietpi-globals' ]]
 then
 	. /boot/dietpi/func/dietpi-globals || exit 1
 else
-	curl -sSfo /tmp/dietpi-globals "https://raw.githubusercontent.com/${G_GITOWNER:-MichaIng}/DietPi/${G_GITBRANCH:-master}/dietpi/func/dietpi-globals" || exit 1
-	# shellcheck disable=SC1091
-	. /tmp/dietpi-globals || exit 1
-	G_EXEC rm /tmp/dietpi-globals
+	# shellcheck disable=SC1090
+	. <(curl -sSf "https://raw.githubusercontent.com/${G_GITOWNER:-MichaIng}/DietPi/${G_GITBRANCH:-master}/dietpi/func/dietpi-globals") || exit 1
 fi
 
 G_EXEC mkdir -p sprd-bluetooth/{DEBIAN,usr/bin,lib/systemd/system}
