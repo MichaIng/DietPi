@@ -10,6 +10,7 @@
 	readonly ADAPTER=$(G_GET_NET -t wlan iface)
 	[[ $ADAPTER ]] || { G_DIETPI-NOTIFY 1 'No WiFi adapter has been found. Exiting...'; exit 1; }
 	[[ $TICKRATE =~ ^[1-9][0-9]*$ ]] || readonly TICKRATE=10
+	[[ $PING_COUNT =~ ^[1-9][0-9]*$ ]] || readonly PING_COUNT=3
 	GATEWAY=
 
 	#-------------------------------------------------------------------------------------
@@ -24,7 +25,7 @@
 			G_DIETPI-NOTIFY 1 "WiFi adapter $ADAPTER has been unplugged. Exiting..."
 			exit 1
 
-		elif ! GATEWAY=$(G_GET_NET -i "$ADAPTER" gateway) || ! ping -nqc 1 -I "$ADAPTER" "$GATEWAY" &> /dev/null
+		elif ! GATEWAY=$(G_GET_NET -i "$ADAPTER" gateway) || ! ping -nqc "$PING_COUNT" -I "$ADAPTER" "$GATEWAY" &> /dev/null
 		then
 			G_DIETPI-NOTIFY 2 "Detected $ADAPTER connection loss. Reconnecting..."
 			ifdown "$ADAPTER"
