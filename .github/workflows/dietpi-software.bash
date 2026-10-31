@@ -271,6 +271,7 @@ Process_Software()
 			'torhotspot') aSERVICES[$i]='tor' aTCP[$i]='9040' aUDP[$i]='53';;
 			'torrelay') aSERVICES[$i]='tor' aTCP[$i]='80 443 9051';;
 			'transmission') aSERVICES[$i]='transmission-daemon' aTCP[$i]='9091 51413' aUDP[$i]='51413';;
+			'tvheadend') aSERVICES[$i]='tvheadend' aTCP[$i]='9981 9982';;
 			'ubooquity') aSERVICES[$i]='ubooquity' aTCP[$i]='2038 2039'; (( $emulation )) && aDELAY[$i]=60;;
 			'unbound') aSERVICES[$i]='unbound' aUDP[$i]='53' aTCP[$i]='53'; [[ ${aSERVICES[adguardhome]} ]] && aUDP[$i]='5335' aTCP[$i]='5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed
 			'unrar') aCOMMANDS[$i]='unrar -V';;
