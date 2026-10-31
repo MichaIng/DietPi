@@ -56,6 +56,7 @@ NEXT_MENU='main'
 MAIN_MENU_LASTITEM=
 IFACE_MENU_LASTITEM=
 PROXY_MENU_LASTITEM=
+WIFIMON_MENU_LASTITEM=
 PRESERVE_SELECTED_SETTINGS=0
 ACTION_VALUE=
 ACTION_EXTRA=
@@ -955,6 +956,51 @@ Menu_Proxy()
 	Apply_Proxy_Settings
 }
 
+Menu_WifiMonitor()
+{
+	local state_text='Off' interval pings
+	systemctl -q is-active dietpi-wifi-monitor && state_text='On'
+	interval=$(sed -n '/^[[:blank:]]*CONFIG_WIFI_MONITOR_INTERVAL=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+	[[ $interval =~ ^([3-9]|[1-9][0-9]+)$ ]] || interval=10
+	pings=$(sed -n '/^[[:blank:]]*CONFIG_WIFI_MONITOR_PINGS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+	[[ $pings =~ ^([1-9]|10)$ ]] || pings=3
+	G_WHIP_MENU_ARRAY=(
+		'State' ": [$state_text]"
+		'Interval' ": [$interval seconds]"
+		'Pings' ": [$pings]"
+	)
+	G_WHIP_DEFAULT_ITEM=$WIFIMON_MENU_LASTITEM
+	G_WHIP_MENU 'The WiFi connection is checked via ping to the default gateway. The interface is only restarted if none of the pings is answered.' || { NEXT_MENU="iface:$CURRENT_IFACE"; return 0; }
+	WIFIMON_MENU_LASTITEM=$G_WHIP_RETURNED_VALUE
+	case $G_WHIP_RETURNED_VALUE in
+		'State')
+			if [[ $state_text == 'On' ]]
+			then
+				G_EXEC_NOEXIT=1 G_EXEC systemctl disable --now dietpi-wifi-monitor
+			else
+				G_EXEC_NOEXIT=1 G_EXEC systemctl enable --now dietpi-wifi-monitor
+			fi
+		;;
+		'Interval')
+			G_WHIP_INPUTBOX_REGEX='^([3-9]|[1-9][0-9]+)$'
+			G_WHIP_INPUTBOX_REGEX_TEXT='an integer number of seconds of 3 or higher'
+			G_WHIP_DEFAULT_ITEM=$interval
+			G_WHIP_INPUTBOX 'Please enter the interval in seconds between connection checks (min 3):' || return 0
+			G_CONFIG_INJECT 'CONFIG_WIFI_MONITOR_INTERVAL=' "CONFIG_WIFI_MONITOR_INTERVAL=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt
+			[[ $state_text == 'On' ]] && G_EXEC_NOEXIT=1 G_EXEC systemctl restart dietpi-wifi-monitor
+		;;
+		'Pings')
+			G_WHIP_INPUTBOX_REGEX='^([1-9]|10)$'
+			G_WHIP_INPUTBOX_REGEX_TEXT='an integer number between 1 and 10'
+			G_WHIP_DEFAULT_ITEM=$pings
+			G_WHIP_INPUTBOX 'Please enter the number of pings (1-10) sent per connection check:' || return 0
+			G_CONFIG_INJECT 'CONFIG_WIFI_MONITOR_PINGS=' "CONFIG_WIFI_MONITOR_PINGS=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt
+			[[ $state_text == 'On' ]] && G_EXEC_NOEXIT=1 G_EXEC systemctl restart dietpi-wifi-monitor
+		;;
+		*) :;;
+	esac
+}
+
 Apply_Static_IP_Defaults()
 {
 	[[ $CURRENT_IFACE_MODE == 'static' ]] || return 0
@@ -1137,14 +1183,7 @@ Menu_Interface()
 			'Static Gateway') Change_StaticGateway;;
 			'Static DNS') Change_StaticDns;;
 			'Country') Change_WifiCountryCode;;
-			'Auto Reconnect')
-				if (( $CURRENT_IFACE_WIFI_AUTO_RECONNECT ))
-				then
-					G_EXEC_NOEXIT=1 G_EXEC systemctl disable --now dietpi-wifi-monitor
-				else
-					G_EXEC_NOEXIT=1 G_EXEC systemctl enable --now dietpi-wifi-monitor
-				fi
-			;;
+			'Auto Reconnect') NEXT_MENU='monitor';;
 			'Boot Mode') Change_BootMode;;
 			'Enable') CURRENT_IFACE_ENABLED=1; Apply_Current_Interface 1;;
 			'Disable') CURRENT_IFACE_ENABLED=0; G_EXEC_NOEXIT=1 G_EXEC systemctl disable --now dietpi-wifi-monitor; Apply_Current_Interface 1 && Return_From_Submenu "iface:$iface";;
@@ -1391,6 +1430,7 @@ Menu_Loop()
 		'iface:'*) Menu_Interface "${NEXT_MENU#iface:}"; PRESERVE_SELECTED_SETTINGS=1;; # do not override changed CURRENT_IFACE_* settings from values in config files while in this menu
 		'country') Load_Interface_State "${WIFI_INTERFACES[0]:-wlan0}"; Change_WifiCountryCode; return 1;; # called via NEXT_MENU from CLI only
 		'proxy') Menu_Proxy;;
+		'monitor') Menu_WifiMonitor;;
 		'exit') return 1;;
 		*) NEXT_MENU='main';;
 	esac
