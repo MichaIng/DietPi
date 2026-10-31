@@ -673,6 +673,18 @@
 
 	}
 
+	# Ensure /etc/pihole/cli_pw exists: Create with random password if root, return 1 otherwise
+	Pihole_CLI_Password()
+	{
+		[[ -s '/etc/pihole/cli_pw' ]] && return 0
+		(( $UID )) && return 1
+		local pw
+		pw=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32) || return 1
+		( umask 0077; echo "$pw" > /etc/pihole/cli_pw ) || return 1
+		chown pihole:pihole /etc/pihole/cli_pw 2> /dev/null
+		G_DIETPI-NOTIFY 2 'Created /etc/pihole/cli_pw for Pi-hole API access'
+	}
+
 	# Pi-hole stats
 	PIHOLE_QUERY_COUNT=0
 	PIHOLE_TOTAL_ADS=0
@@ -686,8 +698,40 @@
 		# Pi-hole v6: https://docs.pi-hole.net/api/
 		if [[ -f '/etc/pihole/pihole.toml' ]]
 		then
-			first_line="${aCOLOUR[1]}$C_REVERSE Pi-hole v6 not supported yet"
-			return
+			Pihole_CLI_Password || { first_line="${aCOLOUR[1]}$C_REVERSE Pi-hole: Run dietpi-cloudshell as root once "; return; }
+
+			# Get web server port if not obtained before
+			if [[ ! $PIHOLE_API_PORT ]]
+			then
+				PIHOLE_API_PORT=$(sed -n '/^[[:blank:]]*port[[:blank:]]*=[[:blank:]]*"/{s/^[^"]*"\([0-9]*\).*/\1/p;q}' /etc/pihole/pihole.toml)
+				[[ $PIHOLE_API_PORT ]] || PIHOLE_API_PORT=80 # default
+			fi
+			local url="http://127.0.0.1:$PIHOLE_API_PORT/api" pw response sid
+			read -r pw < /etc/pihole/cli_pw
+			pw=${pw//\\/\\\\}
+			pw=${pw//\"/\\\"}
+
+			# Authenticate and obtain session ID
+			response=$(curl -sSf -m 3 -H 'Content-Type: application/json' -d "{\"password\":\"$pw\"}" "$url/auth") || { first_line="${aCOLOUR[1]}$C_REVERSE Pi-hole connection failed"; return; }
+			sid=$(sed -n 's/.*"sid":"\([^"]*\)".*/\1/p' <<< "$response")
+			[[ $sid ]] || { first_line="${aCOLOUR[1]}$C_REVERSE Pi-hole authentication failed"; return; }
+
+			# Stats
+			response=$(curl -sSf -m 3 -H "sid: $sid" "$url/stats/summary") || { first_line="${aCOLOUR[1]}$C_REVERSE Pi-hole connection failed"; return; }
+			PIHOLE_QUERY_COUNT=$(sed -n 's/.*"queries":{"total":\([0-9]*\).*/\1/p' <<< "$response")
+			PIHOLE_TOTAL_ADS=$(sed -n 's/.*"queries":{"total":[0-9]*,"blocked":\([0-9]*\).*/\1/p' <<< "$response")
+			PIHOLE_TOTAL_DOMAINS=$(sed -n 's/.*"domains_being_blocked":\([0-9]*\).*/\1/p' <<< "$response")
+			: "${PIHOLE_QUERY_COUNT:=0}" "${PIHOLE_TOTAL_ADS:=0}" "${PIHOLE_TOTAL_DOMAINS:=0}"
+
+			# Last blocked domain
+			response=$(curl -sSf -m 3 -H "sid: $sid" "$url/queries?length=1&upstream=blocked") && PIHOLE_LAST_DOMAIN_BLOCKED=$(sed -n 's/.*"domain":"\([^"]*\)".*/\1/p' <<< "$response")
+
+			# Close session
+			curl -sS -m 3 -X DELETE -H "sid: $sid" "$url/auth" > /dev/null
+
+			# Calculate percentage of blocked queries and convert to graph
+			Percent_To_Graph $(( $PIHOLE_QUERY_COUNT ? $PIHOLE_TOTAL_ADS * 100 / $PIHOLE_QUERY_COUNT : 0 ))
+			PIHOLE_PERCENT_ADS=$C_PERCENT_GRAPH
 
 		# Pi-hole v5: https://github.com/pi-hole/pi-hole/blob/v5.18.4/advanced/Scripts/chronometer.sh
 		elif [[ -f '/etc/pihole/pihole-FTL.conf' ]]
@@ -1499,6 +1543,7 @@ _EOF_
 
 			# If selected, assure that nyx Tor monitor is installed
 			[[ $i == 9 ]] && G_AG_CHECK_INSTALL_PREREQ nyx kbd
+			[[ $i == 8 && -f '/etc/pihole/pihole.toml' ]] && Pihole_CLI_Password
 		done
 
 	}
