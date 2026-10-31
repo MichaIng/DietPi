@@ -9,8 +9,12 @@
 
 	readonly ADAPTER=$(G_GET_NET -t wlan iface)
 	[[ $ADAPTER ]] || { G_DIETPI-NOTIFY 1 'No WiFi adapter has been found. Exiting...'; exit 1; }
-	[[ $TICKRATE =~ ^[1-9][0-9]*$ ]] || readonly TICKRATE=10
-	[[ $PING_COUNT =~ ^[1-9][0-9]*$ ]] || readonly PING_COUNT=3
+	TICKRATE=$(sed -n '/^[[:blank:]]*CONFIG_WIFI_MONITOR_INTERVAL=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+	[[ $TICKRATE =~ ^([3-9]|[1-9][0-9]+)$ ]] || TICKRATE=10
+	PING_COUNT=$(sed -n '/^[[:blank:]]*CONFIG_WIFI_MONITOR_PINGS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+	[[ $PING_COUNT =~ ^([1-9]|10)$ ]] || PING_COUNT=3
+	# Preload half of the pings (rounded up), the others follow in 1 second intervals. Ping exits as soon as all replies are received, and succeeds if any reply arrives.
+	PRELOAD=$(( $PING_COUNT / 2 + 1 ))
 	GATEWAY=
 
 	#-------------------------------------------------------------------------------------
@@ -25,7 +29,7 @@
 			G_DIETPI-NOTIFY 1 "WiFi adapter $ADAPTER has been unplugged. Exiting..."
 			exit 1
 
-		elif ! GATEWAY=$(G_GET_NET -i "$ADAPTER" gateway) || ! ping -nqc "$PING_COUNT" -I "$ADAPTER" "$GATEWAY" &> /dev/null
+		elif ! GATEWAY=$(G_GET_NET -i "$ADAPTER" gateway) || ! ping -nqc "$PING_COUNT" -l "$PRELOAD" -I "$ADAPTER" "$GATEWAY" &> /dev/null
 		then
 			G_DIETPI-NOTIFY 2 "Detected $ADAPTER connection loss. Reconnecting..."
 			ifdown "$ADAPTER"
