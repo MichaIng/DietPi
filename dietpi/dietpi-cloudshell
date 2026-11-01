@@ -635,36 +635,19 @@
 		fi
 	}
 
-	# Ensure /etc/pihole/cli_pw exists: Create with random password if root, return 1 otherwise
-	Pihole_CLI_Password()
-	{
-		[[ -s '/etc/pihole/cli_pw' ]] && return 0
-		(( $EUID )) && return 1
-		local pw
-		pw=$(od -An -N16 -tx1 /dev/random) || return 1
-		pw=${pw// /}
-		umask 0037 && echo "$pw" > /etc/pihole/cli_pw && umask 0022 || return 1
-		chown 'pihole:pihole' /etc/pihole/cli_pw
-		G_DIETPI-NOTIFY 2 'Created /etc/pihole/cli_pw for Pi-hole API access'
-	}
-
-	# Pi-hole v6 session handling: Cached password and session ID
-	PIHOLE_PW=
+	# Pi-hole v6 session handling: Cached session ID
 	PIHOLE_SID=
 	# shellcheck disable=SC2329
 	Pihole_Auth()
 	{
-		# Obtain CLI password if not cached yet
-		if [[ ! $PIHOLE_PW ]]
-		then
-			Pihole_CLI_Password || { first_line="${aCOLOUR[1]}$C_REVERSE /etc/pihole/cli_pw misses"; return 1; }
-			# read fails if the file does not end with a newline, hence do not throw error if PIHOLE_PW got a value.
-			read -r PIHOLE_PW < /etc/pihole/cli_pw || [[ $PIHOLE_PW ]] || { first_line="${aCOLOUR[1]}$C_REVERSE /etc/pihole/cli_pw access"; return 1; }
-			PIHOLE_PW=${PIHOLE_PW//\\/\\\\}
-			PIHOLE_PW=${PIHOLE_PW//\"/\\\"}
-		fi
+		# Obtain CLI password on every authentication, since it is recreated on every FTL start
+		local password
+		# read fails if the file does not end with a newline, hence do not throw error if PIHOLE_PW got a value.
+		read -r password < /etc/pihole/cli_pw || [[ $password ]] || { first_line="${aCOLOUR[1]}$C_REVERSE Reading CLI password failed"; return 1; }
+		password=${password//\\/\\\\}
+		password=${password//\"/\\\"}
 		local response
-		response=$(curl -sSm 3 -H 'Content-Type: application/json' -d "{\"password\":\"$PIHOLE_PW\"}" "http://127.0.0.1:$PIHOLE_API_PORT/api/auth") || { first_line="${aCOLOUR[1]}$C_REVERSE Pi-hole connection failed"; return 1; }
+		response=$(curl -sSm 3 --json @- "$PIHOLE_API_PROTO://127.0.0.1:$PIHOLE_API_PORT/api/auth" <<< "{\"password\":\"$password\"}") || { first_line="${aCOLOUR[1]}$C_REVERSE Pi-hole connection failed"; return 1; }
 		PIHOLE_SID=$(sed -n 's/.*"sid":"\([^"]*\)".*/\1/p' <<< "$response")
 		[[ $PIHOLE_SID ]] || { first_line="${aCOLOUR[1]}$C_REVERSE API authentication failed"; return 1; }
 	}
@@ -675,14 +658,14 @@
 	{
 		# Authenticate if no session ID cached yet
 		[[ $PIHOLE_SID ]] || Pihole_Auth || return 1
-		PIHOLE_RESPONSE=$(curl -sSm 3 -w '\n%{http_code}' -H "sid: $PIHOLE_SID" "http://127.0.0.1:$PIHOLE_API_PORT/api/$1") || { first_line="${aCOLOUR[1]}$C_REVERSE Pi-hole connection failed"; return 1; }
+		PIHOLE_RESPONSE=$(curl -sSm 3 -w '\n%{http_code}' -H @- "$PIHOLE_API_PROTO://127.0.0.1:$PIHOLE_API_PORT/api/$1" <<< "sid: $PIHOLE_SID") || { first_line="${aCOLOUR[1]}$C_REVERSE Pi-hole connection failed"; return 1; }
 		local http_code=${PIHOLE_RESPONSE##*$'\n'}
 		# Re-authenticate if session ID expired
 		if [[ $http_code == 401 ]]
 		then
 			PIHOLE_SID=
 			Pihole_Auth || return 1
-			PIHOLE_RESPONSE=$(curl -sSm 3 -w '\n%{http_code}' -H "sid: $PIHOLE_SID" "http://127.0.0.1:$PIHOLE_API_PORT/api/$1") || { first_line="${aCOLOUR[1]}$C_REVERSE Pi-hole connection failed"; return 1; }
+			PIHOLE_RESPONSE=$(curl -sSm 3 -w '\n%{http_code}' -H @- "$PIHOLE_API_PROTO://127.0.0.1:$PIHOLE_API_PORT/api/$1" <<< "sid: $PIHOLE_SID") || { first_line="${aCOLOUR[1]}$C_REVERSE Pi-hole connection failed"; return 1; }
 			http_code=${PIHOLE_RESPONSE##*$'\n'}
 		fi
 		[[ $http_code == 200 ]] || { first_line="${aCOLOUR[1]}$C_REVERSE Pi-hole API request error"; return 1; }
@@ -696,6 +679,7 @@
 	PIHOLE_TOTAL_DOMAINS=0
 	PIHOLE_LAST_DOMAIN_BLOCKED=
 	PIHOLE_API_PORT=
+	PIHOLE_API_PROTO='http'
 	# shellcheck disable=SC2329
 	Obtain_PIHOLE()
 	{
@@ -705,8 +689,14 @@
 			# Get web server port if not obtained before
 			if [[ ! $PIHOLE_API_PORT ]]
 			then
-				PIHOLE_API_PORT=$(sed -n '/^[[:blank:]]*port[[:blank:]]*=[[:blank:]]*"/{s/^[^"]*"\([0-9]*\).*/\1/p;q}' /etc/pihole/pihole.toml)
-				[[ $PIHOLE_API_PORT ]] || PIHOLE_API_PORT=80 # default
+				PIHOLE_API_PORT=$(sed -n '/^[[:blank:]]*port[[:blank:]]*=[[:blank:]]*"/{s/^[^"]*"\([0-9]*[ors]*\).*/\1/p;q}' /etc/pihole/pihole.toml)
+				if [[ $PIHOLE_API_PORT ]]
+				then
+					[[ $PIHOLE_API_PORT == *'s'* ]] && PIHOLE_API_PROTO='https'
+					PIHOLE_API_PORT=${PIHOLE_API_PORT%%[ors]*}
+				else
+					PIHOLE_API_PORT=80 # default
+				fi
 			fi
 
 			# Stats, redo authentication once on 401 (session expired)
@@ -717,8 +707,8 @@
 			: "${PIHOLE_QUERY_COUNT:=0}" "${PIHOLE_TOTAL_ADS:=0}" "${PIHOLE_TOTAL_DOMAINS:=0}"
 
 			# Last blocked domain
-			Pihole_Request 'queries?length=1&upstream=blocked' || return 1
-			PIHOLE_LAST_DOMAIN_BLOCKED=$(sed -n 's/.*"domain":"\([^"]*\)".*/\1/p' <<< "$PIHOLE_RESPONSE")
+			Pihole_Request 'stats/recent_blocked?count=1' || return 1
+			PIHOLE_LAST_DOMAIN_BLOCKED=$(sed -n 's/.*"blocked":\["\([^"]*\)".*/\1/p' <<< "$PIHOLE_RESPONSE")
 
 		# Pi-hole v5: https://github.com/pi-hole/pi-hole/blob/v5.18.4/advanced/Scripts/chronometer.sh
 		elif [[ -f '/etc/pihole/pihole-FTL.conf' ]]
@@ -1521,7 +1511,6 @@ _EOF_
 
 			# If selected, assure that nyx Tor monitor is installed
 			[[ $i == 9 ]] && G_AG_CHECK_INSTALL_PREREQ nyx kbd
-			[[ $i == 8 && -f '/etc/pihole/pihole.toml' ]] && Pihole_CLI_Password
 		done
 
 	}
