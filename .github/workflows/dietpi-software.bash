@@ -295,6 +295,7 @@ Process_Software()
 			'yacy') aSERVICES[$i]='yacy' aTCP[$i]='8090' aDELAY[$i]=30; (( $emulation )) && aDELAY[$i]=120;;
 			'ympd') aSERVICES[$i]='ympd' aTCP[$i]='1337';;
 			'ytdlp') aCOMMANDS[$i]='yt-dlp --version';;
+			'yuvomi') aSERVICES[$i]='yuvomi' aTCP[$i]='3004'; (( $emulation )) && aDELAY[$i]=60;;
 			'zerotier') aSERVICES[$i]='zerotier-one' aTCP[$i]='9993';;
 			# Software titles without further tests
 			# - Software which requires interactive input
@@ -324,7 +325,7 @@ do
 		'alloguifull') Process_Software squeezelite shairportsync netdata mariadb php sambaserver roonbridge naadaemon mpd ompd avahidaemon allogui gmediarender webserver;;
 		'nextcloud'|'nextcloudtalk') Process_Software mariadb php redis webserver;;
 		'javajdk'|'ubooquity'|'yacy'|'nukkit'|'komga'|'papermc'|'openhab') Process_Software javajre;;
-		'nodered'|'uptimekuma'|'scrypted') Process_Software nodejs;;
+		'nodered'|'uptimekuma'|'scrypted'|'yuvomi') Process_Software nodejs;;
 		'mineos'|'blynkserver') Process_Software nodejs javajre;;
 		'ympd'|'mympd'|'cava') Process_Software mpd;;
 		'ompd') Process_Software mariadb php mpd webserver;;
