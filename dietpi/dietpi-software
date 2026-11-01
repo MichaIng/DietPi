@@ -953,6 +953,17 @@ Names are accepted as well, e.g. "Node-RED". Legacy numeric IDs are still suppor
 		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=0
 		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,2]=0
 		#------------------
+		software_id='yuvomi'
+		aSOFTWARE_NAME[$software_id]='Yuvomi'
+		aSOFTWARE_DESC[$software_id]='self-hosted family planner: calendar, tasks, meals, shopping and budget'
+		aSOFTWARE_CATX[$software_id]=4
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#yuvomi'
+		aSOFTWARE_DEPS[$software_id]='nodejs'
+		# - 32-bit ARM/RISC-V: The native SQLite/bcrypt modules ship prebuilt binaries for arm64 and x86_64 only: https://github.com/ulsklyc/yuvomi/blob/main/Dockerfile
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=0
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,2]=0
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,11]=0
+		#------------------
 		software_id='rclone'
 		aSOFTWARE_ID_LEGACY[202]=$software_id
 		aSOFTWARE_NAME[$software_id]='Rclone'
@@ -12769,6 +12780,118 @@ WantedBy=multi-user.target
 _EOF_
 			unset -v mnt opt
 		fi
+
+		if To_Install yuvomi yuvomi # Yuvomi: https://github.com/ulsklyc/yuvomi
+		then
+			local opt='/opt/yuvomi' mnt='/mnt/dietpi_userdata/yuvomi'
+
+			# Deps
+			command -v openssl > /dev/null || aDEPS=('openssl')
+
+			# Download
+			local version=$(curl -sSfL 'https://api.github.com/repos/ulsklyc/yuvomi/releases/latest' | grep -Po '"tag_name": *"\Kv?[0-9.]+(?=")')
+			[[ $version ]] || { version='v2.83.0'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			Download_Install "https://github.com/ulsklyc/yuvomi/archive/refs/tags/$version.tar.gz"
+
+			# Install
+			# - The archive top level directory name has the leading "v" stripped.
+			G_EXEC cd "yuvomi-${version#v}"
+			# - The native modules (better-sqlite3-multiple-ciphers, bcrypt) ship prebuilt binaries for arm64 and x86_64. The install scripts are skipped, since npm would otherwise compile SQLite from source, which is slow and requires a build toolchain.
+			G_EXEC_OUTPUT=1 G_EXEC npm ci --omit dev --no-audit --ignore-scripts
+			G_EXEC cd "$G_WORKING_DIR"
+			[[ -f '/etc/systemd/system/yuvomi.service' ]] && G_EXEC systemctl stop yuvomi # Reinstall/update
+			[[ -d $opt ]] && G_EXEC rm -R "$opt"
+			G_EXEC mv "yuvomi-${version#v}" "$opt"
+
+			# User
+			Create_User -d "$mnt" yuvomi
+
+			# Data dir: Database, backups and modules, hence everything which needs to be backed up, apart from the app itself. Documents are stored in the encrypted database.
+			G_EXEC mkdir -p "$mnt"/{backups,modules}
+
+			# Config: Generated once. NB: The DB encryption key must never change or get lost, otherwise the database cannot be opened anymore!
+			if [[ ! -f $mnt/yuvomi.env ]]
+			then
+				local session_secret=$(openssl rand -hex 32) db_key=$(openssl rand -hex 32)
+				G_EXEC install -m 0600 /dev/null "$mnt/yuvomi.env"
+				cat << _EOF_ > "$mnt/yuvomi.env"
+# Yuvomi configuration: https://github.com/ulsklyc/yuvomi/blob/main/.env.example
+# Restart to apply changes: systemctl restart yuvomi
+
+# Web interface port
+PORT=3004
+
+# Address to listen on: Set to 127.0.0.1 if you access Yuvomi only via a reverse proxy on this host.
+#BIND_ADDRESS=127.0.0.1
+
+# Which proxies may set X-Forwarded-For (client IP for login rate limits and logs).
+# "loopback" trusts only a reverse proxy on this host. Set to the proxy IP/subnet if it runs on another host.
+TRUST_PROXY=loopback
+
+# Set to true if you access Yuvomi via HTTPS, e.g. behind a reverse proxy. Required for push notifications.
+#SESSION_SECURE=true
+
+# Signs login cookies. Changing it only signs everyone out once.
+SESSION_SECRET=$session_secret
+
+# AES-256 database encryption. Do NOT change or lose this key: without it, the database cannot be read anymore!
+# This file is hence part of your backup. Remove the line before the first start to use an unencrypted database.
+DB_ENCRYPTION_KEY=$db_key
+
+# Storage locations
+DB_PATH=$mnt/yuvomi.db
+BACKUP_DIR=$mnt/backups
+MODULES_DIR=$mnt/modules
+
+# Log level: debug, info, warn, error
+#LOG_LEVEL=info
+
+# Weather widget: Coordinates of your location
+#WEATHER_LAT=
+#WEATHER_LON=
+#WEATHER_CITY=
+_EOF_
+				unset -v session_secret db_key
+			fi
+			G_EXEC chmod 0600 "$mnt/yuvomi.env"
+			G_EXEC chown -R yuvomi:yuvomi "$mnt"
+
+			# Service
+			cat << _EOF_ > /etc/systemd/system/yuvomi.service || exit 1
+[Unit]
+Description=Yuvomi (DietPi)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+SyslogIdentifier=Yuvomi
+User=yuvomi
+WorkingDirectory=$opt
+EnvironmentFile=$mnt/yuvomi.env
+Environment=NODE_ENV=production
+ExecStart=/usr/local/bin/node server/index.js
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=1
+PrivateUsers=1
+PrivateTmp=1
+PrivateDevices=1
+ProtectKernelTunables=1
+ProtectControlGroups=1
+ProtectKernelModules=1
+ProtectKernelLogs=1
+ProtectClock=1
+NoNewPrivileges=1
+ReadWritePaths=-$mnt
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			unset -v mnt opt
+		fi
 	}
 
 	# $1: 0=None 23=LXDE 24=MATE 25=Xfce 26=GNUstep 173=LXQt
@@ -14951,6 +15074,13 @@ _EOF_
 			Remove_Service uptime-kuma 1 1
 			G_EXEC rm -Rf /opt/uptime-kuma
 			G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO "Shall all ${aSOFTWARE_NAME[$software_id]} data at /mnt/dietpi_userdata/uptime-kuma be removed as well?" && G_EXEC rm -Rf /mnt/dietpi_userdata/uptime-kuma
+		fi
+
+		if To_Uninstall yuvomi
+		then
+			Remove_Service yuvomi 1 1
+			G_EXEC rm -Rf /opt/yuvomi
+			G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO "Shall all ${aSOFTWARE_NAME[$software_id]} data at /mnt/dietpi_userdata/yuvomi be removed as well? This includes the database, backups, documents and the encryption key. Without the key, the database cannot be restored." && G_EXEC rm -Rf /mnt/dietpi_userdata/yuvomi
 		fi
 
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Finalising uninstall'

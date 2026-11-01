@@ -192,6 +192,11 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/louislam/uptime
 aREGEX[$software_id]='version='\''[^'\'']*'\''; '
 aREPLACE[$software_id]='version='\''$release'\''; '
 
+software_id='yuvomi'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/ulsklyc/yuvomi/releases/latest'\'' | grep -Po '\''"tag_name": *"\K[^"]+(?=")'\'
+aREGEX[$software_id]='version='\''[^'\'']*'\''; '
+aREPLACE[$software_id]='version='\''$release'\''; '
+
 software_id='forgejo'
 aURL[$software_id]='https://codeberg.org/api/v1/repos/forgejo/forgejo/releases/latest'
 aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*-linux-$arch\.xz(?=\")"'
