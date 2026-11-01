@@ -992,6 +992,15 @@ Names are accepted as well, e.g. "Node-RED". Legacy numeric IDs are still suppor
 		(( $G_DISTRO == 8 )) || aSOFTWARE_AVAIL_G_DISTRO[$software_id,$G_DISTRO]=0
 		# onnxruntime wheels only available for ARMv8 and x86_64, and no source package: https://pypi.org/project/onnxruntime/#files
 		(( $G_HW_ARCH == 3 || $G_HW_ARCH == 10 )) || aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,$G_HW_ARCH]=0
+		#------------------
+		software_id='paperlessngx'
+		aSOFTWARE_NAME[$software_id]='Paperless-ngx'
+		aSOFTWARE_DESC[$software_id]='Document management system with OCR and full-text search'
+		aSOFTWARE_CATX[$software_id]=4
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#paperless-ngx'
+		aSOFTWARE_DEPS[$software_id]='redis python3'
+		# PyTorch wheels only available for ARMv8 and x86_64, and no source package: https://download.pytorch.org/whl/cpu/torch/
+		(( $G_HW_ARCH == 3 || $G_HW_ARCH == 10 )) || aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,$G_HW_ARCH]=0
 
 		# Gaming & Emulation
 		#--------------------------------------------------------------------------------
@@ -12368,6 +12377,142 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
+		if To_Install paperlessngx paperless-webserver paperless-consumer paperless-task-queue paperless-scheduler
+		then
+			# Dependencies: https://docs.paperless-ngx.com/setup/#bare_metal
+			# - OCRmyPDF: ghostscript, icc-profiles-free, pngquant, qpdf, tesseract-ocr, unpaper
+			# - Thumbnails and text extraction: fonts-liberation, imagemagick, poppler-utils
+			# - MIME type detection: libmagic1
+			# - Encrypted documents: gnupg
+			aDEPS=('fonts-liberation' 'ghostscript' 'gnupg' 'icc-profiles-free' 'imagemagick' 'libmagic1' 'pngquant' 'poppler-utils' 'qpdf' 'tesseract-ocr' 'unpaper')
+
+			# Assure at least 2 GiB total memory (RAM + swap)
+			Min_Total_Memory 2048
+
+			# Download: The release archive ships the compiled frontend and collected static files
+			local version=$(curl -sSfL 'https://api.github.com/repos/paperless-ngx/paperless-ngx/releases/latest' | grep -Po '"tag_name": *"\K[^"]+')
+			[[ $version ]] || { version='v3.3.4'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			# - Clear existing instance, but keep the venv
+			[[ -d '/opt/paperless-ngx' ]] && G_EXEC find /opt/paperless-ngx -mindepth 1 -maxdepth 1 ! -name venv -exec rm -R {} +
+			Download_Install "https://github.com/paperless-ngx/paperless-ngx/releases/download/$version/paperless-ngx-$version.tar.xz" /opt
+			# - Remove docs and the uncollected duplicate of the static files
+			G_EXEC rm -Rf /opt/paperless-ngx/docs /opt/paperless-ngx/src/documents/static
+			# - Replace the example config, which is read when running management commands from the src directory
+			G_EXEC ln -sf /mnt/dietpi_userdata/paperless-ngx/paperless.conf /opt/paperless-ngx/paperless.conf
+
+			# Install the Python dependencies into a virtual environment at /opt/paperless-ngx/venv
+			Remove_old_venv /opt/paperless-ngx/venv
+			G_EXEC python3 -m venv --upgrade-deps /opt/paperless-ngx/venv
+			# - PyTorch from its CPU index, since the PyPI wheels pull ~3 GiB CUDA dependencies on all Linux systems: https://github.com/MichaIng/DietPi/discussions/5489
+			# - Eager upgrade strategy to upgrade dependencies of an existing venv as well
+			G_EXEC_OUTPUT=1 G_EXEC /opt/paperless-ngx/venv/bin/pip install -U --upgrade-strategy eager --extra-index-url 'https://download.pytorch.org/whl/cpu' --only-deps '/opt/paperless-ngx[webserver]'
+
+			# User
+			Create_User -g dietpi -G redis -d /mnt/dietpi_userdata/paperless-ngx paperless
+
+			# Data directories: Allow users of the dietpi group to add files to the consumption directory
+			G_EXEC mkdir -p /mnt/dietpi_userdata/paperless-ngx/{data,media,consume}
+			G_EXEC chown -R paperless:dietpi /mnt/dietpi_userdata/paperless-ngx
+			G_EXEC chmod 0750 /mnt/dietpi_userdata/paperless-ngx
+			G_EXEC chmod 0775 /mnt/dietpi_userdata/paperless-ngx/consume
+
+			# Config: Preserve existing
+			if [[ ! -f '/mnt/dietpi_userdata/paperless-ngx/paperless.conf' ]]
+			then
+				local redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' /etc/redis/redis.conf | mawk '{print $2}')
+				local timezone=$(readlink /etc/localtime)
+				timezone=${timezone#*/zoneinfo/}
+
+				G_EXEC install -o paperless -g root -m 0600 /dev/null /mnt/dietpi_userdata/paperless-ngx/paperless.conf
+				cat << _EOF_ > /mnt/dietpi_userdata/paperless-ngx/paperless.conf || exit 1
+# Paperless-ngx configuration: https://docs.paperless-ngx.com/configuration/
+
+# Web UI port and bind host
+GRANIAN_HOST=0.0.0.0
+GRANIAN_PORT=8010
+
+# Paths
+PAPERLESS_DATA_DIR=/mnt/dietpi_userdata/paperless-ngx/data
+PAPERLESS_MEDIA_ROOT=/mnt/dietpi_userdata/paperless-ngx/media
+PAPERLESS_CONSUMPTION_DIR=/mnt/dietpi_userdata/paperless-ngx/consume
+
+# Database and broker
+PAPERLESS_DBENGINE=sqlite
+PAPERLESS_REDIS=unix://${redis_sock:-/run/redis/redis-server.sock}
+
+# Security
+PAPERLESS_SECRET_KEY=$(tr -dc '[:alnum:]' < /dev/random | head -c64)
+
+# Time zone and OCR languages: Install additional languages via e.g. "apt install tesseract-ocr-deu" and set e.g. "deu+eng"
+PAPERLESS_TIME_ZONE=${timezone:-UTC}
+PAPERLESS_OCR_LANGUAGE=eng
+
+# Number of parallel document processing tasks: Each one can use several hundred MiB RAM
+PAPERLESS_TASK_WORKERS=1
+_EOF_
+			fi
+
+			# Database migration, search index, and admin user: Redis is used as cache, accessed via UNIX socket as member of the redis group
+			G_EXEC systemctl start redis-server
+			local paperless_manage=(setpriv --reuid='paperless' --regid='dietpi' --init-groups --reset-env -- env 'PAPERLESS_CONFIGURATION_PATH=/mnt/dietpi_userdata/paperless-ngx/paperless.conf' /opt/paperless-ngx/venv/bin/python3 /opt/paperless-ngx/src/manage.py)
+			G_EXEC_OUTPUT=1 G_EXEC "${paperless_manage[@]}" migrate
+			if [[ ! -d '/mnt/dietpi_userdata/paperless-ngx/data/index' ]]
+			then
+				G_EXEC mkdir /mnt/dietpi_userdata/paperless-ngx/data/index
+				G_EXEC chown paperless:dietpi /mnt/dietpi_userdata/paperless-ngx/data/index
+				G_EXEC "${paperless_manage[@]}" document_index reindex
+			fi
+			# - Creates the user only if it does not exist yet
+			G_EXEC_PRE_FUNC(){ acommand[8]="PAPERLESS_ADMIN_PASSWORD=$GLOBAL_PW"; } # Mask password in console output
+			G_EXEC setpriv --reuid='paperless' --regid='dietpi' --init-groups --reset-env -- env 'PAPERLESS_ADMIN_USER=admin' "PAPERLESS_ADMIN_PASSWORD=${GLOBAL_PW//?/X}" 'PAPERLESS_CONFIGURATION_PATH=/mnt/dietpi_userdata/paperless-ngx/paperless.conf' /opt/paperless-ngx/venv/bin/python3 /opt/paperless-ngx/src/manage.py manage_superuser
+
+			# Services: https://github.com/paperless-ngx/paperless-ngx/tree/dev/scripts
+			# - No PrivateTmp, since all services share the scratch directory /tmp/paperless.
+			local service
+			for service in webserver consumer task-queue scheduler
+			do
+				local exec_start=
+				case $service in
+					'webserver') exec_start='/opt/paperless-ngx/venv/bin/granian --interface asginl --ws paperless.asgi:application';;
+					'consumer') exec_start='/opt/paperless-ngx/venv/bin/python3 manage.py document_consumer';;
+					'task-queue') exec_start='/opt/paperless-ngx/venv/bin/celery --app paperless worker --loglevel INFO';;
+					'scheduler') exec_start='/opt/paperless-ngx/venv/bin/celery --app paperless beat --loglevel INFO --schedule /mnt/dietpi_userdata/paperless-ngx/data/celerybeat-schedule.db';;
+					*) :;;
+				esac
+				cat << _EOF_ > "/etc/systemd/system/paperless-$service.service" || exit 1
+[Unit]
+Description=Paperless-ngx ${service^} (DietPi)
+Wants=network-online.target
+After=network-online.target redis-server.service
+
+[Service]
+SyslogIdentifier=Paperless-${service^}
+User=paperless
+WorkingDirectory=/opt/paperless-ngx/src
+Environment=PATH=/opt/paperless-ngx/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin PAPERLESS_CONFIGURATION_PATH=/mnt/dietpi_userdata/paperless-ngx/paperless.conf PYTHONUNBUFFERED=1
+# Workaround for failing systemd.automount: https://dietpi.com/forum/t/17463/22
+EnvironmentFile=-/mnt/dietpi_userdata/paperless-ngx/paperless.conf
+ExecStartPre=/bin/test -e /mnt/dietpi_userdata/paperless-ngx/paperless.conf
+ExecStart=$exec_start
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=1
+PrivateDevices=1
+ProtectKernelTunables=1
+ProtectKernelModules=1
+ProtectControlGroups=1
+ProtectKernelLogs=1
+ProtectClock=1
+NoNewPrivileges=1
+ReadWritePaths=-/mnt -/tmp
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			done
+		fi
+
 		if To_Install lazylibrarian lazylibrarian
 		then
 			# Dependencies
@@ -14923,6 +15068,16 @@ _EOF_
 			# Disable machine learning in Immich server config if still installed
 			[[ -f '/mnt/dietpi_userdata/immich/immich.env' ]] && G_CONFIG_INJECT 'IMMICH_MACHINE_LEARNING_ENABLED=' 'IMMICH_MACHINE_LEARNING_ENABLED=false' /mnt/dietpi_userdata/immich/immich.env
 			[[ -d '/mnt/dietpi_userdata/immich-ml' ]] && G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO "Shall all ${aSOFTWARE_NAME[$software_id]} data at /mnt/dietpi_userdata/immich-ml be removed as well?" && G_EXEC rm -R /mnt/dietpi_userdata/immich-ml
+		fi
+
+		if To_Uninstall paperlessngx
+		then
+			Remove_Service paperless-webserver
+			Remove_Service paperless-consumer
+			Remove_Service paperless-task-queue
+			Remove_Service paperless-scheduler paperless
+			G_EXEC rm -Rf /opt/paperless-ngx /tmp/paperless
+			[[ -d '/mnt/dietpi_userdata/paperless-ngx' ]] && G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO "Shall all ${aSOFTWARE_NAME[$software_id]} data at /mnt/dietpi_userdata/paperless-ngx, including all your documents, be removed as well?" && G_EXEC rm -R /mnt/dietpi_userdata/paperless-ngx
 		fi
 
 		if To_Uninstall lazylibrarian
