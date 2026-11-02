@@ -21,7 +21,7 @@
 	fi
 	# Use half of the pings (rounded up), since we send `n*2-1` pings, using `ping -c n -l n`.
 	# This sends `n` pings right at the start, and finishes immediately if they get all answered.
-	# The next `n-1` pings are send with a second delay each, to still return successfully if there was an outage only during the first fraction of a second.
+	# The next `n-1` pings are sent with a second delay each, to still return successfully if there was an outage only during the first fraction of a second.
 	# Timeouts etc however are counted from the first `n` packets on, so that the overall time until interface restart is not longer compared to a simple `-c 1`.
 	PINGS=$(( $PINGS / 2 + 1 ))
 	GATEWAY=
