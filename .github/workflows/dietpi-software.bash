@@ -255,6 +255,7 @@ Process_Software()
 			'sambaclient') aCOMMANDS[$i]='smbclient -V';;
 			'sambaserver') aSERVICES[$i]='smbd' aTCP[$i]='139 445' aUDP[$i]='137 138';;
 			'scrypted') aSERVICES[$i]='scrypted' aTCP[$i]='10443 11080 10081';; # ports: https (secure), http (insecure), debug
+			'sftpserver') aCOMMANDS[$i]='test -x /usr/lib/sftp-server';;
 			'shairportsync') aSERVICES[$i]='shairport-sync' aTCP[$i]='5000';; # AirPlay 2 would be TCP port 7000
 			'snapcastclient') aSERVICES[$i]='snapclient';;
 			'snapcastserver') aSERVICES[$i]='snapserver' aTCP[$i]='1704 1780';;
