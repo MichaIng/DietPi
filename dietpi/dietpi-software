@@ -1324,6 +1324,12 @@ Names are accepted as well, e.g. "Node-RED". Legacy numeric IDs are still suppor
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/system_stats/#docker-compose'
 		aSOFTWARE_DEPS[$software_id]='docker'
 		#------------------
+		software_id='podman'
+		aSOFTWARE_NAME[$software_id]='Podman'
+		aSOFTWARE_DESC[$software_id]='Daemonless container engine with Docker-compatible CLI and API'
+		aSOFTWARE_CATX[$software_id]=8
+		aSOFTWARE_DOCS[$software_id]='https://docs.podman.io/'
+		#------------------
 		software_id='k3s'
 		aSOFTWARE_ID_LEGACY[193]=$software_id
 		aSOFTWARE_NAME[$software_id]='K3s'
@@ -10460,6 +10466,45 @@ _EOF_
 			fi
 		fi
 
+		if To_Install podman
+		then
+			# APT packages
+			# - netavark + aardvark-dns: Network backend with DNS resolution between containers. Debian's podman package only recommends them, and DietPi does not install recommends.
+			# - iptables: Firewall backend for netavark on Bookworm. Trixie+ adds nftables for netavark's nftables driver.
+			local packages=('podman' 'netavark' 'aardvark-dns' 'iptables')
+			(( $G_DISTRO > 7 )) && packages+=('nftables')
+			G_AGI "${packages[@]}"
+
+			# Storage: Move images and containers to dietpi_userdata, like Docker
+			G_EXEC mkdir -p /mnt/dietpi_userdata/podman-data /etc/containers
+			if [[ -f '/etc/containers/storage.conf' ]]
+			then
+				GCI_PRESERVE=1 G_CONFIG_INJECT 'graphroot[[:blank:]]*=' 'graphroot = "/mnt/dietpi_userdata/podman-data"' /etc/containers/storage.conf '^\[storage\]'
+			else
+				echo '[storage]
+driver = "overlay"
+runroot = "/run/containers/storage"
+graphroot = "/mnt/dietpi_userdata/podman-data"' > /etc/containers/storage.conf
+			fi
+
+			# Config: Log containers and events to systemd-journald (journalctl), like Docker
+			G_EXEC mkdir -p /etc/containers/containers.conf.d
+			echo '[containers]
+log_driver = "journald"
+
+[engine]
+events_logger = "journald"' > /etc/containers/containers.conf.d/97-dietpi.conf
+
+			# Services
+			# - podman.socket: Docker-compatible API on /run/podman/podman.sock, socket-activated
+			# - podman-restart: Start containers with "--restart=always" or "unless-stopped" at boot, as there is no daemon to do it
+			G_EXEC systemctl enable --now podman.socket
+			G_EXEC systemctl enable podman-restart
+
+			Enable_memory_cgroup
+			Configure_iptables
+		fi
+
 		if To_Install fuguhub bdd
 		then
 			local arch='RaspberryPi'
@@ -14520,6 +14565,27 @@ _EOF_
 				[[ $image ]] && G_EXEC docker image rm "$image"
 				[[ $(docker volume ls -qf 'name=^portainer_data$') ]] && G_EXEC docker volume rm 'portainer_data'
 			fi
+		fi
+
+		if To_Uninstall podman
+		then
+			# Remove all containers, images, volumes and networks while podman is still installed
+			command -v podman > /dev/null && G_EXEC_NOHALT=1 G_EXEC podman system reset -f
+
+			Remove_Service podman-restart
+			G_EXEC systemctl --no-reload disable --now podman.socket
+			Remove_Service podman
+
+			# Packages: iptables and nftables are kept, as other software may use them
+			G_AGP podman netavark aardvark-dns
+
+			# DietPi data dir
+			[[ -d '/mnt/dietpi_userdata/podman-data' ]] && G_EXEC rm -R /mnt/dietpi_userdata/podman-data
+			# Default data dir
+			[[ -d '/var/lib/containers' ]] && G_EXEC rm -R /var/lib/containers
+			# Configs
+			[[ -f '/etc/containers/containers.conf.d/97-dietpi.conf' ]] && G_EXEC rm /etc/containers/containers.conf.d/97-dietpi.conf
+			[[ -f '/etc/containers/storage.conf' ]] && G_EXEC rm /etc/containers/storage.conf
 		fi
 
 		if To_Uninstall dockercompose
