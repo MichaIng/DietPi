@@ -160,6 +160,7 @@ Process_Software()
 			'go') aCOMMANDS[$i]='go version';;
 			'gogs') aSERVICES[$i]='gogs' aTCP[$i]='3000';;
 			'grafana') aSERVICES[$i]='grafana-server' aTCP[$i]='3001' aDELAY[$i]=30;;
+			'greenendsftpserver') aCOMMANDS[$i]='test -x /usr/lib/sftp-server';;
 			'gzdoom') aCOMMANDS[$i]='gzdoom -norun | grep '\''^GZDoom version '\';;
 			'haproxy') aSERVICES[$i]='haproxy' aTCP[$i]='80 1338';;
 			'homeassistant') aSERVICES[$i]='home-assistant' aTCP[$i]='8123'; (( $emulation )) && aDELAY[$i]=900 || aDELAY[$i]=60;;
@@ -255,7 +256,6 @@ Process_Software()
 			'sambaclient') aCOMMANDS[$i]='smbclient -V';;
 			'sambaserver') aSERVICES[$i]='smbd' aTCP[$i]='139 445' aUDP[$i]='137 138';;
 			'scrypted') aSERVICES[$i]='scrypted' aTCP[$i]='10443 11080 10081';; # ports: https (secure), http (insecure), debug
-			'sftpserver') aCOMMANDS[$i]='test -x /usr/lib/sftp-server';;
 			'shairportsync') aSERVICES[$i]='shairport-sync' aTCP[$i]='5000';; # AirPlay 2 would be TCP port 7000
 			'snapcastclient') aSERVICES[$i]='snapclient';;
 			'snapcastserver') aSERVICES[$i]='snapserver' aTCP[$i]='1704 1780';;
