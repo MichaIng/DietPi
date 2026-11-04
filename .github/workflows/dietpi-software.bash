@@ -160,6 +160,7 @@ Process_Software()
 			'go') aCOMMANDS[$i]='go version';;
 			'gogs') aSERVICES[$i]='gogs' aTCP[$i]='3000';;
 			'grafana') aSERVICES[$i]='grafana-server' aTCP[$i]='3001' aDELAY[$i]=30;;
+			'greenendsftpserver') aCOMMANDS[$i]='test -x /usr/lib/sftp-server';;
 			'gzdoom') aCOMMANDS[$i]='gzdoom -norun | grep '\''^GZDoom version '\';;
 			'haproxy') aSERVICES[$i]='haproxy' aTCP[$i]='80 1338';;
 			'homeassistant') aSERVICES[$i]='home-assistant' aTCP[$i]='8123'; (( $emulation )) && aDELAY[$i]=900 || aDELAY[$i]=60;;

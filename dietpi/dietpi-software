@@ -1645,6 +1645,14 @@ Names are accepted as well, e.g. "Node-RED". Legacy numeric IDs are still suppor
 		aSOFTWARE_DESC[$software_id]='Network File System server'
 		aSOFTWARE_CATX[$software_id]=14
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/file_servers/#nfs'
+		#------------------
+		software_id='greenendsftpserver'
+		aSOFTWARE_ALIAS[gesftpserver]=$software_id
+		aSOFTWARE_ALIAS[sftpserver]=$software_id
+		aSOFTWARE_NAME[$software_id]='Green End SFTP Server'
+		aSOFTWARE_DESC[$software_id]='Lightweight SFTP server, e.g. for Dropbear'
+		aSOFTWARE_CATX[$software_id]=14
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/file_servers/#green-end-sftp-server'
 
 		# VPN Servers
 		#--------------------------------------------------------------------------------
@@ -3179,6 +3187,13 @@ _EOF_
 
 			G_AGI openssh-server
 
+			# If OpenSSH's SFTP server has been diverted by the Green End SFTP Server install, revert this, so the latest installed SFTP server takes /usr/lib/sftp-server
+			if [[ $(dpkg-divert --truename /usr/lib/sftp-server) == '/usr/lib/sftp-server.openssh' ]]
+			then
+				[[ -L '/usr/lib/sftp-server' ]] && G_EXEC rm /usr/lib/sftp-server
+				G_EXEC dpkg-divert --local --remove --rename /usr/lib/sftp-server
+			fi
+
 			# Apply password login setting from dietpi.txt or default (implies a restart)
 			# - Assure service is active
 			G_EXEC systemctl unmask ssh
@@ -3187,6 +3202,22 @@ _EOF_
 
 			# Mark Dropbear for uninstall
 			dpkg-query -s 'dropbear' &> /dev/null && aSOFTWARE_INSTALL_STATE[dropbear]=-1
+		fi
+
+		if To_Install greenendsftpserver
+		then
+			G_AGI gesftpserver
+			local gesftpserver=$(dpkg -L gesftpserver | grep -m1 '/gesftpserver$')
+			[[ -x $gesftpserver ]] || { G_DIETPI-NOTIFY 1 'Green End SFTP Server binary not found. Aborting ...'; exit 1; }
+
+			# Dropbear and OpenSSH invoke /usr/lib/sftp-server on SFTP subsystem requests, while Green End SFTP Server installs to /usr/libexec/gesftpserver
+			# - Both SFTP servers can coexist, and the latest installed one takes /usr/lib/sftp-server.
+			# - If OpenSSH's SFTP server is installed, divert it, so that package upgrades do not overwrite our symlink.
+			if dpkg-query -s 'openssh-sftp-server' 2> /dev/null | grep -q '^Status: install ok installed$' && [[ $(dpkg-divert --truename /usr/lib/sftp-server) == '/usr/lib/sftp-server' ]]
+			then
+				G_EXEC dpkg-divert --local --add --rename --divert /usr/lib/sftp-server.openssh /usr/lib/sftp-server
+			fi
+			G_EXEC ln -sf "$gesftpserver" /usr/lib/sftp-server
 		fi
 
 		if To_Install postgresql postgresql
@@ -12797,7 +12828,7 @@ _EOF_
 		G_CONFIG_INJECT 'AUTO_SETUP_DESKTOP=' "AUTO_SETUP_DESKTOP=$1" /boot/dietpi.txt
 	}
 
-	# $1: 0=None -1=Dropbear -2=OpenSSH
+	# $1: 0=None -1=Dropbear -2=OpenSSH -3=Dropbear with Green End SFTP Server
 	Apply_SSHServer_Choices()
 	{
 		if (( $1 == 0 ))
@@ -12812,6 +12843,17 @@ _EOF_
 		else
 			[[ ${aSOFTWARE_INSTALL_STATE[dropbear]} == [01] ]] && aSOFTWARE_INSTALL_STATE[dropbear]=1 || aSOFTWARE_INSTALL_STATE[dropbear]=2
 			[[ ${aSOFTWARE_INSTALL_STATE[opensshserver]} == [01] ]] && aSOFTWARE_INSTALL_STATE[opensshserver]=0 || aSOFTWARE_INSTALL_STATE[opensshserver]=-1
+		fi
+
+		# Green End SFTP Server: Install with Dropbear + SFTP, remove with Dropbear only or no SSH server, keep an installed one with OpenSSH, as both SFTP servers can coexist
+		if (( $1 == -3 ))
+		then
+			[[ ${aSOFTWARE_INSTALL_STATE[greenendsftpserver]} == [01] ]] && aSOFTWARE_INSTALL_STATE[greenendsftpserver]=1 || aSOFTWARE_INSTALL_STATE[greenendsftpserver]=2
+		elif (( $1 == -2 ))
+		then
+			(( ${aSOFTWARE_INSTALL_STATE[greenendsftpserver]} == 1 )) && aSOFTWARE_INSTALL_STATE[greenendsftpserver]=0
+		else
+			[[ ${aSOFTWARE_INSTALL_STATE[greenendsftpserver]} == [01] ]] && aSOFTWARE_INSTALL_STATE[greenendsftpserver]=0 || aSOFTWARE_INSTALL_STATE[greenendsftpserver]=-1
 		fi
 	}
 
@@ -14681,6 +14723,16 @@ _EOF_
 		if To_Uninstall opensshserver
 		then
 			G_AGP openssh-{,sftp-}server
+			# Remove diversion by Green End SFTP Server, after the purge removed the diverted binary, keeping our symlink in place
+			[[ $(dpkg-divert --truename /usr/lib/sftp-server) == '/usr/lib/sftp-server.openssh' ]] && G_EXEC dpkg-divert --local --remove --no-rename /usr/lib/sftp-server
+		fi
+
+		if To_Uninstall greenendsftpserver
+		then
+			# Remove our symlink only, and restore OpenSSH's SFTP server if it was diverted
+			[[ -L '/usr/lib/sftp-server' && $(readlink -f /usr/lib/sftp-server) == *'/gesftpserver' ]] && G_EXEC rm /usr/lib/sftp-server
+			[[ $(dpkg-divert --truename /usr/lib/sftp-server) == '/usr/lib/sftp-server.openssh' ]] && G_EXEC dpkg-divert --local --remove --rename /usr/lib/sftp-server
+			G_AGP gesftpserver
 		fi
 
 		if To_Uninstall papermc
@@ -15832,7 +15884,11 @@ We allow it to take up to 30 minutes, it's process can be followed, please be pa
 
 		# Selected SSH server choice
 		local sshserver_text='None'
-		if (( ${aSOFTWARE_INSTALL_STATE[dropbear]} > 0 )); then
+		if (( ${aSOFTWARE_INSTALL_STATE[dropbear]} > 0 && ${aSOFTWARE_INSTALL_STATE[greenendsftpserver]} > 0 )); then
+
+			sshserver_text="${aSOFTWARE_NAME[dropbear]} + SFTP"
+
+		elif (( ${aSOFTWARE_INSTALL_STATE[dropbear]} > 0 )); then
 
 			sshserver_text=${aSOFTWARE_NAME[dropbear]}
 
@@ -15959,6 +16015,7 @@ List of installed software and their online documentation URLs:
 
 					'None' ': Not required / manual setup'
 					"${aSOFTWARE_NAME[dropbear]}" ": ${aSOFTWARE_DESC[dropbear]} (recommended)"
+					"${aSOFTWARE_NAME[dropbear]} + SFTP" ": Dropbear with lightweight ${aSOFTWARE_NAME[greenendsftpserver]}"
 					"${aSOFTWARE_NAME[opensshserver]}" ": ${aSOFTWARE_DESC[opensshserver]}"
 				)
 
@@ -15967,6 +16024,7 @@ List of installed software and their online documentation URLs:
 				G_WHIP_MENU 'Please select desired SSH server:
 \n- None: Selecting this option will uninstall all SSH servers. This reduces system resources and improves performance. Useful for users who do NOT require networked/remote terminal access.
 \n- Dropbear (recommended): Lightweight SSH server, installed by default on DietPi systems.
+\n- Dropbear + SFTP: Dropbear plus the lightweight Green End SFTP Server, for SFTP access and modern SCP clients.
 \n- OpenSSH: A feature-rich SSH server with SFTP/SCP support, at the cost of increased resource usage.' || return 0
 
 				# Apply selection
@@ -15974,11 +16032,12 @@ List of installed software and their online documentation URLs:
 
 					'None') Apply_SSHServer_Choices 0;;
 					"${aSOFTWARE_NAME[opensshserver]}") Apply_SSHServer_Choices -2;;
+					"${aSOFTWARE_NAME[dropbear]} + SFTP") Apply_SSHServer_Choices -3;;
 					*) Apply_SSHServer_Choices -1;;
 				esac
 
 				# Check for changes
-				for i in dropbear opensshserver
+				for i in dropbear greenendsftpserver opensshserver
 				do
 					(( ${aSOFTWARE_INSTALL_STATE[$i]} == 1 )) && tobeinstalled_text+="\n - ${aSOFTWARE_NAME[$i]}"
 					(( ${aSOFTWARE_INSTALL_STATE[$i]} == -1 )) && toberemoved_text+="\n - ${aSOFTWARE_NAME[$i]}"
