@@ -1856,22 +1856,23 @@ Press any key to continue...'
 	# - print_full_info=1	Optional input to print full colour text output and temp warnings
 	G_OBTAIN_CPU_TEMP()
 	{
-		# Read CPU temp from file
-		local temp
-		# - Odroid N2/ASUS: Requires special case as in other array this would break SBC temp readouts with 2 zones
-		if [[ ( $G_HW_MODEL == 15 || $G_HW_MODEL == 52 ) && -f '/sys/class/thermal/thermal_zone1/temp' ]]
-		then
-			read -r temp < /sys/class/thermal/thermal_zone1/temp
+		# Read CPU temp from sysfs node, using an array of possible paths, ordered by priority
+		local custom afp_temperature=() i temp
 
-		# - Others
-		else
-			# Array to store possible locations for temp read
-			: "${G_HW_CPU_TEMP_PATH:=$(sed -n 's/^CONFIG_CPU_TEMP_PATH=//p' /boot/dietpi.txt)}"
-			[[ $G_HW_CPU_TEMP_PATH == 'auto' ]] && G_HW_CPU_TEMP_PATH=
-			local i afp_temperature=(
+		# Custom entry first
+		custom=$(sed -n '/^[[:blank:]]*CONFIG_CPU_TEMP_PATH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		[[ $custom && $custom != 'auto' ]] && afp_temperature+=("$custom")
 
-				${G_HW_CPU_TEMP_PATH:+"$G_HW_CPU_TEMP_PATH"}  # User override from /boot/dietpi.txt
-				'/sys/devices/platform/coretemp.[0-9]/hwmon/hwmon[0-9]/temp[1-9]_input' # Intel Mini PCs: https://github.com/MichaIng/DietPi/issues/3172, https://github.com/MichaIng/DietPi/issues/3412
+		# Board-specific additions
+		case $G_HW_MODEL in
+			21) afp_temperature+=('/sys/devices/platform/coretemp.[0-9]/hwmon/hwmon[0-9]/temp[1-9]_input');; # Intel Mini PCs: https://github.com/MichaIng/DietPi/issues/3172, https://github.com/MichaIng/DietPi/issues/3412
+			15|52) afp_temperature+=('/sys/class/thermal/thermal_zone1/temp');; # Odroid N2/ASUS
+			110) afp_temperature+=('/sys/class/thermal/thermal_zone8/temp');; # Orange Pi 6: The two big A720 cores
+			*) :;;
+		esac
+
+		# Generic last
+		afp_temperature+=(
 				'/sys/class/thermal/thermal_zone0/temp'
 				'/sys/devices/platform/sunxi-i2c.0/i2c-0/0-0034/temp1_input'
 				'/sys/class/hwmon/hwmon0/device/temp_label'
@@ -1879,17 +1880,17 @@ Press any key to continue...'
 				'/sys/class/hwmon/hwmon0/temp1_input' # Odroid C1 Armbian legacy Linux 5.4.40: https://dietpi.com/forum/t/3976/17
 				'/sys/class/thermal/thermal_zone1/temp' # Roseapple Pi, probably OrangePi's: https://dietpi.com/forum/t/4993
 				'/sys/class/hwmon/hwmon[0-9]/temp[1-9]_input'
-			)
+				'/sys/class/thermal/thermal_zone[0-9]/temp'
+		)
 
-			# Coders NB: Do NOT quote the array to allow coretemp file paths glob expansion!
-			# shellcheck disable=SC2068
-			for i in ${afp_temperature[@]}
-			do
-				[[ -f $i ]] || continue
-				read -r temp < "$i"
-				[[ $temp -gt 0 ]] && break # Trust only positive temperatures for now (strings are treated as "0")
-			done
-		fi
+		# Coders NB: Do NOT quote the array to allow wildcard path glob expansion!
+		# shellcheck disable=SC2068
+		for i in ${afp_temperature[@]}
+		do
+			[[ -f $i ]] || continue
+			read -r temp < "$i"
+			[[ $temp -gt 0 ]] && break # Trust only positive temperatures for now (strings are treated as "0")
+		done
 
 		# Format output
 		# - Check for valid value: We must always return a value, due to VM lacking this feature + benchmark online
