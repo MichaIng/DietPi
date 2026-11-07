@@ -1464,8 +1464,19 @@ Turning off IPv6 for them removes the IPv6 addresses from the server and client 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# serialconsole
 	#/////////////////////////////////////////////////////////////////////////////////////
+	GRUB_SKIP=0
 	Serial_Main()
 	{
+		# GRUB
+		if (( ! $GRUB_SKIP ))
+		then
+			IS_GRUB=0
+			if command -v update-grub > /dev/null
+			then
+				IS_GRUB=1 FP_GRUB='/etc/default/grub.d/95-dietpi-consoles.cfg' GRUB_CONSOLES=()
+				[[ -f $FP_GRUB ]] && read -ra GRUB_CONSOLES < <(sed -En '1s/^dietpi_consoles='\''(.*)'\''$/\1/p' "$FP_GRUB")
+			fi
+		fi
 		#-------------------------------------------------------------------------------------
 		# Enable
 		if [[ $INPUT_DEVICE_VALUE == 'enable' ]]
@@ -1545,6 +1556,17 @@ _EOF_
 					fi
 				fi
 
+				# GRUB
+				if [[ $IS_GRUB == 1 && $INPUT_ADDITIONAL != 'ttyGS'[0-9]* ]]
+				then
+					local i
+					for i in "${!GRUB_CONSOLES[@]}"
+					do
+						[[ ${GRUB_CONSOLES[i]%%,*} == "$INPUT_ADDITIONAL" ]] && unset -v 'GRUB_CONSOLES[i]'
+					done
+					GRUB_CONSOLES+=("$INPUT_ADDITIONAL")
+				fi
+
 				G_DIETPI-NOTIFY 2 "Enabling serial-getty on: /dev/$INPUT_ADDITIONAL"
 				G_EXEC systemctl unmask "serial-getty@$INPUT_ADDITIONAL"
 				G_EXEC systemctl enable "serial-getty@$INPUT_ADDITIONAL"
@@ -1553,11 +1575,13 @@ _EOF_
 
 			# Enable for all detected Serial/UART devices
 			else
+				GRUB_SKIP=1
 				for i in /dev/{tty{S,AMA,SAC,AML,SC,GS,FIQ,MV},hvc}[0-9]*
 				do
 					[[ -e $i ]] || continue
 					INPUT_ADDITIONAL=${i/\/dev\/} Serial_Main
 				done
+				GRUB_SKIP=0
 
 				# On RPi enable primary UART device
 				(( $G_HW_MODEL > 9 )) || G_CONFIG_INJECT 'enable_uart=' 'enable_uart=1' /boot/firmware/config.txt
@@ -1613,8 +1637,21 @@ _EOF_
 					fi
 				fi
 
+				# GRUB
+				if (( $IS_GRUB ))
+				then
+					local i
+					for i in "${!GRUB_CONSOLES[@]}"
+					do
+						[[ ${GRUB_CONSOLES[i]%%,*} == "$INPUT_ADDITIONAL" ]] || continue
+						unset -v 'GRUB_CONSOLES[i]'
+						break
+					done
+				fi
+
 			# Disable for all detected Serial/UART devices
 			else
+				GRUB_SKIP=1
 				for i in /dev/{serial,tty{S,AMA,SAC,AML,SC,GS,FIQ,MV},hvc}[0-9]*
 				do
 					[[ -e $i ]] || continue
@@ -1628,6 +1665,8 @@ _EOF_
 					i=${i%.service}
 					INPUT_ADDITIONAL=${i##*@} Serial_Main
 				done
+				GRUB_CONSOLES=()
+				GRUB_SKIP=0
 
 				# On RPi disable primary UART device
 				(( $G_HW_MODEL > 9 )) || G_CONFIG_INJECT 'enable_uart=' 'enable_uart=0' /boot/firmware/config.txt
@@ -1637,6 +1676,44 @@ _EOF_
 			fi
 		else
 			Unknown_Input_Mode
+			return 1
+		fi
+		#-------------------------------------------------------------------------------------
+		# GRUB
+		if (( ! $GRUB_SKIP && $IS_GRUB ))
+		then
+			if (( ${#GRUB_CONSOLES[@]} ))
+			then
+				{
+					echo "dietpi_consoles='${GRUB_CONSOLES[*]}'"
+					cat << '_EOF_'
+# Append tty1, unless already present, then the UARTs. The last console= entry is /dev/console.
+case " ${GRUB_CMDLINE_LINUX} ${GRUB_CMDLINE_LINUX_DEFAULT} " in
+	*' console=tty'[01]' '*) :;;
+	*) GRUB_CMDLINE_LINUX="${GRUB_CMDLINE_LINUX:+${GRUB_CMDLINE_LINUX} }console=tty1";;
+esac
+for dietpi_console in ${dietpi_consoles}
+do
+	GRUB_CMDLINE_LINUX="${GRUB_CMDLINE_LINUX:+${GRUB_CMDLINE_LINUX} }console=${dietpi_console},115200"
+done
+unset -v dietpi_console dietpi_consoles
+_EOF_
+				} > "$FP_GRUB"
+			else
+				if [[ $G_HW_ARCH =~ ^(3|11)$ && -e '/sys/firmware/acpi/tables/SPCR' ]]
+				then
+					cat << '_EOF_' > "$FP_GRUB"
+# Append tty1, unless already present
+case " ${GRUB_CMDLINE_LINUX} ${GRUB_CMDLINE_LINUX_DEFAULT} " in
+	*' console=tty'[01]' '*) :;;
+	*) GRUB_CMDLINE_LINUX="${GRUB_CMDLINE_LINUX:+${GRUB_CMDLINE_LINUX} }console=tty1";;
+esac
+_EOF_
+				else
+					[[ -f $FP_GRUB ]] && G_EXEC rm "$FP_GRUB"
+				fi
+			fi
+			G_EXEC_OUTPUT=1 G_EXEC update-grub
 		fi
 	}
 
