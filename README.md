@@ -336,6 +336,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [uv](https://github.com/astral-sh/uv)
 - [RustDesk Client](https://github.com/rustdesk/rustdesk)
 - [Scrypted](https://github.com/koush/scrypted)
+- [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx)
 
 ---
 
