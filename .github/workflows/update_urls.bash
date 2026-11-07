@@ -266,8 +266,7 @@ aURL[$software_id]='https://api.github.com/repos/Spotifyd/spotifyd/releases/late
 aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/spotifyd-linux-$arch-full\.tar\.gz(?=\")"'
 aARCH[$software_id]='armv7 aarch64 x86_64'
 aARCH_CHECK[$software_id]='riscv64'
-aREGEX[$software_id]='https://github.com/Spotifyd/spotifyd/releases/download/v[^$].*/spotifyd-linux-\$arch-\$variant\.tar\.gz'
-aREPLACE[$software_id]='${release/full/\$variant}'
+aREGEX[$software_id]='https://github.com/Spotifyd/spotifyd/releases/download/v[^$].*/spotifyd-linux-\$arch-full\.tar\.gz'
 
 software_id='rclone'
 aURL[$software_id]='https://api.github.com/repos/rclone/rclone/releases/latest'
