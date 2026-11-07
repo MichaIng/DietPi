@@ -63,7 +63,7 @@
 	# - 1337 moments ;)
 	alias 1337='echo "Indeed, you are =)"'
 
-	# Tab completion: Replace the whole word below the cursor with the match, instead of keeping the characters after the cursor
+	# Tab completion: Do not duplicate characters after the cursor which match the completion, e.g. "foo<cursor>bar<tab>" now gives "foobarbaz" instead of "foobarbazbar"
 	bind 'set skip-completed-text on'
 
 	# "G_DIETPI-NOTIFY -2 message" starts a process animation. If scripts fail to kill the animation, e.g. cancelled by user, terminal bash prompt has to do it as last resort.
