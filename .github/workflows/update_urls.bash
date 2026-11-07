@@ -339,6 +339,11 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/immich-app/immi
 aREGEX[$software_id]='version='\''[^'\'']*'\'
 aREPLACE[$software_id]='version='\''$release'\'
 
+software_id='paperlessngx'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/paperless-ngx/paperless-ngx/releases/latest'\'' | grep -Po '\''"tag_name": *"\K[^"]+(?=")'\'
+aREGEX[$software_id]='version='\''[^'\'']*'\'
+aREPLACE[$software_id]='version='\''$release'\'
+
 software_id='uv'
 aURL[$software_id]='https://api.github.com/repos/astral-sh/uv/releases/latest'
 aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/uv-$arch\.tar\.gz(?=\")"'

@@ -169,6 +169,7 @@ Process_Software()
 			'icecast') aSERVICES[$i]='icecast2' aTCP[$i]='8000' aCOMMANDS[$i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start on GitHub runner as it requires a hardware capture device, and those runners do not provide the dummy audio kernel module
 			'immich') aSERVICES[$i]='immich' aTCP[$i]='2283';;
 			'immichml') aSERVICES[$i]='immich-ml' aTCP[$i]='3003';;
+			'paperlessngx') aSERVICES[$i]='paperless-webserver paperless-consumer paperless-task-queue paperless-scheduler' aTCP[$i]='8010';;
 			'influxdb') aSERVICES[$i]='influxdb' aTCP[$i]='8086 8088';;
 			'jackett') aSERVICES[$i]='jackett' aTCP[$i]='9117';;
 			'javajdk') aCOMMANDS[$i]='javac -version';;
@@ -338,6 +339,7 @@ do
 		'soju') Process_Software git go;;
 		'vaultwarden') Process_Software sqlite;;
 		'immich') Process_Software ffmpeg nodejs redis postgresql;;
+		'paperlessngx') Process_Software redis python3;;
 		'virtualhere'|'cups') Process_Software avahidaemon;;
 		'lasp') Process_Software apache sqlite php;;
 		'lamp') Process_Software apache mariadb php;;
