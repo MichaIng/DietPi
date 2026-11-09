@@ -11248,18 +11248,24 @@ _EOF_'
 			[[ -d '.cargo/bin' ]] && ha_env=("PATH=$ha_home/.cargo/bin:/usr/local/bin:/usr/bin")
 
 			G_EXEC_DESC="Installing additional dependencies: ${custom_pip_deps[*]}"
-			G_EXEC_OUTPUT=1 G_EXEC setpriv --re{u,g}id="$ha_user" --clear-groups --reset-env -- ${ha_env[@]+env -- "${ha_env[@]}"} uv pip install -U "${custom_pip_deps[@]}"
+			# Mute uv's hardlink warning where TMPDIR is not set to /var/tmp: Of course nothing can be hardlinked to disk from a tmpfs cache.
+			G_EXEC_OUTPUT=1 G_EXEC setpriv --re{u,g}id="$ha_user" --clear-groups --reset-env -- ${ha_env[@]+env -- "${ha_env[@]}" UV_LINK_MODE=copy} uv pip install -U "${custom_pip_deps[@]}"
 
 			# ARMv6/RISC-V: Prevent full /tmp, OOM, and extensive swap usage caused mainly by grpcio build
 			Min_Total_Memory 2048
 			if (( $G_HW_ARCH == 1 || $G_HW_ARCH == 11 ))
 			then
 				(( $RAM_PHYS / 1024 < $G_HW_CPU_CORES )) && ha_env+=("GRPC_PYTHON_BUILD_EXT_COMPILER_JOBS=$(( $RAM_PHYS / 1024 ))")
-				(( $(findmnt -nbo SIZE /tmp) < 6000*1024**2 )) && ha_env+=('TMPDIR=/var/tmp')
+				(( $(findmnt -nbo SIZE /tmp) < 6000*1024**2 )) && ha_env+=('TMPDIR=/var/tmp') || ha_env+=('UV_LINK_MODE=copy')
+			else
+				ha_env+=('UV_LINK_MODE=copy')
 			fi
 
 			G_EXEC_DESC='Installing Home Assistant core module'
 			G_EXEC_OUTPUT=1 G_EXEC setpriv --re{u,g}id="$ha_user" --clear-groups --reset-env -- ${ha_env[@]+env -- "${ha_env[@]}"} uv pip install -U homeassistant
+
+			# Mute uv's hardlink warning permanently
+			G_EXEC eval "echo 'link-mode = \"copy\"' > '$ha_home/.config/uv/uv.toml'"
 
 			G_DIETPI-NOTIFY 2 'Linking config and data to /mnt/dietpi_userdata/homeassistant'
 			if [[ ! -d '/mnt/dietpi_userdata/homeassistant' ]]
@@ -11296,14 +11302,6 @@ WantedBy=multi-user.target
 _EOF_
 			[[ -d '.cargo/bin' ]] && G_CONFIG_INJECT 'Environment=' "Environment=PATH=$ha_home/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin" /etc/systemd/system/home-assistant.service 'User='
 			G_EXEC cd "$G_WORKING_DIR"
-
-			# Download HACS
-			Download_Install 'https://github.com/hacs/integration/releases/latest/download/hacs.zip' hacs
-			[[ -d '/mnt/dietpi_userdata/homeassistant/custom_components/hacs' ]] && G_EXEC rm -R /mnt/dietpi_userdata/homeassistant/custom_components/hacs
-			G_EXEC mkdir -p /mnt/dietpi_userdata/homeassistant/custom_components
-			G_EXEC mv hacs /mnt/dietpi_userdata/homeassistant/custom_components/
-			G_EXEC chown -R "$ha_user:$ha_user" /mnt/dietpi_userdata/homeassistant
-			G_DIETPI-NOTIFY 2 "Home Assistant Community Store (HACS) has been installed in addition. To activate it, follow this guide: https://hacs.xyz/docs/use/configuration/basic/#to-set-up-the-hacs-integration"
 
 			[[ -d '/mnt/dietpi_userdata/homeassistant/deps' || -L '/mnt/dietpi_userdata/homeassistant/deps' ]] && G_EXEC rm -R /mnt/dietpi_userdata/homeassistant/deps
 			[[ -d '/home/homeassistant' ]] && G_EXEC rm -R /home/homeassistant # pre-v10.2
