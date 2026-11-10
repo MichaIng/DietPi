@@ -10469,47 +10469,44 @@ _EOF_
 		if To_Install podman
 		then
 			# APT packages
-			# - Bookworm: podman does not depend on netavark, and would otherwise fall back to the deprecated CNI network backend. iptables is only suggested, but required by netavark.
-			# - Trixie+: podman depends on netavark, which pulls iptables via containernetworking-plugins.
+			# - netavark: Network backend. Installed explicitly, as otherwise the legacy CNI plugins (containernetworking-plugins) may be used: On Bookworm, podman does not depend on any network stack, on Trixie+ any provider of container-network-stack satisfies the dependency.
+			# - Bookworm: netavark requires iptables, but does neither depend on nor recommend it.
+			# - Trixie+: netavark manages netfilter via nftables by default, which it only recommends.
 			# - aardvark-dns is not installed: It is only needed for DNS resolution between containers on user-defined networks, while the default "podman" network has DNS disabled.
-			local packages=('podman')
-			(( $G_DISTRO < 8 )) && packages+=('netavark' 'iptables')
+			local packages=('podman' 'netavark')
+			if (( $G_DISTRO < 8 ))
+			then
+				packages+=('iptables')
+			else
+				packages+=('nftables')
+			fi
 			G_AGI "${packages[@]}"
 
 			# Storage: Move images and containers to dietpi_userdata, like Docker
-			G_EXEC mkdir -p /mnt/dietpi_userdata/podman-data /etc/containers
-			if [[ -f '/etc/containers/storage.conf' ]]
+			G_EXEC mkdir -p /mnt/dietpi_userdata/podman-data
+			# - Podman v6+ supports storage.conf.d drop-ins. Older versions read only the first storage.conf found, so to keep the package defaults, copy them to /etc first.
+			if dpkg --compare-versions "$(dpkg-query -Wf '${Version}' podman)" ge 6
 			then
-				GCI_PRESERVE=1 G_CONFIG_INJECT 'graphroot[[:blank:]]*=' 'graphroot = "/mnt/dietpi_userdata/podman-data"' /etc/containers/storage.conf '^\[storage\]'
+				G_EXEC mkdir -p /etc/containers/storage.conf.d
+				echo -e '[storage]\ngraphroot = "/mnt/dietpi_userdata/podman-data"' > /etc/containers/storage.conf.d/97-dietpi.conf
 			else
-				echo '[storage]
-driver = "overlay"
-runroot = "/run/containers/storage"
-graphroot = "/mnt/dietpi_userdata/podman-data"' > /etc/containers/storage.conf
+				[[ ! -f '/etc/containers/storage.conf' && -f '/usr/share/containers/storage.conf' ]] && G_EXEC cp /usr/share/containers/storage.conf /etc/containers/storage.conf
+				if [[ -f '/etc/containers/storage.conf' ]]
+				then
+					GCI_PRESERVE=1 G_CONFIG_INJECT 'graphroot[[:blank:]]*=' 'graphroot = "/mnt/dietpi_userdata/podman-data"' /etc/containers/storage.conf '^\[storage\]'
+				else
+					echo -e '[storage]\ndriver = "overlay"\nrunroot = "/run/containers/storage"\ngraphroot = "/mnt/dietpi_userdata/podman-data"' > /etc/containers/storage.conf
+				fi
 			fi
 
 			# Config: Log containers and events to systemd-journald (journalctl), like Docker
 			G_EXEC mkdir -p /etc/containers/containers.conf.d
-			echo '[containers]
-log_driver = "journald"
-
-[engine]
-events_logger = "journald"' > /etc/containers/containers.conf.d/97-dietpi.conf
-			# - Trixie+: Pin netavark to iptables, as nftables is not installed. Podman v4 on Bookworm does not know this setting, and supports iptables only.
-			(( $G_DISTRO > 7 )) && G_EXEC eval "echo -e '\n[network]\nfirewall_driver = \"iptables\"' >> /etc/containers/containers.conf.d/97-dietpi.conf"
+			echo -e '[containers]\nlog_driver = "journald"\n\n[engine]\nevents_logger = "journald"' > /etc/containers/containers.conf.d/97-dietpi.conf
 
 			Enable_memory_cgroup
-			Configure_iptables
+			(( $G_DISTRO < 8 )) && Configure_iptables
 
-			# Services
-			# - podman.socket: Docker-compatible API on /run/podman/podman.sock, socket-activated
-			# - podman.service: API service, started by the socket. Reduce log level from "info" to "warn", like Docker: https://github.com/MichaIng/DietPi/issues/2388
-			# - podman-restart: Start containers with "--restart=always" or "unless-stopped" at boot, as there is no daemon to do it
-			G_EXEC mkdir -p /etc/systemd/system/podman.service.d
-			G_EXEC eval "echo -e '[Service]\nEnvironment=\"LOGGING=--log-level=warn\"' > /etc/systemd/system/podman.service.d/dietpi.conf"
-			G_EXEC systemctl daemon-reload
-			G_EXEC systemctl enable --now podman.socket
-			G_EXEC systemctl enable podman-restart
+			# No services are enabled: Containers are meant to be run as individual systemd units, e.g. via Quadlet on Podman v4.4+ or "podman generate systemd" on Bookworm. The Docker-compatible API (podman.socket) and podman-restart.service (for "--restart=always" containers) can be enabled manually if needed.
 		fi
 
 		if To_Install fuguhub bdd
@@ -14579,11 +14576,12 @@ _EOF_
 			# Remove all containers, images, volumes and networks while podman is still installed
 			command -v podman > /dev/null && G_EXEC_NOHALT=1 G_EXEC podman system reset -f
 
+			# Services: Not enabled by DietPi, but might have been by admin
 			Remove_Service podman-restart
-			G_EXEC systemctl --no-reload disable --now podman.socket
+			systemctl -q is-enabled podman.socket 2> /dev/null && G_EXEC systemctl --no-reload disable --now podman.socket
 			Remove_Service podman
 
-			# Packages: iptables is kept, as other software may use it
+			# Packages: iptables and nftables are kept, as other software may use them
 			G_AGP podman netavark
 
 			# DietPi data dir
@@ -14593,6 +14591,7 @@ _EOF_
 			# Configs
 			[[ -f '/etc/containers/containers.conf.d/97-dietpi.conf' ]] && G_EXEC rm /etc/containers/containers.conf.d/97-dietpi.conf
 			[[ -f '/etc/containers/storage.conf' ]] && G_EXEC rm /etc/containers/storage.conf
+			[[ -f '/etc/containers/storage.conf.d/97-dietpi.conf' ]] && G_EXEC rm /etc/containers/storage.conf.d/97-dietpi.conf
 		fi
 
 		if To_Uninstall dockercompose
