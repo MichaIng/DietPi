@@ -338,6 +338,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Scrypted](https://github.com/koush/scrypted)
 - [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx)
 - [Yuvomi](https://github.com/ulsklyc/yuvomi)
+- [SolidPing](https://github.com/fclairamb/solidping)
 
 ---
 
