@@ -44,7 +44,7 @@
 	alias dietpi-banner='/boot/dietpi/func/dietpi-banner'
 	alias dietpi-justboom='/boot/dietpi/misc/dietpi-justboom'
 	alias dietpi-led_control='/boot/dietpi/dietpi-led_control'
-	alias dietpi-fan_control='/boot/dietpi/dietpi-fan_control'
+	(( $G_HW_MODEL > 9 )) || alias dietpi-fan_control='/boot/dietpi/dietpi-fan_control'
 	alias dietpi-wifidb='/boot/dietpi/func/dietpi-wifidb'
 	alias dietpi-optimal_mtu='/boot/dietpi/func/dietpi-optimal_mtu'
 	alias dietpi-cloudshell='/boot/dietpi/dietpi-cloudshell'
