@@ -1,6 +1,7 @@
 #!/bin/bash
 {
 . /boot/dietpi/func/dietpi-globals
+grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l'
 
 # Build deps
 G_AGUP
@@ -11,7 +12,7 @@ adeps=('libc6' 'libmad0' 'libvorbisfile3' 'libsoxr0' 'libfaad2' 'libopus0')
 case $G_DISTRO in
 	7) adeps+=('libasound2' 'libflac12' 'libmpg123-0' 'libavformat59' 'liblirc-client0' 'libssl3');;
 	8) adeps+=('libasound2t64' 'libflac14' 'libmpg123-0t64' 'libavformat61' 'liblirc-client0t64' 'libssl3t64');;
-	9) adeps+=('libasound2t64' 'libflac14' 'libmpg123-0t64' 'libavformat62' 'liblirc-client0t64' 'libssl3t64');;
+	9) adeps+=('libasound2t64' 'libflac14' 'libmpg123-0t64' 'liblirc-client0t64' 'libssl3t64'); [[ $G_HW_ARCH_NAME == 'armv6l' ]] && adeps+=('libavformat62') || adeps+=('libavformat63');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 for i in "${adeps[@]}"
@@ -36,7 +37,6 @@ G_DIETPI-NOTIFY 2 'Starting packaging ...'
 
 # Package dir
 G_EXEC cd /tmp
-grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l'
 DIR="squeezelite_$G_HW_ARCH_NAME"
 G_EXEC rm -Rf "$DIR"
 G_EXEC mkdir -p "$DIR/"{DEBIAN,lib/systemd/system,etc/default,usr/{bin,share/doc/squeezelite,share/man/man1}}

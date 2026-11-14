@@ -94,8 +94,8 @@ G_EXEC tar xf master.tar.gz
 G_EXEC rm master.tar.gz
 G_EXEC cd capsimg-master
 # RISC-V: "checking build system type... ./config.guess: unable to guess system type"
-G_EXEC curl -sSfo CAPSImg/config.guess 'https://cgit.git.savannah.gnu.org/cgit/config.git/plain/config.guess'
-G_EXEC curl -sSfo CAPSImg/config.sub 'https://cgit.git.savannah.gnu.org/cgit/config.git/plain/config.sub'
+#G_EXEC curl -sSfo CAPSImg/config.guess 'https://cgit.git.savannah.gnu.org/cgit/config.git/plain/config.guess'
+#G_EXEC curl -sSfo CAPSImg/config.sub 'https://cgit.git.savannah.gnu.org/cgit/config.git/plain/config.sub'
 G_EXEC_OUTPUT=1 G_EXEC ./bootstrap
 G_EXEC_OUTPUT=1 G_EXEC ./configure C{,XX}FLAGS='-g0 -O3'
 G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"

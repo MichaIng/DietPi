@@ -18,6 +18,7 @@ This means that your WiFi adapter will only be able to use the very limited set 
 
 # Warn about incompatible installed software titles
 alist=()
+# NB: IDs are numeric as long as dietpi-update did not migrate the install states file yet
 while read -r id
 do
 	case $id in
@@ -32,10 +33,10 @@ do
 		;;
 		48) alist+=('Pydio');;
 		59) alist+=('RPi Cam Web Interface');;
-		167) (( $G_HW_ARCH == 1 )) && alist+=('Raspotify');;
+		167|raspotify) (( $G_HW_ARCH == 1 )) && alist+=('Raspotify');;
 		*) :;;
 	esac
-done < <(sed -nE 's/^aSOFTWARE_INSTALL_STATE\[([0-9]+)\]=2$/\1/p' /boot/dietpi/.installed)
+done < <(sed -nE 's/^aSOFTWARE_INSTALL_STATE\[([[:alnum:]]+)\]=2$/\1/p' /boot/dietpi/.installed)
 (( ! ${#alist[@]} )) || G_WHIP_BUTTON_OK_TEXT='Continue' G_WHIP_BUTTON_CANCEL_TEXT='Exit' G_WHIP_YESNO "[WARNING] Incompatible software titles found
 \nThe following installed software titles are not yet compatible with Debian Bookworm on your system:
 ${alist[*]}
@@ -63,6 +64,9 @@ mapfile -t apackages < <(apt-mark showhold)
 [[ ${apackages[0]} ]] && G_EXEC_DESC='Unholding all packages' G_EXEC apt-mark unhold "${apackages[@]}"
 unset -v apackages
 
+G_DIETPI-NOTIFY 2 'Removing obsolete package lists, including those obsoleted with Bullseye'
+G_EXEC rm -f /etc/apt/sources.list.d/dietpi-{wsdd,php,wireguard}.list /etc/apt/trusted.gpg.d/dietpi-{wsdd,php}.gpg
+
 G_DIETPI-NOTIFY 2 'Migrating package lists to Bookworm suite'
 # Update Microsoft list properly: https://dietpi.com/blog/?p=3128#comment-6199
 if dpkg-query -s 'packages-microsoft-prod' 2> /dev/null | grep -q '^Status: install ok installed$'
@@ -74,20 +78,21 @@ then
 fi
 G_EXEC sed --follow-symlinks -i 's/bullseye/bookworm/g' /etc/apt/sources.list
 (( $G_RASPBIAN )) || G_EXEC sed --follow-symlinks -i -e 's/ non-free$/ non-free non-free-firmware/' -e 's/archive.debian.org/deb.debian.org/' /etc/apt/sources.list
-# Remove obsolete WSDD repo
-[[ -f '/etc/apt/sources.list.d/dietpi-wsdd.list' ]] && G_EXEC rm /etc/apt/sources.list.d/dietpi-wsdd.list
-[[ -f '/etc/apt/trusted.gpg.d/dietpi-wsdd.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/dietpi-wsdd.gpg
-for i in /etc/apt/sources.list.d/*.list
+for i in /etc/apt/sources.list.d/*.{list,sources}
 do
 	[[ $i == '/etc/apt/sources.list.d/*.list' ]] && break
+	[[ $i == '/etc/apt/sources.list.d/*.sources' ]] && break
 	G_EXEC sed --follow-symlinks -i 's/bullseye/bookworm/g' "$i"
-	G_EXEC sed --follow-symlinks -i '/download\.opensuse\.org/s/Debian_11/Debian_12/' "$i"
-	G_EXEC sed --follow-symlinks -i '/download\.opensuse\.org/s/Raspbian_11/Raspbian_12/' "$i"
+	G_EXEC sed --follow-symlinks -i '/download\.opensuse\.org/s/Debian_1[01]/Debian_12/' "$i"
+	G_EXEC sed --follow-symlinks -i '/download\.opensuse\.org/s/Raspbian_1[01]/Raspbian_12/' "$i"
 done
 
 G_DIETPI-NOTIFY 2 'Reverting some package lists to Bullseye which have no Bookworm suite (yet)'
 [[ -f '/etc/apt/sources.list.d/radxa.list' ]] && G_EXEC sed --follow-symlinks -i 's/bookworm/bullseye/g' /etc/apt/sources.list.d/radxa.list
 [[ -f '/etc/apt/sources.list.d/dietpi-radxa.list' ]] && G_EXEC sed --follow-symlinks -i 's/bookworm/bullseye/g' /etc/apt/sources.list.d/dietpi-radxa.list
+
+G_DIETPI-NOTIFY 2 'Removing obsolete APT pinnings'
+G_EXEC rm -f /etc/apt/preferences.d/dietpi-{php,wireguard,openssl,xrdp,kodi}
 
 if dpkg-query -s 'postgresql' 2> /dev/null | grep -q '^Status: install ok installed$'
 then
@@ -150,6 +155,13 @@ G_AGP gcc-{8,9,10,11}-base
 
 # Purge PHP 7.4 packages, obsolete after PHP 8.2 install
 G_AGP '*php7.4*'
+
+# Update PHP-related webserver drop-ins
+for i in apache2 nginx lighttpd
+do
+	[[ -f /etc/systemd/system/$i.service.d/dietpi.conf ]] || continue
+	G_EXEC eval "echo -e '[Unit]\nAfter=php8.2-fpm.service' > '/etc/systemd/system/$i.service.d/dietpi.conf'"
+done
 
 # Remove obsolete PHP 7.4 configs and Python 3.9 modules, obsolete after Python 3.11 install
 G_EXEC rm -Rf /etc/php/7.4 /usr/local/lib/python3.9 /usr/local/bin/pip3*
@@ -216,7 +228,7 @@ fi
 
 # Reinstall all PHP applications which require non-standard PHP modules, Python applications installed via pip, Home Assistant to get latest version, ...
 # - Lighttpd: Assure correct PHP handler config is enabled
-G_PROMPT_BACKUP_DISABLED=1 /boot/dietpi/dietpi-software reinstall 38 40 84 89 114 118 125 130 136 139 141 143 153 155 157 180 210
+G_PROMPT_BACKUP_DISABLED=1 /boot/dietpi/dietpi-software reinstall freshrss ampache lighttpd php nextcloud mopidy synapse python3 motioneye sabnzbd adsbfeeder koel octoprint htpcmanager homeassistant bazarr mediawiki
 
 G_DIETPI-NOTIFY 2 'Purging left config files from packages which were removed before already'
 mapfile -t packages < <(dpkg -l | mawk '$1=="rc"{print $2}')
