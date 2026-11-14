@@ -72,7 +72,9 @@
 			'rpi5') (( $G_HW_MODEL == 5 ));;
 			# The pwm-fan overlay addresses the PWM controller of the BCM283x/BCM2711 SoCs, and failed to load on RPi 5 in tests.
 			'pwm-fan') (( $G_HW_MODEL < 5 )) && [[ -f $FP_OVERLAYS/pwm-fan.dtbo ]];;
-			'pwm-gpio-fan'|'gpio-fan') [[ -f $FP_OVERLAYS/$1.dtbo ]];;
+			# The pwm-gpio-fan overlay uses a 20 ms PWM period, which the pwm-fan driver rejects on 32-bit kernels: "Configured period too big"
+			'pwm-gpio-fan') [[ $G_HW_ARCH == 3 && -f $FP_OVERLAYS/pwm-gpio-fan.dtbo ]];;
+			'gpio-fan') [[ -f $FP_OVERLAYS/gpio-fan.dtbo ]];;
 			*) return 1;;
 		esac
 	}
@@ -449,11 +451,11 @@ dtoverlay='
 	# Try to apply settings to the running system
 	# - Runtime "dtoverlay"/"dtparam" commands change the live device tree, but the thermal and fan drivers read it only when they are loaded. They are hence re-bound.
 	# - A fan overlay which was loaded by the firmware at boot cannot be changed or removed at runtime.
-	# - Tested on RPi 5 only so far, hence a reboot is requested on other models.
-	# - Exit code 0: Running system matches saved settings, else: Reboot required
+	# - Tested on RPi 4 and RPi 5 so far.
+	# - Exit code 0: Running system matches saved settings, 2: Overlay was loaded but the fan driver failed to start, else: Reboot required
 	Apply_Live()
 	{
-		(( $G_HW_MODEL == 5 )) && command -v dtoverlay > /dev/null && [[ -d '/sys/bus/platform/drivers' ]] || return 1
+		command -v dtoverlay > /dev/null && [[ -d '/sys/bus/platform/drivers' ]] || return 1
 
 		local i changed=0 loaded=$(dtoverlay -l 2> /dev/null) regex="^[0-9]+:[[:blank:]]+$OVERLAY_REGEX([[:blank:]]|$)"
 
@@ -511,7 +513,7 @@ dtoverlay='
 			then
 				params=("gpiopin=$PIN" "temp=${aTEMP[0]}" "hyst=${aHYST[0]}")
 			else
-				params=("fan_gpio=$PIN")
+				[[ $METHOD == 'pwm-fan' ]] && params=("fan_gpio_$PIN") || params=("fan_gpio=$PIN")
 				for i in 0 1 2 3
 				do
 					params+=("fan_temp$i=${aTEMP[$i]}" "fan_temp${i}_hyst=${aHYST[$i]}" "fan_temp${i}_speed=${aSPEED[$i]}")
@@ -529,6 +531,14 @@ dtoverlay='
 		do
 			Rebind "$i" || return 1
 		done
+
+		# Verify that the fan driver started
+		if (( $ENABLED && ! $port ))
+		then
+			G_SLEEP 1
+			[[ $METHOD == 'gpio-fan' ]] && i='/sys/bus/platform/drivers/gpio-fan/gpio-fan@0' || i='/sys/bus/platform/drivers/pwm-fan/pwm-fan'
+			[[ -e $i ]] || return 2
+		fi
 		return 0
 	}
 
@@ -575,14 +585,21 @@ Fan settings are managed in $FP_FAN from now on. The above lines hence need to b
 			return 0
 		fi
 
-		if Apply_Live
-		then
-			REBOOT_REQUIRED=0
-			G_WHIP_MSG "[  OK  ] Fan settings have been saved to $FP_FAN and applied to the running system."
-		else
-			REBOOT_REQUIRED=1
-			G_WHIP_MSG "[  OK  ] Fan settings have been saved to $FP_FAN\n\nA reboot is required to apply them."
-		fi
+		Apply_Live
+		case $? in
+			0)
+				REBOOT_REQUIRED=0
+				G_WHIP_MSG "[  OK  ] Fan settings have been saved to $FP_FAN and applied to the running system."
+			;;
+			2)
+				REBOOT_REQUIRED=0
+				G_WHIP_MSG "[FAILED] Fan settings have been saved to $FP_FAN, but the fan driver failed to start\n\nPlease check the kernel log for errors, e.g. whether the GPIO pin is in use already:\n - dmesg | tail"
+			;;
+			*)
+				REBOOT_REQUIRED=1
+				G_WHIP_MSG "[  OK  ] Fan settings have been saved to $FP_FAN\n\nA reboot is required to apply them."
+			;;
+		esac
 	}
 
 	# Remove config-fan.txt and its include line, to restore system defaults
@@ -687,8 +704,9 @@ Fan settings are managed in $FP_FAN from now on. The above lines hence need to b
 		Method_Available 'gpio-fan' && G_WHIP_MENU_ARRAY+=('gpio-fan' ': Simple on/off, any GPIO pin, no speed control')
 
 		Method_Available 'pwm-fan' && text+='\n\n- pwm-fan: Drives the fan at 25 kHz via hardware PWM on GPIO 12, 13, 18 or 19. The analog audio output (3.5 mm jack) uses the same PWM channels, and its sound quality is severely affected while this method is used. HDMI, USB and I2S audio is not affected.'
-		text+='\n\n- pwm-gpio-fan: Drives the fan at 50 Hz via software PWM. It works on any GPIO pin and does not affect audio, but fans may run rougher or louder at lower speeds.'
+		Method_Available 'pwm-gpio-fan' && text+='\n\n- pwm-gpio-fan: Drives the fan at 50 Hz via software PWM. It works on any GPIO pin and does not affect audio, but fans may run rougher or louder at lower speeds.'
 		text+='\n\n- gpio-fan: Switches the fan on and off at a single trip point. Use this if on/off is sufficient, or if your fan does not handle different speeds well.'
+		(( $G_HW_ARCH == 3 )) || text+='\n\nNB: The "pwm-gpio-fan" overlay for software PWM does not work with 32-bit kernels, and is hence not available on this system.'
 		(( $G_HW_MODEL < 5 )) && ! Method_Available 'pwm-fan' && text+='\n\nNB: The "pwm-fan" overlay for hardware PWM is not available on this system. It requires Debian Trixie or later with an up-to-date kernel package.'
 
 		G_WHIP_DEFAULT_ITEM=${aMETHOD_NAME[$METHOD]}
