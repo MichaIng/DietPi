@@ -187,38 +187,75 @@
 		return 0
 	}
 
-	# Check throttled state of the system
-	THROTTLED_NOW=
-	THROTTLED_PAST=
+	# Check RPi undervoltage and thermal throttling state
+	# - Bits 0-3 of "vcgencmd get_throttled" show current events, bits 16-19 whether the same events occurred since boot.
+	# - As tested on RPi 5: Undervoltage (0x1) comes along with throttling (0x4), never with capping (0x2).
+	#   Approaching temp_limit sets the soft temperature limit (0x8) with progressive CPU frequency reduction, reaching it sets capping and throttling together (0x6).
+	# - Docs: https://www.raspberrypi.com/documentation/computers/os.html#get_throttled
+	aTHROTTLED_NOW=()
+	aTHROTTLED_PAST=()
 	Check_Throttled()
 	{
-		local RAW HEX VALUE CURRENT PAST
+		aTHROTTLED_NOW=() aTHROTTLED_PAST=()
 		(( $G_HW_MODEL > 9 )) && return 1
 		command -v vcgencmd > /dev/null || return 1
 		# Requires root or video group, else "Can't open device file: /dev/vcio_gencmd"
-		RAW=$(vcgencmd get_throttled 2> /dev/null) || return 1
+		local value
+		value=$(vcgencmd get_throttled 2> /dev/null) || return 1
+		value=${value#*=}
+		[[ $value =~ ^0x[0-9a-fA-F]+$ ]] || return 1
+		local current=$(( value & 0xF )) past=$(( value >> 16 & 0xF ))
 
-		HEX=${RAW#*=}
-		HEX=${HEX#0x}
-		VALUE=$((16#$HEX))
-		CURRENT=$((VALUE & 0xF))
-		PAST=$(((VALUE >> 16) & 0xF))
+		# Undervoltage
+		if (( current & 0x1 ))
+		then
+			# Throttling without any thermal flag is caused by the undervoltage
+			if (( current & 0x4 && !(current & 0xA) ))
+			then
+				aTHROTTLED_NOW+=('CPU throttled due to undervoltage!')
+			else
+				aTHROTTLED_NOW+=('Undervoltage detected!')
+			fi
 
-		THROTTLED_NOW=
-		THROTTLED_PAST=
-		# Now https://www.raspberrypi.com/documentation/computers/os.html
-		((CURRENT & 0x1)) && THROTTLED_NOW+='Undervoltage detected! Power supply not providing enough current/voltage (Check PSU, voltage...) '
-		((CURRENT & 0x2)) && THROTTLED_NOW+='ARM CPU Freq capped! '
-		((CURRENT & 0x4)) && THROTTLED_NOW+='Currently Throttled! '
-		((CURRENT & 0x8)) && THROTTLED_NOW+='Temp limit active! Detected overheating (enhance cooling) '
-		# Past (warning)
-		((PAST & 0x1)) && THROTTLED_PAST+='Undervoltage has ocurred (Check logs, PSU, voltage...) [vcgencmd measure_volts], '
-		((PAST & 0x2)) && THROTTLED_PAST+='ARM CPU Freq cap has ocurred (Check logs, PSU, voltage...), '
-		((PAST & 0x4)) && THROTTLED_PAST+='Throttled has ocurred recently, '
-		((PAST & 0x8)) && THROTTLED_PAST+='Temp limit has ocurred (enhance cooling) [vcgencmd measure_temp], '
-		THROTTLED_PAST=${THROTTLED_PAST%, }
-		[[ $THROTTLED_NOW ]] && return 0
-		return 1
+		elif (( past & 0x1 ))
+		then
+			if (( past & 0x4 && !(past & 0xA) ))
+			then
+				aTHROTTLED_PAST+=('CPU was throttled due to undervoltage!')
+			else
+				aTHROTTLED_PAST+=('Undervoltage occurred!')
+			fi
+		fi
+
+		# Temperature limit: The capped flag implies that temp_limit has been reached, the soft limit flag that it has been approached.
+		if (( current & 0x2 ))
+		then
+			aTHROTTLED_NOW+=('CPU throttled due to temperature limit!')
+
+		elif (( current & 0x8 ))
+		then
+			aTHROTTLED_NOW+=('CPU frequency reduced due to high temperature!')
+
+		elif (( past & 0x2 ))
+		then
+			aTHROTTLED_PAST+=('CPU was throttled due to temperature limit!')
+
+		elif (( past & 0x8 ))
+		then
+			aTHROTTLED_PAST+=('CPU frequency was reduced due to high temperature!')
+		fi
+
+		# Throttling without known cause
+		if (( current == 0x4 ))
+		then
+			aTHROTTLED_NOW+=('CPU throttled!')
+
+		elif (( past == 0x4 ))
+		then
+			aTHROTTLED_PAST+=('CPU was throttled!')
+		fi
+
+		[[ ${aTHROTTLED_NOW[0]} ]]
 	}
 
 	Save()
@@ -301,8 +338,8 @@
 			local text_update_available_date=$(LC_ALL=${locale:-C.UTF-8} date '+%R - %a %x')
 		fi
 
-		# RPi throttled?
-		Check_Throttled && local text_update_available_date="${aCOLOUR[alert]}$THROTTLED_NOW"
+		# RPi undervoltage or thermal throttling?
+		Check_Throttled && local text_update_available_date="${aCOLOUR[alert]}${aTHROTTLED_NOW[0]}"
 
 		echo -e "$CLI_LINE
  ${aCOLOUR[strong]}DietPi v$DIETPI_VERSION$COLOUR_RESET $CLI_SEPARATOR $text_update_available_date$COLOUR_RESET
@@ -1001,15 +1038,18 @@ For example: "/mnt/*" or "re:^/mnt/.*/*$"'
 			echo -e " ${aCOLOUR[strong]}reboot$COLOUR_RESET          $CLI_SEPARATOR ${aCOLOUR[alert]}A reboot is required to finalise a recent kernel upgrade$COLOUR_RESET\n"
 		fi
 
-		# RPi throttled?
-		if [[ $THROTTLED_NOW ]]
-		then
-			echo -e "  ${aCOLOUR[alert]}$THROTTLED_NOW$COLOUR_RESET\n"
-
-		elif [[ $THROTTLED_PAST ]]
-		then
-			echo -e "  ${aCOLOUR[highlight]}$THROTTLED_PAST$COLOUR_RESET\n"
-		fi
+		# RPi undervoltage or thermal throttling?
+		local i
+		for i in "${aTHROTTLED_NOW[@]}" "${aTHROTTLED_PAST[@]}"
+		do
+			case $i in
+				*[Uu]'ndervoltage'*) i+=' Check PSU, cable and peripherals for stable operation.';;
+				*'temperature'*) i+=' Consider enhancing cooling.';;
+				*) :;;
+			esac
+			[[ $i == *' was '* || $i == *' occurred!'* ]] && echo -e "  ${aCOLOUR[highlight]}$i$COLOUR_RESET" || echo -e "  ${aCOLOUR[alert]}$i$COLOUR_RESET"
+		done
+		[[ $i ]] && echo
 	}
 
 	Print_Useful_Commands()
