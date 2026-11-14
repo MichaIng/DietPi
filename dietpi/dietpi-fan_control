@@ -1,0 +1,847 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi Fan Control Script
+	#
+	#////////////////////////////////////
+	# Created by MichaIng / micha@dietpi.com / dietpi.com
+	#
+	#////////////////////////////////////
+	#
+	# Info:
+	# - Location: /boot/dietpi/dietpi-fan_control
+	# - Whiptail menu to configure temperature-controlled cooling fans on Raspberry Pi
+	# - Supported methods:
+	#	- pwm-fan overlay: Hardware PWM on GPIO 12/13/18/19, not on RPi 5, breaks analog audio
+	#	- pwm-gpio-fan overlay: Software PWM on any GPIO pin
+	#	- gpio-fan overlay: Simple on/off on any GPIO pin
+	#	- Dedicated PWM fan port of the RPi 5
+	# - Settings are stored in /boot/firmware/config-fan.txt, which is included by /boot/firmware/config.txt.
+	# - RPi 1-4: Disabling fan control comments out the "include" line only, so that settings are preserved.
+	# - RPi 5: The firmware enables the fan port if a fan is detected at boot. Disabling fan control or using an overlay hence turns it off explicitly in config-fan.txt.
+	#   Settings are then preserved as comments. "Reset" removes config-fan.txt, which restores the default fan port state.
+	#
+	#////////////////////////////////////
+
+	# Import DietPi-Globals --------------------------------------------------------------
+	. /boot/dietpi/func/dietpi-globals
+	readonly G_PROGRAM_NAME='DietPi-Fan_control'
+	G_CHECK_ROOT_USER "$@"
+	G_CHECK_ROOTFS_RW
+	G_INIT
+	# Import DietPi-Globals --------------------------------------------------------------
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Variables and Functions
+	#/////////////////////////////////////////////////////////////////////////////////////
+	readonly FP_CONFIG='/boot/firmware/config.txt'
+	readonly FP_FAN='/boot/firmware/config-fan.txt'
+	FP_OVERLAYS='/boot/firmware/overlays'
+	[[ -d $FP_OVERLAYS ]] || FP_OVERLAYS='/boot/overlays'
+	readonly FP_OVERLAYS
+	readonly INCLUDE_REGEX='include[[:blank:]]+config-fan\.txt'
+	readonly OVERLAY_REGEX='(pwm-fan|pwm-gpio-fan|gpio-fan)'
+	readonly MAX_TEMP=100000 # m°C
+	readonly MAX_SPEED=255 # Higher values make the pwm-fan driver fail to load
+
+	# Display names for methods
+	declare -A aMETHOD_NAME=(
+
+		['pwm-fan']='pwm-fan'
+		['pwm-gpio-fan']='pwm-gpio-fan'
+		['gpio-fan']='gpio-fan'
+		['rpi5']='RPi 5 fan port'
+	)
+
+	ENABLED=0 # 1 = Fan control active
+	METHOD= # pwm-fan | pwm-gpio-fan | gpio-fan | rpi5
+	PIN= # BCM GPIO number, unused for METHOD=rpi5
+	# Trip points: Always 4 are kept, but only the first one is used for METHOD=gpio-fan
+	aTEMP=() # m°C
+	aHYST=() # m°C
+	aSPEED=() # 0-255, unused for METHOD=gpio-fan
+	UNSAVED=0
+	REBOOT_REQUIRED=0
+	# Set by Parse_File
+	PORT_OFF=0 # 1 = RPi 5 fan port explicitly disabled via dtparam=cooling_fan=off
+	ACTIVE_OVERLAY=0 # 1 = Uncommented fan overlay line found
+
+	# $1: Method
+	Method_Available()
+	{
+		case $1 in
+			'rpi5') (( $G_HW_MODEL == 5 ));;
+			# The pwm-fan overlay addresses the PWM controller of the BCM283x/BCM2711 SoCs, and failed to load on RPi 5 in tests.
+			'pwm-fan') (( $G_HW_MODEL < 5 )) && [[ -f $FP_OVERLAYS/pwm-fan.dtbo ]];;
+			'pwm-gpio-fan'|'gpio-fan') [[ -f $FP_OVERLAYS/$1.dtbo ]];;
+			*) return 1;;
+		esac
+	}
+
+	# $1: Method
+	Default_Pin(){ [[ $1 == 'gpio-fan' ]] && echo 12 || echo 18; }
+
+	# Set trip point defaults, matching those of the overlays and RPi 5 device tree
+	# $1: Method
+	Set_Defaults()
+	{
+		case $1 in
+			'pwm-gpio-fan') aTEMP=(55000 60000 67500 75000) aHYST=(5000 5000 5000 5000) aSPEED=(114 152 204 255);;
+			'gpio-fan') aTEMP=(55000 60000 67500 75000) aHYST=(10000 5000 5000 5000) aSPEED=(75 125 175 250);;
+			*) aTEMP=(50000 60000 67500 75000) aHYST=(5000 5000 5000 5000) aSPEED=(75 125 175 250);;
+		esac
+	}
+
+	# $1: Method
+	Is_Defaults()
+	{
+		local current="${aTEMP[*]} ${aHYST[*]} ${aSPEED[*]}" aTEMP aHYST aSPEED
+		Set_Defaults "$1"
+		[[ $current == "${aTEMP[*]} ${aHYST[*]} ${aSPEED[*]}" ]]
+	}
+
+	# Assure that all trip point values are valid:
+	# - The thermal governor applies the cooling state of the highest trip point index which has been crossed, regardless of the temperature order.
+	#   A trip point with a higher temperature than the next one has hence no effect, and a lower speed than the previous one is applied as is.
+	#   To keep things reasonable, temperatures and speeds are forced to not decrease from one trip point to the next.
+	Sanitise()
+	{
+		local i
+		for i in 0 1 2 3
+		do
+			[[ ${aTEMP[$i]} =~ ^[0-9]+$ ]] || aTEMP[$i]=$MAX_TEMP
+			[[ ${aHYST[$i]} =~ ^[0-9]+$ ]] || aHYST[$i]=5000
+			[[ ${aSPEED[$i]} =~ ^[0-9]+$ ]] || aSPEED[$i]=$MAX_SPEED
+			(( ${aTEMP[$i]} > $MAX_TEMP )) && aTEMP[$i]=$MAX_TEMP
+			(( ${aSPEED[$i]} > $MAX_SPEED )) && aSPEED[$i]=$MAX_SPEED
+			if (( $i ))
+			then
+				(( ${aTEMP[$i]} < ${aTEMP[$i-1]} )) && aTEMP[$i]=${aTEMP[$i-1]}
+				(( ${aSPEED[$i]} < ${aSPEED[$i-1]} )) && aSPEED[$i]=${aSPEED[$i-1]}
+			fi
+			(( ${aHYST[$i]} > ${aTEMP[$i]} )) && aHYST[$i]=${aTEMP[$i]}
+		done
+		return 0
+	}
+
+	# Convert m°C to °C: 67500 => 67.5
+	# $1: m°C
+	mC_to_C()
+	{
+		local int=$(( $1 / 1000 )) frac=$(( $1 % 1000 ))
+		if (( $frac ))
+		then
+			printf -v frac '%03d' "$frac"
+			while [[ $frac == *0 ]]; do frac=${frac%0}; done
+			echo "$int.$frac"
+		else
+			echo "$int"
+		fi
+	}
+
+	# Convert °C to m°C: 67.5 => 67500
+	# $1: °C, matching ^[0-9]+(\.[0-9]{1,3})?$
+	C_to_mC()
+	{
+		local int=${1%%.*} frac=
+		[[ $1 == *'.'* ]] && frac=${1#*.}
+		frac+='000'
+		echo $(( 10#$int * 1000 + 10#${frac:0:3} ))
+	}
+
+	# Print PWM value with percentage: 75 => 75 (29%)
+	# $1: 0-255
+	Speed_Text(){ echo "$1 ($(( ( $1 * 200 + 255 ) / 510 ))%)"; }
+
+	# Read a single overlay/dtparam parameter into our settings
+	# $1: Overlay context (empty for base device tree)
+	# $2: key[=value]
+	Read_Param()
+	{
+		local key=${2%%=*} value=
+		[[ $2 == *'='* ]] && value=${2#*=}
+		case $key in
+			'fan_gpio_12'|'fan_gpio_13'|'fan_gpio_18'|'fan_gpio_19') [[ $1 == 'pwm-fan' ]] && PIN=${key#fan_gpio_}; return 0;;
+			*) :;;
+		esac
+		[[ $value =~ ^[0-9]+$ ]] || return 0
+		case $key in
+			'fan_gpio') [[ $1 == 'pwm-gpio-fan' ]] && PIN=$value;;
+			'gpiopin') [[ $1 == 'gpio-fan' ]] && PIN=$value;;
+			'temp') [[ $1 == 'gpio-fan' ]] && aTEMP[0]=$value;;
+			'hyst') [[ $1 == 'gpio-fan' ]] && aHYST[0]=$value;;
+			fan_temp[0-3]) [[ $1 != 'gpio-fan' ]] && aTEMP[${key:8:1}]=$value;;
+			fan_temp[0-3]_hyst) [[ $1 != 'gpio-fan' ]] && aHYST[${key:8:1}]=$value;;
+			fan_temp[0-3]_speed) [[ $1 != 'gpio-fan' ]] && aSPEED[${key:8:1}]=$value;;
+			*) :;;
+		esac
+		return 0
+	}
+
+	# Read fan settings from a config.txt-style file
+	# - "dtparam" lines apply to the preceding "dtoverlay", or to the base device tree if there is none, or after an empty "dtoverlay=".
+	# $1: File path
+	Parse_File()
+	{
+		local line ctx='' params param
+		while read -r line
+		do
+			line=${line%$'\r'}
+			case $line in
+				'dtoverlay='*)
+					line=${line#dtoverlay=}
+					ctx=${line%%,*} params=
+					[[ $line == *','* ]] && params=${line#*,}
+					[[ $ctx =~ ^$OVERLAY_REGEX$ ]] || continue
+					METHOD=$ctx ACTIVE_OVERLAY=1
+					PIN=$(Default_Pin "$METHOD")
+					Set_Defaults "$METHOD"
+				;;
+				'dtparam='*)
+					params=${line#dtparam=}
+					[[ ! $ctx && $G_HW_MODEL == 5 && $params =~ (^|,)cooling_fan=(off|false|no|n|0)(,|$) ]] && PORT_OFF=1
+					if [[ $ctx =~ ^$OVERLAY_REGEX$ ]]
+					then
+						:
+					# RPi 5 fan port trip points, ignored if the port is disabled, where we set all speeds to 0
+					elif [[ ! $ctx && $G_HW_MODEL == 5 && $PORT_OFF == 0 && $params =~ (^|,)fan_temp[0-3] && ( ! $METHOD || $METHOD == 'rpi5' ) ]]
+					then
+						[[ $METHOD ]] || { METHOD='rpi5'; Set_Defaults 'rpi5'; }
+					else
+						continue
+					fi
+				;;
+				# Settings preserved as comments while they are not in use
+				'#method='*)
+					(( $ACTIVE_OVERLAY )) && continue
+					line=${line#\#method=}
+					[[ $line =~ ^($OVERLAY_REGEX|rpi5)$ ]] || continue
+					METHOD=$line
+					PIN=$(Default_Pin "$METHOD")
+					Set_Defaults "$METHOD"
+					continue
+				;;
+				'#pin='*)
+					line=${line#\#pin=}
+					[[ $ACTIVE_OVERLAY == 0 && $line =~ ^[0-9]+$ ]] && PIN=$line
+					continue
+				;;
+				'#fan_temp'*)
+					Read_Param 'preserved' "${line#\#}"
+					continue
+				;;
+				*) continue;;
+			esac
+			for param in ${params//,/ }
+			do
+				Read_Param "$ctx" "$param"
+			done
+
+		done < "$1"
+	}
+
+	# Print or remove conflicting fan settings in config.txt
+	# - All fan overlays with their "dtparam" lines
+	# - RPi 5: Fan port "dtparam"s
+	# $1: "list" to print conflicting lines, "clean" to print the file content without them
+	Config_Filter()
+	{
+		local rpi5=0
+		(( $G_HW_MODEL == 5 )) && rpi5=1
+		mawk -v mode="$1" -v rpi5="$rpi5" '
+		function isfan(o) { return o ~ /^(pwm-fan|pwm-gpio-fan|gpio-fan)$/ }
+		{
+			line = $0
+			sub(/\r$/, "", line)
+			sub(/^[ \t]+/, "", line)
+			if (line ~ /^dtoverlay=/) {
+				ctx = substr(line, 11)
+				sub(/[, \t].*$/, "", ctx)
+				if (isfan(ctx)) { if (mode == "list") print line; next }
+			} else if (line ~ /^include[ \t]+config-fan\.txt/) {
+				# Our file ends the overlay scope
+				ctx = ""
+			} else if (line ~ /^dtparam=/) {
+				if (isfan(ctx)) { if (mode == "list") print line; next }
+				if (ctx == "" && rpi5) {
+					n = split(substr(line, 9), a, ",")
+					keep = ""
+					hit = 0
+					for (i = 1; i <= n; i++) {
+						if (a[i] ~ /^fan_temp[0-3](_hyst|_speed)?(=|$)/ || a[i] ~ /^cooling_fan(=|$)/) hit = 1
+						else keep = keep (keep == "" ? "" : ",") a[i]
+					}
+					if (hit) {
+						if (mode == "list") print line
+						else if (keep != "") print "dtparam=" keep
+						next
+					}
+				}
+			}
+			if (mode != "list") print $0
+		}' "$FP_CONFIG"
+	}
+
+	# Read settings from config-fan.txt, or import existing ones from config.txt
+	Init()
+	{
+		ENABLED=0 METHOD='' PIN='' aTEMP=() aHYST=() aSPEED=() UNSAVED=0 PORT_OFF=0 ACTIVE_OVERLAY=0
+
+		if [[ -f $FP_FAN ]]
+		then
+			Parse_File "$FP_FAN"
+			if ! grep -Eq "^[[:blank:]]*$INCLUDE_REGEX" "$FP_CONFIG"
+			then
+				# RPi 5: The fan port runs with defaults if config-fan.txt is not included, which we never leave like that.
+				(( $G_HW_MODEL == 5 )) && UNSAVED=1
+
+			elif (( $G_HW_MODEL != 5 || $ACTIVE_OVERLAY || ! $PORT_OFF ))
+			then
+				ENABLED=1
+			fi
+
+		elif [[ -f $FP_CONFIG ]]
+		then
+			# Import existing settings from config.txt
+			Parse_File "$FP_CONFIG"
+			if [[ $METHOD ]]
+			then
+				ENABLED=1 UNSAVED=1
+
+			# RPi 5: The firmware enables the fan port, if not explicitly disabled.
+			elif (( $G_HW_MODEL == 5 && ! $PORT_OFF ))
+			then
+				ENABLED=1
+			fi
+		fi
+
+		if [[ $METHOD ]] && ! Method_Available "$METHOD"
+		then
+			G_WHIP_MSG "[WARNING] The configured method \"${aMETHOD_NAME[$METHOD]}\" is not available on this system\n\nAnother method will be preselected. Please review all settings and select \"Apply\" to save them."
+			METHOD=
+			UNSAVED=1
+		fi
+
+		# Preselect the best available method
+		local method
+		if [[ ! $METHOD ]]
+		then
+			for method in 'rpi5' 'pwm-fan' 'pwm-gpio-fan' 'gpio-fan'
+			do
+				Method_Available "$method" || continue
+				METHOD=$method
+				[[ ${aTEMP[0]} ]] || Set_Defaults "$METHOD"
+				break
+			done
+		fi
+
+		if [[ ! $METHOD ]]
+		then
+			G_WHIP_MSG "[FAILED] No fan control overlay found in $FP_OVERLAYS\n\nPlease assure that your kernel/firmware packages are up-to-date:\n - apt update && apt upgrade"
+			TARGETMENUID=-1 # Exit
+			return 1
+		fi
+
+		[[ $PIN =~ ^[0-9]+$ ]] || PIN=$(Default_Pin "$METHOD")
+		[[ $METHOD == 'pwm-fan' && ! $PIN =~ ^1[2389]$ ]] && PIN=18
+		Sanitise
+	}
+
+	# Write settings to config-fan.txt
+	Write_Config()
+	{
+		local i content='# DietPi fan control settings, managed by dietpi-fan_control
+# - This file is included by config.txt via "include config-fan.txt".
+# - The empty "dtoverlay=" lines end the scope of the previous overlay,
+#   so that "dtparam" lines here and in config.txt apply as intended.
+dtoverlay='
+
+		# RPi 5: The firmware enables the fan port only if it detects a fan at boot, but then regardless of "cooling_fan=off".
+		# - Enable it explicitly if it is the chosen method, so that it works if a fan is attached later.
+		# - Else turn it off: To stop a detected fan as well, all speeds are set to 0.
+		if (( $G_HW_MODEL == 5 && $ENABLED )) && [[ $METHOD == 'rpi5' ]]
+		then
+			content+='\ndtparam=cooling_fan=on'
+
+		elif (( $G_HW_MODEL == 5 ))
+		then
+			content+='\ndtparam=cooling_fan=off'
+			for i in 0 1 2 3
+			do
+				content+="\ndtparam=fan_temp${i}_speed=0"
+			done
+		fi
+
+		# RPi 5: Fan control off, preserve settings as comments
+		if (( $G_HW_MODEL == 5 && ! $ENABLED ))
+		then
+			content+="\n# Fan control is off, settings are preserved here:\n#method=$METHOD\n#pin=$PIN"
+			for i in 0 1 2 3
+			do
+				content+="\n#fan_temp$i=${aTEMP[$i]}\n#fan_temp${i}_hyst=${aHYST[$i]}\n#fan_temp${i}_speed=${aSPEED[$i]}"
+			done
+			G_DIETPI-NOTIFY 2 "Writing fan settings to $FP_FAN"
+			echo -e "$content" > "$FP_FAN"
+			return
+		fi
+
+		case $METHOD in
+			'pwm-fan') content+="\ndtoverlay=pwm-fan\ndtparam=fan_gpio_$PIN";;
+			'pwm-gpio-fan') content+="\ndtoverlay=pwm-gpio-fan\ndtparam=fan_gpio=$PIN";;
+			'gpio-fan') content+="\ndtoverlay=gpio-fan\ndtparam=gpiopin=$PIN\ndtparam=temp=${aTEMP[0]}\ndtparam=hyst=${aHYST[0]}";;
+			*) :;;
+		esac
+
+		if [[ $METHOD == 'gpio-fan' ]]
+		then
+			# Preserve the settings which are unused by this method as comments, for the case that the method is changed later
+			content+="\n# Unused by gpio-fan, preserved for PWM methods:\n#fan_temp0_speed=${aSPEED[0]}"
+			for i in 1 2 3
+			do
+				content+="\n#fan_temp$i=${aTEMP[$i]}\n#fan_temp${i}_hyst=${aHYST[$i]}\n#fan_temp${i}_speed=${aSPEED[$i]}"
+			done
+		else
+			for i in 0 1 2 3
+			do
+				content+="\ndtparam=fan_temp$i=${aTEMP[$i]}\ndtparam=fan_temp${i}_hyst=${aHYST[$i]}\ndtparam=fan_temp${i}_speed=${aSPEED[$i]}"
+			done
+		fi
+
+		[[ $METHOD == 'rpi5' ]] || content+='\ndtoverlay='
+
+		G_DIETPI-NOTIFY 2 "Writing fan settings to $FP_FAN"
+		echo -e "$content" > "$FP_FAN"
+	}
+
+	# Enable or disable the "include config-fan.txt" line in config.txt
+	# - RPi 5: Always enabled, since config-fan.txt turns off the fan port if fan control is disabled.
+	Set_Include()
+	{
+		local line='#include config-fan.txt' active=$ENABLED
+		(( $G_HW_MODEL == 5 )) && active=1
+		(( $active )) && line='include config-fan.txt'
+
+		# Reuse an existing line if it is not subject to a conditional filter, else re-add it at the end of the file.
+		if grep -Eq "^[[:blank:]#]*$INCLUDE_REGEX" "$FP_CONFIG"
+		then
+			local section=$(mawk '/^[ \t]*\[/{s=$1} /^[ \t#]*include[ \t]+config-fan\.txt/{print s;exit}' "$FP_CONFIG")
+			if [[ ! $section || $section == '[all]' ]]
+			then
+				G_EXEC sed --follow-symlinks -Ei "/^[[:blank:]#]*$INCLUDE_REGEX/c\\$line" "$FP_CONFIG"
+				return 0
+			fi
+			G_EXEC sed --follow-symlinks -Ei "/^[[:blank:]#]*$INCLUDE_REGEX/d" "$FP_CONFIG"
+		fi
+
+		(( $active )) || return 0
+		local last_section=$(mawk '/^[ \t]*\[/{s=$1} END{print s}' "$FP_CONFIG")
+		[[ $last_section && $last_section != '[all]' ]] && line="[all]\n$line"
+		[[ $(tail -c1 "$FP_CONFIG") ]] && line="\n$line"
+		echo -e "$line" >> "$FP_CONFIG"
+	}
+
+	# Unbind and bind a platform device from/to its driver, so that it re-reads its device tree properties
+	# $1: Path to device symlink in driver directory
+	Rebind()
+	{
+		[[ -L $1 ]] || return 0
+		echo "${1##*/}" > "${1%/*}/unbind" && echo "${1##*/}" > "${1%/*}/bind"
+	}
+
+	# Try to apply settings to the running system
+	# - Runtime "dtoverlay"/"dtparam" commands change the live device tree, but the thermal and fan drivers read it only when they are loaded. They are hence re-bound.
+	# - A fan overlay which was loaded by the firmware at boot cannot be changed or removed at runtime.
+	# - Tested on RPi 5 only so far, hence a reboot is requested on other models.
+	# - Exit code 0: Running system matches saved settings, else: Reboot required
+	Apply_Live()
+	{
+		(( $G_HW_MODEL == 5 )) && command -v dtoverlay > /dev/null && [[ -d '/sys/bus/platform/drivers' ]] || return 1
+
+		local i changed=0 loaded=$(dtoverlay -l 2> /dev/null) regex="^[0-9]+:[[:blank:]]+$OVERLAY_REGEX([[:blank:]]|$)"
+
+		# Fan overlay loaded at boot?
+		if [[ -d '/proc/device-tree/pwm-fan' || -d '/proc/device-tree/gpio-fan@0' ]] && ! grep -Eq "$regex" <<< "$loaded"
+		then
+			return 1
+		fi
+
+		# Remove fan overlays and trip point dtparams which were loaded at runtime, highest index first
+		while read -r i
+		do
+			G_DIETPI-NOTIFY 2 "Removing runtime overlay $i"
+			dtoverlay -r "$i" || return 1
+			changed=1
+
+		done < <(sed -En "/$regex|^[0-9]+:[[:blank:]]+dtparam[[:blank:]].*fan_temp/s/:.*//p" <<< "$loaded" | sort -rn)
+
+		# RPi 5 fan port: Apply chosen trip points, or turn it off via speed 0 if it is not the chosen method
+		local port=0
+		(( $ENABLED )) && [[ $METHOD == 'rpi5' ]] && port=1
+		if [[ -e '/sys/bus/platform/drivers/pwm-fan/cooling_fan' ]]
+		then
+			local dt='/proc/device-tree/thermal-zones/cpu-thermal/trips' node files=() live want params=() aT=("${aTEMP[@]}") aH=("${aHYST[@]}") aS=("${aSPEED[@]}")
+			(( $port )) || aT=(50000 60000 67500 75000) aH=(5000 5000 5000 5000) aS=(0 0 0 0)
+			for node in 'cpu-tepid' 'cpu-warm' 'cpu-hot' 'cpu-vhot'
+			do
+				files+=("$dt/$node/temperature" "$dt/$node/hysteresis")
+			done
+			read -ra live < <(od -An -v -tu4 --endian=big -w64 "${files[@]}" '/proc/device-tree/cooling_fan/cooling-levels' 2> /dev/null)
+			want="${aT[0]} ${aH[0]} ${aT[1]} ${aH[1]} ${aT[2]} ${aH[2]} ${aT[3]} ${aH[3]} 0 ${aS[*]}"
+			if [[ ${live[*]} != "$want" ]]
+			then
+				for i in 0 1 2 3
+				do
+					params+=("fan_temp$i=${aT[$i]}" "fan_temp${i}_hyst=${aH[$i]}" "fan_temp${i}_speed=${aS[$i]}")
+				done
+				G_DIETPI-NOTIFY 2 'Applying RPi 5 fan port trip points'
+				dtparam "${params[@]}" || return 1
+				Rebind '/sys/bus/platform/drivers/pwm-fan/cooling_fan' || return 1
+				changed=1
+			fi
+
+		elif (( $port ))
+		then
+			# Fan port disabled at boot: Enabling it at runtime is untested, and disabling it at runtime crashes the kernel.
+			return 1
+		fi
+
+		# Load chosen overlay
+		if (( $ENABLED && ! $port ))
+		then
+			local params=()
+			if [[ $METHOD == 'gpio-fan' ]]
+			then
+				params=("gpiopin=$PIN" "temp=${aTEMP[0]}" "hyst=${aHYST[0]}")
+			else
+				params=("fan_gpio=$PIN")
+				for i in 0 1 2 3
+				do
+					params+=("fan_temp$i=${aTEMP[$i]}" "fan_temp${i}_hyst=${aHYST[$i]}" "fan_temp${i}_speed=${aSPEED[$i]}")
+				done
+			fi
+			G_DIETPI-NOTIFY 2 "Loading $METHOD overlay"
+			dtoverlay "$METHOD" "${params[@]}" || return 1
+			changed=1
+		fi
+
+		(( $changed )) || return 0
+
+		# Re-register the thermal zone, to make it re-read trip points and cooling maps
+		for i in /sys/bus/platform/drivers/bcm2*_thermal/*
+		do
+			Rebind "$i" || return 1
+		done
+		return 0
+	}
+
+	Apply()
+	{
+		if ! Method_Available "$METHOD"
+		then
+			G_WHIP_MSG "[FAILED] The method \"${aMETHOD_NAME[$METHOD]}\" is not available on this system\n\nPlease select another one."
+			return 1
+		fi
+
+		Sanitise
+
+		# Check for conflicting settings in config.txt
+		local conflicts=$(Config_Filter list)
+		if [[ $conflicts ]]
+		then
+			G_WHIP_BUTTON_OK_TEXT='Remove' G_WHIP_BUTTON_CANCEL_TEXT='Cancel'
+			G_WHIP_YESNO "[WARNING] Conflicting fan settings found in $FP_CONFIG:\n\n$conflicts\n
+Fan settings are managed in $FP_FAN from now on. The above lines hence need to be removed from $FP_CONFIG.\n\nDo you want to remove them and continue?" || return 1
+		fi
+
+		# Remember old settings, to skip applying if nothing changed
+		local old new
+		old="$(cat "$FP_FAN" 2> /dev/null)$(grep -E "^[[:blank:]#]*$INCLUDE_REGEX" "$FP_CONFIG")"
+
+		Write_Config || { G_WHIP_MSG "[FAILED] Could not write to $FP_FAN\n\nNo changes have been applied."; return 1; }
+
+		if [[ $conflicts ]]
+		then
+			local content
+			content=$(Config_Filter clean) && [[ $content ]] || { G_WHIP_MSG "[FAILED] Could not process $FP_CONFIG\n\nPlease remove the conflicting lines manually."; return 1; }
+			G_DIETPI-NOTIFY 2 "Removing conflicting fan settings from $FP_CONFIG"
+			echo "$content" > "$FP_CONFIG"
+		fi
+
+		Set_Include
+		UNSAVED=0
+
+		new="$(<"$FP_FAN")$(grep -E "^[[:blank:]#]*$INCLUDE_REGEX" "$FP_CONFIG")"
+		if [[ ! $conflicts && $old == "$new" ]]
+		then
+			G_WHIP_MSG '[ INFO ] The saved fan settings did not change.'
+			return 0
+		fi
+
+		if Apply_Live
+		then
+			REBOOT_REQUIRED=0
+			G_WHIP_MSG "[  OK  ] Fan settings have been saved to $FP_FAN and applied to the running system."
+		else
+			REBOOT_REQUIRED=1
+			G_WHIP_MSG "[  OK  ] Fan settings have been saved to $FP_FAN\n\nA reboot is required to apply them."
+		fi
+	}
+
+	# Remove config-fan.txt and its include line, to restore system defaults
+	Reset()
+	{
+		local text='no fan is controlled'
+		(( $G_HW_MODEL == 5 )) && text='the dedicated RPi 5 fan port is enabled with default trip points, if a fan is detected at boot'
+		G_WHIP_YESNO "This will remove $FP_FAN and discard all fan settings. By default, $text.\n\nDo you want to continue?" || return 0
+
+		local changed=0
+		[[ -f $FP_FAN ]] && { G_EXEC rm "$FP_FAN"; changed=1; }
+		grep -Eq "^[[:blank:]#]*$INCLUDE_REGEX" "$FP_CONFIG" && { G_EXEC sed --follow-symlinks -Ei "/^[[:blank:]#]*$INCLUDE_REGEX/d" "$FP_CONFIG"; changed=1; }
+		Init || return 1
+		(( $changed )) || return 0
+
+		if Apply_Live
+		then
+			REBOOT_REQUIRED=0
+			G_WHIP_MSG '[  OK  ] Fan settings have been removed, and system defaults were applied to the running system.'
+		else
+			REBOOT_REQUIRED=1
+			G_WHIP_MSG '[  OK  ] Fan settings have been removed.\n\nA reboot is required to restore system defaults.'
+		fi
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Menu System
+	#/////////////////////////////////////////////////////////////////////////////////////
+	TARGETMENUID=0
+	SELECTED_TRIP=0
+
+	# TARGETMENUID=0
+	Menu_Main()
+	{
+		local i count=4 enabled_text='Off' text fp
+		[[ $METHOD == 'gpio-fan' ]] && count=1
+		(( $ENABLED )) && enabled_text='On'
+
+		G_WHIP_MENU_ARRAY=(
+
+			'Fan control' ": [$enabled_text]"
+			'Method' ": [${aMETHOD_NAME[$METHOD]}]"
+		)
+		[[ $METHOD == 'rpi5' ]] || G_WHIP_MENU_ARRAY+=('GPIO pin' ": [GPIO $PIN]")
+
+		for (( i=0; i<$count; i++ ))
+		do
+			text="$(mC_to_C "${aTEMP[$i]}") °C | Hysteresis: $(mC_to_C "${aHYST[$i]}") °C"
+			[[ $METHOD == 'gpio-fan' ]] || text+=" | Speed: $(Speed_Text "${aSPEED[$i]}")"
+			G_WHIP_MENU_ARRAY+=("Trip point $(( $i + 1 ))" ": [$text]")
+		done
+
+		G_WHIP_MENU_ARRAY+=(
+
+			'Reset' ': Remove all fan settings and restore system defaults'
+			'Apply' ': Save and apply settings'
+		)
+
+		text="CPU temperature: $(G_OBTAIN_CPU_TEMP) °C"
+		for fp in /sys/devices/platform/{cooling_fan,pwm-fan,gpio-fan@0}/hwmon/hwmon*/pwm1
+		do
+			[[ -f $fp ]] || continue
+			[[ $fp == *'/cooling_fan/'* ]] && text+='\nCurrent RPi 5 fan port speed: ' || text+='\nCurrent GPIO fan speed: '
+			text+=$(Speed_Text "$(<"$fp")")
+		done
+		[[ $G_HW_MODEL == 5 && $ENABLED == 1 && $METHOD != 'rpi5' ]] && text+='\n\nNB: The dedicated RPi 5 fan port is turned off while another method is used.'
+		[[ $G_HW_MODEL == 5 && $ENABLED == 1 && $METHOD == 'rpi5' && $REBOOT_REQUIRED == 0 && ! -e '/sys/bus/platform/drivers/pwm-fan/cooling_fan' ]] && text+='\n\nNB: The RPi 5 fan port is currently inactive. By default, the firmware enables it only if a fan is detected at boot.'
+		(( $UNSAVED )) && text+='\n\nNB: There are unsaved changes. Select "Apply" to save them.'
+		(( $REBOOT_REQUIRED )) && text+='\n\nNB: A reboot is required to apply the saved settings.'
+
+		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+		if ! G_WHIP_MENU "$text\n\nPlease select an option:"
+		then
+			if (( $UNSAVED ))
+			then
+				G_WHIP_BUTTON_OK_TEXT='Discard' G_WHIP_BUTTON_CANCEL_TEXT='Back'
+				G_WHIP_YESNO 'There are unsaved changes. Do you want to discard them and exit?' || return 0
+			fi
+			TARGETMENUID=-1 # Exit
+			return 0
+		fi
+
+		case $G_WHIP_RETURNED_VALUE in
+			'Fan control') ENABLED=$(( ! $ENABLED )) UNSAVED=1;;
+			'Method') TARGETMENUID=1;; # Menu_Method
+			'GPIO pin') Menu_Pin;;
+			'Trip point '*) SELECTED_TRIP=$(( ${G_WHIP_RETURNED_VALUE##* } - 1 )) TARGETMENUID=2;; # Menu_Trip
+			'Reset') Reset;;
+			'Apply') Apply;;
+			*) :;;
+		esac
+	}
+
+	# TARGETMENUID=1
+	Menu_Method()
+	{
+		TARGETMENUID=0 # Menu_Main
+
+		local method text='Please select the method to control your fan:'
+		G_WHIP_MENU_ARRAY=()
+		Method_Available 'rpi5' && G_WHIP_MENU_ARRAY+=("${aMETHOD_NAME[rpi5]}" ': Dedicated 4-pin PWM fan connector of the RPi 5')
+		Method_Available 'pwm-fan' && G_WHIP_MENU_ARRAY+=('pwm-fan' ': Hardware PWM, smooth fan operation, but breaks analog audio')
+		Method_Available 'pwm-gpio-fan' && G_WHIP_MENU_ARRAY+=('pwm-gpio-fan' ': Software PWM, any GPIO pin, the fan may run rougher')
+		Method_Available 'gpio-fan' && G_WHIP_MENU_ARRAY+=('gpio-fan' ': Simple on/off, any GPIO pin, no speed control')
+
+		Method_Available 'pwm-fan' && text+='\n\n- pwm-fan: Drives the fan at 25 kHz via hardware PWM on GPIO 12, 13, 18 or 19. The analog audio output (3.5 mm jack) uses the same PWM channels, and its sound quality is severely affected while this method is used. HDMI, USB and I2S audio is not affected.'
+		text+='\n\n- pwm-gpio-fan: Drives the fan at 50 Hz via software PWM. It works on any GPIO pin and does not affect audio, but fans may run rougher or louder at lower speeds.'
+		text+='\n\n- gpio-fan: Switches the fan on and off at a single trip point. Use this if on/off is sufficient, or if your fan does not handle different speeds well.'
+		(( $G_HW_MODEL < 5 )) && ! Method_Available 'pwm-fan' && text+='\n\nNB: The "pwm-fan" overlay for hardware PWM is not available on this system. It requires Debian Trixie or later with an up-to-date kernel package.'
+
+		G_WHIP_DEFAULT_ITEM=${aMETHOD_NAME[$METHOD]}
+		G_WHIP_MENU "$text" || return 0
+
+		method=$G_WHIP_RETURNED_VALUE
+		[[ $method == "${aMETHOD_NAME[rpi5]}" ]] && method='rpi5'
+		[[ $method == "$METHOD" ]] && return 0
+
+		# Switch to the defaults of the new method, if those of the old method were not changed
+		local defaults=0
+		Is_Defaults "$METHOD" && defaults=1
+		[[ $PIN == "$(Default_Pin "$METHOD")" ]] && PIN=$(Default_Pin "$method")
+		METHOD=$method
+		(( $defaults )) && Set_Defaults "$METHOD"
+		[[ $METHOD == 'pwm-fan' && ! $PIN =~ ^1[2389]$ ]] && PIN=18
+		Sanitise
+		UNSAVED=1
+	}
+
+	Menu_Pin()
+	{
+		local text='NB: The BCM GPIO number is required, not the physical pin number of the GPIO header: https://pinout.xyz/'
+		if [[ $METHOD == 'pwm-fan' ]]
+		then
+			G_WHIP_MENU_ARRAY=(
+
+				'12' ': GPIO 12 | PWM0 | physical pin 32'
+				'13' ': GPIO 13 | PWM1 | physical pin 33'
+				'18' ': GPIO 18 | PWM0 | physical pin 12 (default)'
+				'19' ': GPIO 19 | PWM1 | physical pin 35'
+			)
+			G_WHIP_DEFAULT_ITEM=$PIN
+			G_WHIP_MENU "Please select the GPIO pin, the PWM/control wire of your fan is connected to. Hardware PWM is available on these four pins only.\n\n$text" || return 0
+		else
+			G_WHIP_DEFAULT_ITEM=$PIN
+			G_WHIP_INPUTBOX_REGEX='^([2-9]|1[0-9]|2[0-7])$' G_WHIP_INPUTBOX_REGEX_TEXT='be a GPIO number from 2 to 27'
+			G_WHIP_INPUTBOX "Please enter the GPIO pin, the PWM/control wire of your fan is connected to (default: $(Default_Pin "$METHOD")):\n\n$text" || return 0
+		fi
+		[[ $G_WHIP_RETURNED_VALUE == "$PIN" ]] && return 0
+		PIN=$G_WHIP_RETURNED_VALUE
+		UNSAVED=1
+	}
+
+	# TARGETMENUID=2
+	Menu_Trip()
+	{
+		local i=$SELECTED_TRIP count=4 min max value text
+		[[ $METHOD == 'gpio-fan' ]] && count=1
+
+		G_WHIP_MENU_ARRAY=(
+
+			'Temperature' ": [$(mC_to_C "${aTEMP[$i]}") °C]"
+			'Hysteresis' ": [$(mC_to_C "${aHYST[$i]}") °C]"
+		)
+		[[ $METHOD == 'gpio-fan' ]] || G_WHIP_MENU_ARRAY+=('Speed' ": [$(Speed_Text "${aSPEED[$i]}")]")
+
+		if [[ $METHOD == 'gpio-fan' ]]
+		then
+			text="The fan is switched on when the CPU temperature reaches $(mC_to_C "${aTEMP[$i]}") °C, and switched off when it falls below $(mC_to_C $(( ${aTEMP[$i]} - ${aHYST[$i]} ))) °C."
+		else
+			text="The fan runs at speed $(Speed_Text "${aSPEED[$i]}") when the CPU temperature reaches $(mC_to_C "${aTEMP[$i]}") °C, until it falls below $(mC_to_C $(( ${aTEMP[$i]} - ${aHYST[$i]} ))) °C."
+		fi
+
+		G_WHIP_BUTTON_CANCEL_TEXT='Back'
+		if ! G_WHIP_MENU "Trip point $(( $i + 1 )): $text\n\nPlease select a setting to change:"
+		then
+			TARGETMENUID=0 # Menu_Main
+			return 0
+		fi
+
+		case $G_WHIP_RETURNED_VALUE in
+			'Temperature')
+				# Limited by neighbour trip points
+				min=0 max=$MAX_TEMP
+				(( $i )) && min=${aTEMP[$i-1]}
+				(( $i + 1 < $count )) && max=${aTEMP[$i+1]}
+				G_WHIP_DEFAULT_ITEM=$(mC_to_C "${aTEMP[$i]}")
+				G_WHIP_INPUTBOX_REGEX='^[0-9]{1,3}(\.[0-9]{1,3})?$' G_WHIP_INPUTBOX_REGEX_TEXT='be a temperature in °C, like "60" or "67.5"'
+				G_WHIP_INPUTBOX "Please enter the CPU temperature in °C at which trip point $(( $i + 1 )) becomes active:
+ - Allowed range: $(mC_to_C "$min") - $(mC_to_C "$max") °C\n - The range is limited by the temperatures of the previous and next trip points." || return 0
+				value=$(C_to_mC "$G_WHIP_RETURNED_VALUE")
+				if (( $value < $min || $value > $max ))
+				then
+					G_WHIP_MSG "[FAILED] $G_WHIP_RETURNED_VALUE °C is outside of the allowed range of $(mC_to_C "$min") - $(mC_to_C "$max") °C\n\nNo changes applied. To use this temperature, adjust the previous or next trip point first."
+					return 0
+				fi
+				aTEMP[$i]=$value
+			;;
+			'Hysteresis')
+				G_WHIP_DEFAULT_ITEM=$(mC_to_C "${aHYST[$i]}")
+				G_WHIP_INPUTBOX_REGEX='^[0-9]{1,3}(\.[0-9]{1,3})?$' G_WHIP_INPUTBOX_REGEX_TEXT='be a temperature difference in °C, like "5" or "2.5"'
+				G_WHIP_INPUTBOX "Please enter the hysteresis of trip point $(( $i + 1 )) in °C:
+ - This is the temperature difference below the trip point temperature, at which the trip point becomes inactive again.
+ - It prevents the fan from constantly changing its speed when the CPU temperature fluctuates around the trip point.
+ - Allowed range: 0 - $(mC_to_C "${aTEMP[$i]}") °C" || return 0
+				value=$(C_to_mC "$G_WHIP_RETURNED_VALUE")
+				if (( $value > ${aTEMP[$i]} ))
+				then
+					G_WHIP_MSG "[FAILED] $G_WHIP_RETURNED_VALUE °C is outside of the allowed range of 0 - $(mC_to_C "${aTEMP[$i]}") °C\n\nNo changes applied."
+					return 0
+				fi
+				aHYST[$i]=$value
+			;;
+			'Speed')
+				# Limited by neighbour trip points
+				min=0 max=$MAX_SPEED
+				(( $i )) && min=${aSPEED[$i-1]}
+				(( $i + 1 < $count )) && max=${aSPEED[$i+1]}
+				G_WHIP_DEFAULT_ITEM=${aSPEED[$i]}
+				G_WHIP_INPUTBOX "Please enter the fan speed for trip point $(( $i + 1 )) as PWM value:
+ - 0 = off, 128 = 50%, 255 = 100%\n - Allowed range: $min - $max\n - The range is limited by the speeds of the previous and next trip points.
+ - Many fans do not start spinning reliably at low values." || return 0
+				G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" "$min" "$max" || return 0
+				aSPEED[$i]=$(( 10#$G_WHIP_RETURNED_VALUE ))
+			;;
+			*) return 0;;
+		esac
+
+		Sanitise
+		UNSAVED=1
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#/////////////////////////////////////////////////////////////////////////////////////
+	if (( $G_HW_MODEL > 9 ))
+	then
+		G_DIETPI-NOTIFY 1 "$G_PROGRAM_NAME currently supports Raspberry Pi only. Exiting..."
+		exit 1
+	fi
+	#-----------------------------------------------------------------------------------
+	Init
+	#-----------------------------------------------------------------------------------
+	until (( $TARGETMENUID < 0 ))
+	do
+		case $TARGETMENUID in
+			1) Menu_Method;;
+			2) Menu_Trip;;
+			*) Menu_Main;;
+		esac
+	done
+	#-----------------------------------------------------------------------------------
+	if (( $REBOOT_REQUIRED ))
+	then
+		G_WHIP_BUTTON_CANCEL_TEXT='Later'
+		G_WHIP_YESNO 'A reboot is required to apply your new fan settings.\n\nWould you like to reboot now?' && reboot
+	fi
+	#-----------------------------------------------------------------------------------
+	exit 0
+	#-----------------------------------------------------------------------------------
+}
