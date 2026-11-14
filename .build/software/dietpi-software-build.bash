@@ -19,7 +19,7 @@ else
 		'12.'*|'bookworm/sid') G_DISTRO=7;;
 		'13.'*|'trixie/sid') G_DISTRO=8;;
 		'14.'*|'forky/sid') G_DISTRO=9;;
-		*) Error_Exit "Unsupported distro version \"$debian_version\"";;
+		*) Error_Exit "Unsupported Debian version \"$debian_version\"";;
 	esac
 	# Ubuntu ships with /etc/debian_version from Debian testing, hence we assume one version lower.
 	grep -q '^ID=ubuntu' /etc/os-release && ((G_DISTRO--))
@@ -56,7 +56,7 @@ do
 	esac
 	shift
 done
-[[ $NAME =~ ^('amiberry'|'amiberry'[-+]'lite'|'domoticz'|'gzdoom'|'gmediarender'|'gogs'|'shairport-sync'|'squeezelite'|'unbound'|'vaultwarden'|'ympd')$ ]] || Error_Exit "Invalid software title \"$NAME\" passed"
+[[ $NAME =~ ^('amiberry'|'amiberry-lite'|'domoticz'|'gzdoom'|'gmediarender'|'gogs'|'haproxy'|'shairport-sync'|'squeezelite'|'unbound'|'vaultwarden'|'ympd')$ ]] || Error_Exit "Invalid software title \"$NAME\" passed"
 [[ $NAME == 'gogs' ]] && EXT='7z' || EXT='deb'
 case $DISTRO in
 	'bookworm') dist=7;;
@@ -75,22 +75,8 @@ esac
 image="DietPi_Container-$image.img"
 
 SCRIPT=$NAME
-ARGS=()
-if [[ $NAME == 'amiberry'* ]]
-then
-	# ARMv6: Use dedicated Amiberry v5.7.1 build script
-	if (( $arch == 1 ))
-	then
-		SCRIPT='amiberry-v5'
-		NAME='amiberry'
-
-	# Else: Use merged build script and pass variant as argument
-	else
-		SCRIPT='amiberry'
-		ARGS+=("$NAME")
-		NAME=${NAME%+lite} # Check for amiberry_*.deb if both were built
-	fi
-fi
+# Amiberry ARMv6: Use dedicated Amiberry v5.7.1 build script
+[[ $NAME == 'amiberry' && $arch == 1 ]] && SCRIPT='amiberry-v5'
 
 ##########################################
 # Dependencies
@@ -101,7 +87,15 @@ apackages=('xz-utils' 'parted' 'fdisk' 'systemd-container')
 emulation=0
 (( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || emulation=1
 
-(( $emulation )) && apackages+=('qemu-user-static')
+if (( $emulation ))
+then
+	if (( $G_DISTRO > 7 ))
+	then
+		apackages+=('qemu-user-binfmt')
+	else
+		apackages+=('qemu-user-static')
+	fi
+fi
 
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
@@ -119,10 +113,13 @@ G_EXEC truncate -s 8G "$image"
 # Mount as loop device
 FP_LOOP=$(losetup -f)
 G_EXEC losetup -P "$FP_LOOP" "$image"
-G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -N1 '$FP_LOOP' <<< ',+'"
-G_EXEC_OUTPUT=1 G_EXEC resize2fs "${FP_LOOP}p1"
+# - resize2fs: "Please run 'e2fsck -f /dev/loop0p1' first."
+# - e2fsck "-p": "need terminal for interactive repairs"
+# - sleep: e2fsck: No such file or directory while trying to open /dev/loop0p1
+G_SLEEP 0.1
 G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
+G_EXEC_OUTPUT=1 G_EXEC resize2fs "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
@@ -157,7 +154,7 @@ then
 fi
 
 # Install Go for Gogs
-[[ $NAME == 'gogs' ]] && G_CONFIG_INJECT 'AUTO_SETUP_INSTALL_SOFTWARE_ID=' 'AUTO_SETUP_INSTALL_SOFTWARE_ID=188' rootfs/boot/dietpi.txt
+[[ $NAME == 'gogs' ]] && G_CONFIG_INJECT 'AUTO_SETUP_INSTALL_SOFTWARE_ID=' 'AUTO_SETUP_INSTALL_SOFTWARE_ID=go' rootfs/boot/dietpi.txt
 
 # Workaround invalid TERM on login
 # shellcheck disable=SC2016
@@ -166,8 +163,8 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsup
 # Workaround for failing IPv4 network connectivity check as GitHub Actions runners do not receive external ICMP echo replies
 G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
 
-# vaultwarden for ARMv6 on ARMv8 host: https://github.com/rust-lang/rust/issues/60605
-[[ $NAME == 'vaultwarden' && $arch == 1 && $G_HW_ARCH == 3 ]] && G_EXEC sysctl -w 'abi.cp15_barrier=2'
+# ARMv6/7: Workaround for "deprecated CP15 Barrier instruction" on ARMv8 host: https://github.com/llvm/llvm-project/issues/41201
+(( $arch < 3 && $G_HW_ARCH == 3 )) && G_EXEC sysctl -w 'abi.cp15_barrier=2'
 
 # Shutdown on failures before the custom script is executed
 G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; systemctl start poweroff.target; }|' rootfs/boot/dietpi/dietpi-login
@@ -181,7 +178,7 @@ cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || Error_Exit 'Failed to 
 #!/bin/dash
 echo '[ INFO ] Running $SCRIPT build script ...'
 [ '$GH_TOKEN' ] && export GH_TOKEN='$GH_TOKEN'
-bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/$SCRIPT/build.bash')"${ARGS[0]:+ -- "${ARGS[@]}"}
+bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/$SCRIPT/build.bash')"
 mkdir -v /output && mv -v /tmp/*.$EXT /output
 systemctl start poweroff.target
 _EOF_

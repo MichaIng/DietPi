@@ -2,15 +2,20 @@
 {
 . /boot/dietpi/func/dietpi-globals
 grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l'
+Error_Exit(){ G_DIETPI-NOTIFY 1 "$1, aborting ..."; exit 1; }
+
+# Apply GitHub token if set
+header=()
+[[ $GH_TOKEN ]] && header=('-H' "Authorization: token $GH_TOKEN")
 
 # Dependencies
 adeps_build=('automake' 'pkg-config' 'make' 'g++' 'libpopt-dev' 'libconfig-dev' 'libssl-dev' 'libsoxr-dev' 'libavahi-client-dev' 'libasound2-dev' 'libglib2.0-dev' 'libmosquitto-dev' 'avahi-daemon' 'git' 'libplist-dev' 'libsodium-dev' 'libgcrypt20-dev' 'libavformat-dev' 'xxd' 'libplist-utils')
 adeps=('libc6' 'libavahi-client3' 'libsoxr0' 'libpopt0' 'libmosquitto1' 'avahi-daemon')
 adeps2=('libgcrypt20')
 case $G_DISTRO in
-	7) adeps+=('libasound2' 'libssl3' 'libconfig9' 'libglib2.0-0' 'libavcodec59'); adeps2+=('libsodium23' 'libplist3');;
-	8) adeps+=('libasound2t64' 'libssl3t64' 'libconfig11' 'libglib2.0-0t64' 'libavcodec61'); adeps2+=('libsodium23' 'libplist-2.0-4'); adeps_build+=('systemd-dev');;
-	9) adeps+=('libasound2t64' 'libssl3t64' 'libconfig11' 'libglib2.0-0t64' 'libavcodec62'); [[ $G_HW_ARCH_NAME == 'armv6l' ]] && adeps2+=('libsodium23' 'libplist-2.0-4') || adeps2+=('libsodium26' 'libplist-2.0-4'); adeps_build+=('systemd-dev');;
+	7) adeps+=('libasound2' 'libssl3' 'libconfig9' 'libglib2.0-0' 'libavcodec59') adeps2+=('libsodium23' 'libplist3');;
+	8) adeps+=('libasound2t64' 'libssl3t64' 'libconfig11' 'libglib2.0-0t64' 'libavcodec61') adeps2+=('libsodium23' 'libplist-2.0-4') adeps_build+=('systemd-dev');;
+	9) adeps+=('libasound2t64' 'libssl3t64' 'libconfig15' 'libglib2.0-0t64') adeps2+=('libsodium26' 'libplist-2.0-4') adeps_build+=('systemd-dev'); [[ $G_HW_ARCH_NAME == 'armv6l' ]] && adeps+=('libavcodec62') || adeps+=('libavcodec63');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 G_AGUP
@@ -30,8 +35,8 @@ done
 NAME='shairport-sync'
 PRETTY='Shairport Sync'
 repo='https://github.com/mikebrady/shairport-sync'
-version=$(curl -sSf 'https://api.github.com/repos/mikebrady/shairport-sync/releases/latest' | grep -Po '"tag_name": *"\K[^"]+(?=")')
-[[ $version ]] || { G_DIETPI-NOTIFY 1 "No latest $PRETTY version found, aborting ..."; exit 1; }
+version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/mikebrady/shairport-sync/releases/latest' | grep -Po '"tag_name": *"\K[^"]+(?=")')
+[[ $version ]] || Error_Exit "No latest $PRETTY version found"
 
 # Download
 G_DIETPI-NOTIFY 2 "Downloading $PRETTY version \e[33m$version"
@@ -76,6 +81,15 @@ cat << '_EOF_' > "$DIR/usr/local/etc/$NAME.conf"
 // Commented out settings are generally the defaults, except where noted.
 // See the individual sections for details.
 
+// Environment variable substitution:
+// Before this file is parsed, any "${NAME}" is replaced by the value of the
+// environment variable NAME (NAME must match [A-Za-z_][A-Za-z0-9_]*). The braces
+// are required, so a bare "$NAME" or a stray "$" is left untouched. Write "$${"
+// to get a literal "${". Referencing a variable that is not set is a fatal error.
+// This lets one shared configuration file serve several instances, and lets
+// secrets (such as an MQTT password) be supplied from the environment.
+// For example: name = "${SPS_NAME}";
+
 // General Settings
 general =
 {
@@ -100,8 +114,10 @@ general =
 //			"basic" causes the simple removal or insertion of frames in a packet of frames. Not recommended.
 //	interpolation = "auto"; // aka "stuffing". Default is "auto". Alternatives are "vernier", "basic" or "soxr". Choose "soxr" only if you have a reasonably fast processor and Shairport Sync has been built with "soxr" support.
 //	output_backend = "alsa"; // Run "shairport-sync -h" to get a list of all output_backends, e.g. "alsa", "pipe", "stdout". The default is the first one.
-//	mdns_backend = "avahi"; // Run "shairport-sync -h" to get a list of all mdns_backends. The default is the first one.
+//	mdns_backend = "avahi"; // Run "shairport-sync -h" to get a list of all mdns_backends. The default is the first one. "metadata" (never the default) sends the services to the metadata feed instead, for an application with its own mDNS responder to publish.
 //	interface = "name"; // Use this advanced setting to specify the interface on which Shairport Sync should provide its service. Leave it commented out to get the default, which is to select the interface(s) automatically.
+//	address = "a.b.c.d"; // Use this advanced setting to bind the listening (RTSP) socket to a single local IP address. Leave it commented out to get the default, which is to listen on all local addresses. (Note: "interface" above only scopes the mDNS advertisement; "address" scopes the listening socket.)
+//	nqptp_shared_memory_interface_name = "/nqptp"; // Use this advanced setting only if you are running more than one AirPlay 2 instance on this machine. nqptp keeps a separate clock for each shared memory interface name, so instances that share a name share a clock -- and when one instance's room leaves an AirPlay 2 group, the "stop timing" it sends clears the clock the others are still playing to, silently stopping them. Give each instance its own name (e.g. "/nqptp-kitchen") to keep them independent. Must begin with a "/", contain no other "/", and be no more than 63 characters. Requires an nqptp with multi-client support. It can also be given on the command line as --nqptp-shared-memory-interface-name, which takes precedence over this setting, so that instances can share one configuration file. Leave it commented out for the default, which is correct for a single instance.
 //	port = <number>; // Listen for service requests on this port. 5000 for AirPlay 1, 7000 for AirPlay 2
 //	udp_port_base = 6001; // (AirPlay 1 only) start allocating UDP ports from this port number when needed
 //	udp_port_range = 10; // (AirPlay 1 only) look for free ports in this number of places, starting at the UDP port base. Allow at least 10, though only three are needed in a steady state.
@@ -111,6 +127,8 @@ general =
 //	drift_tolerance_in_seconds = 0.002; // allow a timing error of this number of seconds of drift away from exact synchronisation before attempting to correct it
 //	resync_threshold_in_seconds = 0.050; // a synchronisation error greater than this number of seconds will cause resynchronisation; 0 disables it
 //	playback_mode = "stereo"; // This can be "stereo", "mono", "reverse stereo", "both left" or "both right". Default is "stereo".
+//	airplay_2_44100_only_mode = "off"; // Set this very specialised AirPlay-2-only setting to "on" if you want to force all AirPlay 2 input to be 44.1k stereo only. All 48k input, including lossless and surround sound, is disabled."
+//	lossless_mode = "on"; // Set this very specialised AirPlay-2-only setting to "off" if you want to disable lossless playback (where available), perhaps to prevent audible glitches during dynamic lossy-to-lossless transitions.
 //	For FFmpeg channel and layout names, (e.g. "7.1", "FL", "3.0(back)", etc.), please see channel_names and channel_layout_map at https://ffmpeg.org/doxygen/trunk/channel__layout_8c_source.html
 //	eight_channel_mode = "on"; // Enable reception of eight channel audio. Can be "off", "on" or an eight-channel FFmpeg channel layout. If "on", the channel layout used is: "7.1".
 //	six_channel_mode = "on"; // Enable reception of six channel audio. Can be "off", "on" or a six-channel FFmpeg channel layout. If "on", the channel layout used is: "5.1".
@@ -123,6 +141,7 @@ general =
 //	  The audio channel list can include the same channel more than once and can include the silent channel "--".
 
 //	ignore_volume_control = "no"; // set this to "yes" if you want the volume to be at 100% no matter what the source's volume control is set to.
+//	volume_control_type = 3; // this experimental setting affects the volume control in unclear ways. Set it to 0 to hide or disable the volume control in the player. (AirPlay 2 only.)
 //	volume_range_db = 60 ; // use this advanced setting to set the range, in dB, you want between the maximum volume and the minimum volume. Range is 30 to 150 dB. Leave it commented out to use mixer's native range.
 //	volume_max_db = 0.0 ; // use this advanced setting, which must have a decimal point in it, to set the maximum volume, in dB, you wish to use.
 //		The setting is for the hardware mixer, if chosen, or the software mixer otherwise. The value must be in the mixer's range (0.0 to -96.2 for the software mixer).
@@ -157,6 +176,8 @@ general =
 //		as "org.gnome.ShairportSync" on the whichever bus you specify here: "system" (default) or "session".
 //	mpris_service_bus = "system"; // The Shairport Sync mpris interface, will appear
 //		as "org.gnome.ShairportSync" on the whichever bus you specify here: "system" (default) or "session".
+//	dbus_nametag = "Kitchen"; // If set, this is added to the D-Bus and MPRIS bus names, e.g. "org.gnome.ShairportSync.Kitchen" and "org.mpris.MediaPlayer2.ShairportSync.Kitchen".
+//		Use it to give each of several instances on the same bus its own names. It may contain only ASCII letters, digits, "_" and "-", and must not begin with a digit.
 //	resend_control_first_check_time = 0.10; // Use this optional advanced setting to set the wait time in seconds before deciding a packet is missing.
 //	resend_control_check_interval_time = 0.25; //  Use this optional advanced setting to set the time in seconds between requests for a missing packet.
 //	resend_control_last_check_time = 0.10; // Use this optional advanced setting to set the latest time, in seconds, by which the last check should be done before the estimated time of a missing packet's transfer to the output buffer.
@@ -275,7 +296,7 @@ metadata =
 //	cover_art_cache_directory = "/tmp/shairport-sync/.cache/coverart"; // artwork will be  stored in this directory if the dbus or MPRIS interfaces are enabled or if the MQTT client is in use. Set it to "" to prevent caching, which may be useful on some systems
 //	pipe_name = "/tmp/shairport-sync-metadata";
 //	pipe_timeout = 5000; // wait for this number of milliseconds for a blocked pipe to unblock before giving up
-//	progress_interval = 0.0; // if non-zero, progress 'phbt' messages will be sent at the interval specified in seconds. A 'phb0' message will also be sent when the first audio frame of a play session is about to be played.
+//	bitrate_stats_interval = 0.0; // If non-zero, bitrate, missing packet and retry statistics will be sent, encoded as 'ssnc/abrt' and 'ssnc/arst', at the interval specified in seconds.
 //		Each message consists of the RTPtime of a a frame of audio and the exact system time when it is to be played. The system time, in nanoseconds, is based the CLOCK_MONOTONIC_RAW of the machine -- if available -- or CLOCK_MONOTONIC otherwise.
 //		Messages are sent when the frame is placed in the output device's buffer, thus, they will be _approximately_ 'audio_backend_buffer_desired_length_in_seconds' ahead of time.
 //	socket_address = "226.0.0.1"; // if set to a host name or IP address, UDP packets containing metadata will be sent to this address. May be a multicast address. "socket-port" must be non-zero and "enabled" must be set to yes"
@@ -327,7 +348,6 @@ diagnostics =
 //	log_show_time_since_last_message = "yes"; // set this to yes if you want the time since the last debug message in the debug message -- seconds down to nanoseconds
 //	drop_this_fraction_of_audio_packets = 0.0; // use this to simulate a noisy network where this fraction of UDP packets are lost in transmission. E.g. a value of 0.001 would mean an average of 0.1% of packets are lost, which is actually quite a high figure.
 //	retain_cover_art = "no"; // artwork is deleted when its corresponding track has been played. Set this to "yes" to retain all artwork permanently. Warning -- your directory might fill up.
-//	get_plist_metadata = "no"; // set this temporary setting to "yes" to get the new richer metadata stream.
 };
 _EOF_
 

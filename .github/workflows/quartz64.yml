@@ -6,7 +6,7 @@ concurrency:
 permissions: {}
 jobs:
   build:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     steps:
     - uses: actions/setup-python@v7
       with:
@@ -14,7 +14,7 @@ jobs:
         check-latest: true
     - name: Build init
       run: |
-        { python3 -m pip install --no-cache-dir -U pip setuptools wheel; python3 -m pip install --no-cache-dir -U pyelftools; } &
+        { python3 -m pip install --no-cache-dir -U pip setuptools; python3 -m pip install --no-cache-dir -U pyelftools; } &
         { sudo apt-get -q update; sudo DEBIAN_FRONTEND=noninteractive apt-get --no-install-recommends -qq install make gcc libc6-dev flex bison bc libssl-dev swig libgnutls28-dev; } &
         { curl -fO 'https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/snapshot/linux-rolling-stable.tar.gz'; tar xf linux-rolling-stable.tar.gz; rm linux-rolling-stable.tar.gz; } &
         uboot_version=$(curl -sSf 'https://api.github.com/repos/u-boot/u-boot/tags' | grep -Po '"name": *"\Kv[0-9.]*(?=")' | head -1)
@@ -78,7 +78,6 @@ jobs:
     - name: Build package
       run: |
         version=$(mawk '/^VERSION =/{a=$3};/^PATCHLEVEL =/{b=$3};/^SUBLEVEL/{c=$3};END{print a"."b"."c}' linux-rolling-stable/Makefile)
-        rm -R linux-rolling-stable
         curl -sSfO 'https://dietpi.com/downloads/binaries/firmware-quartz64a.deb' &
         curl -sSfo firmware-quartz64b/lib/firmware/brcm/brcmfmac43456-sdio.bin 'https://raw.githubusercontent.com/armbian/firmware/master/brcm/brcmfmac43456-sdio.bin' &
         curl -sSfo firmware-quartz64b/lib/firmware/brcm/brcmfmac43456-sdio.clm_blob 'https://raw.githubusercontent.com/armbian/firmware/master/brcm/brcmfmac43456-sdio.clm_blob' &
@@ -92,6 +91,7 @@ jobs:
         echo "New kernel version is:       $version"
         [ "$version-dietpi$cur_suffix" = "$cur_version" ] && version="$version-dietpi$((cur_suffix+1))" || version="$version-dietpi1"
         echo "New package version will be: $version"
+        echo "version=$version" >> "$GITHUB_ENV"
         cp firmware-quartz64a/lib/firmware/brcm/brcmfmac43455-sdio.txt firmware-soquartz/lib/firmware/brcm/
         cat << '_EOF_' > firmware-quartz64a/boot/extlinux/extlinux.conf
         label DietPi
@@ -169,12 +169,55 @@ jobs:
         dpkg-deb -b -Zxz -z9 -Sextreme firmware-quartz64b
         dpkg-deb -b -Zxz -z9 -Sextreme firmware-soquartz
         sudo rm -R firmware-quartz64a firmware-quartz64b firmware-soquartz
+    - name: Build headers package
+      run: |
+        cd linux-rolling-stable
+        read -r kernelrelease < include/config/kernel.release
+        # Install the files required to build external modules, the same way "make bindeb-pkg" does for its linux-headers package: https://github.com/torvalds/linux/blob/master/scripts/package/builddeb
+        # - The kernel's own install-extmod-build script copies the minimal set of sources, generated headers, Module.symvers, auto.conf, and Kbuild host programs (fixdep, modpost, ...).
+        # - Those host programs were compiled on the Ubuntu runner against its new glibc. To make them run on all supported Debian versions, rebuild them in a Debian Bookworm container with its GCC.
+        #   - First rebuild fixdep in the build tree, which is executed as part of each host program build.
+        #   - CC != HOSTCC then makes install-extmod-build rebuild the host programs in the target directory with $CC, like it does for cross builds.
+        docker run --rm -v "$PWD:$PWD" -w "$PWD" debian:bookworm-slim sh -ec "
+        apt-get -q update
+        DEBIAN_FRONTEND=noninteractive apt-get --no-install-recommends -qq install make gcc libc6-dev libssl-dev
+        make run-command KBUILD_RUN_COMMAND='+\$(MAKE) HOSTCC=gcc-12 \$(build)=scripts/basic'
+        srctree=. SRCARCH=arm64 CC=gcc-12 HOSTCC=gcc MAKE=make sh scripts/package/install-extmod-build 'debian/linux-headers-quartz64/usr/src/linux-headers-$kernelrelease'
+        "
+        # DKMS reads the kernel config from the build directory, e.g. for module compression and signing settings
+        sudo cp .config "debian/linux-headers-quartz64/usr/src/linux-headers-$kernelrelease/"
+        sudo mkdir -p "debian/linux-headers-quartz64/lib/modules/$kernelrelease" debian/linux-headers-quartz64/DEBIAN
+        sudo ln -s "/usr/src/linux-headers-$kernelrelease" "debian/linux-headers-quartz64/lib/modules/$kernelrelease/build"
+        sudo mv debian/linux-headers-quartz64 ..
+        cd ..
+        sudo rm -R linux-rolling-stable
+        find linux-headers-quartz64 ! \( -path linux-headers-quartz64/DEBIAN -prune \) -type f -exec md5sum {} + | sed 's|linux-headers-quartz64/||' | sudo tee linux-headers-quartz64/DEBIAN/md5sums > /dev/null
+        # The kernel is identical for all Quartz64 variants, hence a single headers package serves them all. It provides virtual packages named after the firmware packages, so that installing any of them pulls this one.
+        cat << _EOF_ | sudo tee linux-headers-quartz64/DEBIAN/control
+        Package: linux-headers-quartz64
+        Version: $version
+        Architecture: arm64
+        Maintainer: MichaIng <micha@dietpi.com>
+        Date: $(date -u '+%a, %d %b %Y %T %z')
+        Installed-Size: $(du -sk 'linux-headers-quartz64' | mawk '{print $1}')
+        Provides: linux-headers-quartz64a (= $version), linux-headers-quartz64b (= $version), linux-headers-soquartz (= $version)
+        Section: kernel
+        Priority: optional
+        Description: Linux kernel headers for Quartz64 Model A, Model B and SOQuartz
+         This package provides the kernel headers and Kbuild infrastructure for Linux $kernelrelease, required to build external kernel modules, e.g. via DKMS.
+        _EOF_
+        sudo sed --follow-symlinks -i "/^Installed-Size:/c\Installed-Size: $(du -sk 'linux-headers-quartz64' | mawk '{print $1}')" linux-headers-quartz64/DEBIAN/control
+        sudo chown -R root:root linux-headers-quartz64
+        dpkg-deb -b -Zxz -z9 -Sextreme linux-headers-quartz64
+        sudo rm -R linux-headers-quartz64
     - name: Upload
       run: |
-        [ -d ~/.ssh ] || mkdir ~/.ssh
+        trap 'rm -Rf ~/.ssh' EXIT
+        mkdir -m 0700 ~/.ssh
         umask 377
         echo '${{ secrets.KNOWN_HOSTS }}' > ~/.ssh/known_hosts
         echo '${{ secrets.SSH_KEY }}' > ~/.ssh/id_ed25519
-        curl -T 'firmware-{quartz64a,quartz64b,soquartz}.deb' --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}all/'
+        curl -T '{firmware-quartz64a,firmware-quartz64b,firmware-soquartz,linux-headers-quartz64}.deb' --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}all/'
+        rm -R ~/.ssh
         curl 'https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache' -H 'Authorization: Bearer ${{ secrets.CF_TOKEN }}' -H 'Content-Type: application/json' \
-        --data '{"files":["https://dietpi.com/downloads/binaries/testing/","https://dietpi.com/downloads/binaries/testing/firmware-quartz64a.deb","https://dietpi.com/downloads/binaries/testing/firmware-quartz64b.deb","https://dietpi.com/downloads/binaries/testing/firmware-soquartz.deb"]}'
+        -d '{"files":["https://dietpi.com/downloads/binaries/testing/","https://dietpi.com/downloads/binaries/testing/firmware-quartz64a.deb","https://dietpi.com/downloads/binaries/testing/firmware-quartz64b.deb","https://dietpi.com/downloads/binaries/testing/firmware-soquartz.deb","https://dietpi.com/downloads/binaries/testing/linux-headers-quartz64.deb"]}'

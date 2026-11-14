@@ -7,32 +7,17 @@ Error_Exit(){ G_DIETPI-NOTIFY 1 "$1, aborting ..."; exit 1; }
 header=()
 [[ $GH_TOKEN ]] && header=('-H' "Authorization: token $GH_TOKEN")
 
-# Inputs
-declare -A VARIANTS=()
-while (( $# ))
-do
-	case $1 in
-		'amiberry') VARIANTS['amiberry']=1;;
-		'amiberry-lite') VARIANTS['amiberry-lite']=1;;
-		'amiberry+lite') VARIANTS['amiberry-lite']=1 VARIANTS['amiberry']=1;;
-		*) Error_Exit "Invalid input \"$1\"";;
-	esac
-	shift
-done
-# Build Amiberry non-Lite by default
-(( ${#VARIANTS[@]} )) || VARIANTS['amiberry']=1
-
 # APT dependencies
 # - SDL3
-adeps_build=('cmake' 'make' 'gcc' 'libc6-dev' 'pkg-config' 'libasound2-dev' 'libusb-1.0-0-dev' 'libdrm-dev' 'libgbm-dev' 'libegl-dev' 'libudev-dev')
+adeps_build=('cmake' 'make' 'gcc' 'pkg-config' 'libc6-dev' 'libasound2-dev' 'libusb-1.0-0-dev' 'libdrm-dev' 'libgbm-dev' 'libegl-dev' 'libudev-dev')
 adeps=('libc6' 'libusb-1.0-0' 'libdrm2' 'libgbm1' 'libegl1' 'libgl1-mesa-dri' 'libudev1')
 # - GL or GLES
 if (( $G_HW_ARCH == 10 ))
 then
-	sdl_flags=('-DSDL_OPENGLES=0' '-DSDL_OPENGL=1') amiberry_flags=('-DUSE_GLES=0')
+	sdl_flags=('-DSDL_OPENGLES=0' '-DSDL_OPENGL=1') amiberry_flags=('-DUSE_GLES=0' '-DUSE_OPENGL=1')
 	adeps_build+=('libgl-dev') adeps+=('libgl1')
 else
-	sdl_flags=('-DSDL_OPENGLES=1' '-DSDL_OPENGL=0') amiberry_flags=('-DUSE_GLES=1')
+	sdl_flags=('-DSDL_OPENGLES=1' '-DSDL_OPENGL=0') amiberry_flags=('-DUSE_GLES=1' '-DUSE_OPENGL=0')
 	adeps_build+=('libgles-dev') adeps+=('libgles2')
 fi
 # - SDL3_image
@@ -63,11 +48,12 @@ done
 # Build SDL3
 NAME='SDL3'
 PRETTY=$NAME
-version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL/releases/latest' | grep -Po '"name": *"\K[0-9.]+(?=")')
+ORGA='libsdl-org'
+version=$(curl -sSf "${header[@]}" "https://api.github.com/repos/$ORGA/SDL/releases/latest" | grep -Po '"name": *"\K[0-9.]+(?=")')
 [[ $version ]] || Error_Exit "No latest $PRETTY version found"
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
-G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL/releases/download/release-$version/$NAME-$version.tar.gz"
+G_EXEC curl -sSfLO "https://github.com/$ORGA/SDL/releases/download/release-$version/$NAME-$version.tar.gz"
 [[ -d $NAME-$version ]] && G_EXEC rm -R "$NAME-$version"
 G_EXEC tar xf "$NAME-$version.tar.gz"
 G_EXEC rm "$NAME-$version.tar.gz"
@@ -84,11 +70,11 @@ G_EXEC_OUTPUT=1 G_EXEC cmake --install build
 # Build SDL3_image
 NAME='SDL3_image'
 PRETTY=$NAME
-version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_image/releases/latest' | grep -Po '"name": *"\K[0-9.]+(?=")')
+version=$(curl -sSf "${header[@]}" "https://api.github.com/repos/$ORGA/SDL_image/releases/latest" | grep -Po '"name": *"\K[0-9.]+(?=")')
 [[ $version ]] || Error_Exit "No latest $PRETTY version found"
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
-G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_image/releases/download/release-$version/$NAME-$version.tar.gz"
+G_EXEC curl -sSfLO "https://github.com/$ORGA/SDL_image/releases/download/release-$version/$NAME-$version.tar.gz"
 [[ -d $NAME-$version ]] && G_EXEC rm -R "$NAME-$version"
 G_EXEC tar xf "$NAME-$version.tar.gz"
 G_EXEC rm "$NAME-$version.tar.gz"
@@ -101,11 +87,11 @@ G_EXEC_OUTPUT=1 G_EXEC cmake --install build
 # Build SDL3_ttf
 NAME='SDL3_ttf'
 PRETTY=$NAME
-version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases/latest' | grep -Po '"name": *"\K[0-9.]+(?=")')
+version=$(curl -sSf "${header[@]}" "https://api.github.com/repos/$ORGA/SDL_ttf/releases/latest" | grep -Po '"name": *"\K[0-9.]+(?=")')
 [[ $version ]] || Error_Exit "No latest $PRETTY version found"
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
-G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_ttf/releases/download/release-$version/$NAME-$version.tar.gz"
+G_EXEC curl -sSfLO "https://github.com/$ORGA/SDL_ttf/releases/download/release-$version/$NAME-$version.tar.gz"
 [[ -d $NAME-$version ]] && G_EXEC rm -R "$NAME-$version"
 G_EXEC tar xf "$NAME-$version.tar.gz"
 G_EXEC rm "$NAME-$version.tar.gz"
@@ -116,11 +102,10 @@ find build -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unne
 G_EXEC_OUTPUT=1 G_EXEC cmake --install build
 
 # Build Amiberry
-for NAME in "${!VARIANTS[@]}"
-do
+NAME='amiberry'
+PRETTY='Amiberry'
 ORGA='BlitterStudio'
-[[ $NAME == 'amiberry' ]] && PRETTY='Amiberry' DESC='Optimised Amiga emulator' || PRETTY='Amiberry-Lite' DESC='Optimised Amiga emulator for older/slower ARM SBCs'
-
+DESC='Optimised Amiga emulator'
 version=$(curl -sSf "${header[@]}" "https://api.github.com/repos/$ORGA/$NAME/releases/latest" | grep -Po '"tag_name": *"\K[^"]+(?=")')
 [[ $version ]] || Error_Exit "No latest $PRETTY version found"
 version=${version#v}
@@ -131,10 +116,8 @@ G_EXEC curl -sSfLO "https://github.com/$ORGA/$NAME/archive/v$version.tar.gz"
 G_EXEC tar xf "v$version.tar.gz"
 G_EXEC rm "v$version.tar.gz"
 G_EXEC cd "$NAME-$version"
-# - Add SDL3 to rpath
-# shellcheck disable=SC2015
-grep -q '^include(GNUInstallDirs)$' CMakeLists.txt && G_EXEC sed --follow-symlinks -i "/^include(GNUInstallDirs)$/a\set(CMAKE_INSTALL_RPATH \"\${CMAKE_INSTALL_FULL_LIBDIR}/$NAME\")" CMakeLists.txt || Error_Exit 'CMakeLists.txt does not contain "include(GNUInstallDirs)" line anymore'
-G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH='/tmp/deps' -DCMAKE_INSTALL_PREFIX='/usr' "${amiberry_flags[@]}" -DUSE_IPC_SOCKET=0
+# - Add SDL3 to rpath: BUNDLE_SDL=1
+G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH='/tmp/deps' -DCMAKE_INSTALL_PREFIX='/usr' "${amiberry_flags[@]}" -DUSE_{GPIOD,DBUS,IPC_SOCKET}=0 -DUSE_{PCEM,VIDEOGRAB,MPG123,UAENET_PCAP,UAENET_TAP,LIBSERIALPORT,PORTMIDI,LIBENET,ZSTD,JIT}=1 -DWITH_LTO=1 -DBUNDLE_SDL=1
 G_EXEC_OUTPUT=1 G_EXEC cmake --build build
 G_EXEC strip --remove-section=.comment --remove-section=.note "build/$NAME"
 
@@ -147,9 +130,6 @@ G_EXEC mkdir -p "$DIR/"{DEBIAN,"mnt/dietpi_userdata/$NAME",lib/systemd/system}
 
 # - Copy files in place
 G_EXEC_OUTPUT=1 G_EXEC cmake --install "$NAME-$version/build" --prefix "$DIR/usr"
-# - Obtain library dir
-LIB_DIR=$(find "$DIR/usr/lib/"*"/$NAME" -maxdepth 0)
-G_EXEC cp -aL /tmp/deps/lib/libSDL3{,_image,_ttf}.so.0 "$LIB_DIR/"
 
 # - systemd service
 cat << _EOF_ > "$DIR/lib/systemd/system/$NAME.service" || exit 1
@@ -175,9 +155,7 @@ WantedBy=multi-user.target
 _EOF_
 
 # - preinst
-if [[ $NAME == 'amiberry' ]]
-then
-	cat << '_EOF_' > "$DIR/DEBIAN/preinst" || exit 1
+cat << '_EOF_' > "$DIR/DEBIAN/preinst" || exit 1
 #!/bin/dash -e
 if [ -d '/mnt/dietpi_userdata/amiberry' ] && [ ! -d '/mnt/dietpi_userdata/amiberry_v5_bak' ] && dpkg --compare-versions "$2" lt-nl '5.7.5'
 then
@@ -191,22 +169,6 @@ then
 	sed --follow-symlinks -Ei '/^(rom_path|floppy_sounds_dir|saveimage_dir|data_dir|plugins_dir|saveimage_dir)=/d' /mnt/dietpi_userdata/amiberry/amiberry.conf
 fi
 _EOF_
-else
-	cat << '_EOF_' > "$DIR/DEBIAN/preinst" || exit 1
-#!/bin/dash -e
-if [ -d '/mnt/dietpi_userdata/amiberry_v5_bak' ] && [ ! -d '/mnt/dietpi_userdata/amiberry-lite' ]
-then
-	echo 'Using Amiberry v5 config/data backup for Amiberry-Lite ...'
-	mv /mnt/dietpi_userdata/amiberry_v5_bak /mnt/dietpi_userdata/amiberry-lite
-	echo 'Migrating Amiberry v5 config/data directory ...'
-	[ -f '/mnt/dietpi_userdata/amiberry-lite/conf/amiberry.conf' ] && mv -v /mnt/dietpi_userdata/amiberry-lite/conf/amiberry.conf /mnt/dietpi_userdata/amiberry-lite/amiberry.conf
-	rm -fv /mnt/dietpi_userdata/amiberry-lite/conf/amiberry.conf.dpkg-*
-	[ -d '/mnt/dietpi_userdata/amiberry-lite/kickstarts' ] && [ ! -d '/mnt/dietpi_userdata/amiberry-lite/roms' ] && mv -v /mnt/dietpi_userdata/amiberry-lite/kickstarts /mnt/dietpi_userdata/amiberry-lite/roms
-	sed --follow-symlinks -Ei '/^(rom_path|floppy_sounds_dir|saveimage_dir|data_dir|plugins_dir|saveimage_dir)=/d' /mnt/dietpi_userdata/amiberry-lite/amiberry.conf
-	sed --follow-symlinks -Ei 's#dietpi_userdata/amiberry(/|$)#dietpi_userdata/amiberry-lite\1#' /mnt/dietpi_userdata/amiberry-lite/amiberry.conf
-fi
-_EOF_
-fi
 
 # - prerm
 cat << _EOF_ > "$DIR/DEBIAN/prerm" || exit 1
@@ -274,7 +236,6 @@ G_EXEC chmod +x "$DIR/usr/bin/$NAME" "$DIR/DEBIAN/"{preinst,prerm,postrm}
 
 # Build DEB package
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
-done
 
 exit 0
 }
