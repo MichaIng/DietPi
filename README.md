@@ -299,7 +299,6 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Radarr](https://github.com/Radarr/Radarr)
 - [Lidarr](https://github.com/Lidarr/Lidarr)
 - [Prowlarr](https://github.com/Prowlarr/Prowlarr)
-- [Readarr](https://github.com/Readarr/Readarr)
 - [Jackett](https://github.com/Jackett/Jackett)
 - [HAProxy](https://github.com/haproxy/haproxy)
 - [Prometheus Node Exporter](https://github.com/prometheus/node_exporter)
@@ -337,6 +336,9 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [uv](https://github.com/astral-sh/uv)
 - [RustDesk Client](https://github.com/rustdesk/rustdesk)
 - [Scrypted](https://github.com/koush/scrypted)
+- [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx)
+- [Yuvomi](https://github.com/ulsklyc/yuvomi)
+- [SolidPing](https://github.com/fclairamb/solidping)
 
 ---
 

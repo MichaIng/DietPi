@@ -14,10 +14,10 @@ adeps=('libc6' 'libusb-1.0-0' 'libdrm2' 'libgbm1' 'libegl1' 'libgl1-mesa-dri' 'l
 # - GL or GLES
 if (( $G_HW_ARCH == 10 ))
 then
-	sdl_flags=('-DSDL_OPENGLES=0' '-DSDL_OPENGL=1') amiberry_flags=('-DUSE_GLES=0')
+	sdl_flags=('-DSDL_OPENGLES=0' '-DSDL_OPENGL=1') amiberry_flags=('-DUSE_GLES=0' '-DUSE_OPENGL=1')
 	adeps_build+=('libgl-dev') adeps+=('libgl1')
 else
-	sdl_flags=('-DSDL_OPENGLES=1' '-DSDL_OPENGL=0') amiberry_flags=('-DUSE_GLES=1')
+	sdl_flags=('-DSDL_OPENGLES=1' '-DSDL_OPENGL=0') amiberry_flags=('-DUSE_GLES=1' '-DUSE_OPENGL=0')
 	adeps_build+=('libgles-dev') adeps+=('libgles2')
 fi
 # - SDL3_image
@@ -116,10 +116,8 @@ G_EXEC curl -sSfLO "https://github.com/$ORGA/$NAME/archive/v$version.tar.gz"
 G_EXEC tar xf "v$version.tar.gz"
 G_EXEC rm "v$version.tar.gz"
 G_EXEC cd "$NAME-$version"
-# - Add SDL3 to rpath
-# shellcheck disable=SC2015
-grep -q '^include(GNUInstallDirs)$' CMakeLists.txt && G_EXEC sed --follow-symlinks -i "/^include(GNUInstallDirs)$/a\set(CMAKE_INSTALL_RPATH \"\${CMAKE_INSTALL_FULL_LIBDIR}/$NAME\")" CMakeLists.txt || Error_Exit 'CMakeLists.txt does not contain "include(GNUInstallDirs)" line anymore'
-G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH='/tmp/deps' -DCMAKE_INSTALL_PREFIX='/usr' "${amiberry_flags[@]}" -DUSE_IPC_SOCKET=0
+# - Add SDL3 to rpath: BUNDLE_SDL=1
+G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH='/tmp/deps' -DCMAKE_INSTALL_PREFIX='/usr' "${amiberry_flags[@]}" -DUSE_{GPIOD,DBUS,IPC_SOCKET}=0 -DUSE_{PCEM,VIDEOGRAB,MPG123,UAENET_PCAP,UAENET_TAP,LIBSERIALPORT,PORTMIDI,LIBENET,ZSTD,JIT}=1 -DWITH_LTO=1 -DBUNDLE_SDL=1
 G_EXEC_OUTPUT=1 G_EXEC cmake --build build
 G_EXEC strip --remove-section=.comment --remove-section=.note "build/$NAME"
 
@@ -132,9 +130,6 @@ G_EXEC mkdir -p "$DIR/"{DEBIAN,"mnt/dietpi_userdata/$NAME",lib/systemd/system}
 
 # - Copy files in place
 G_EXEC_OUTPUT=1 G_EXEC cmake --install "$NAME-$version/build" --prefix "$DIR/usr"
-# - Obtain library dir
-LIB_DIR=$(find "$DIR/usr/lib/"*"/$NAME" -maxdepth 0)
-G_EXEC cp -aL /tmp/deps/lib/libSDL3{,_image,_ttf}.so.0 "$LIB_DIR/"
 
 # - systemd service
 cat << _EOF_ > "$DIR/lib/systemd/system/$NAME.service" || exit 1

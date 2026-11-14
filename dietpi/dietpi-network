@@ -42,6 +42,7 @@ Available options for "apply" command:
   --no-restart                        Write config only, do not reconnect the interface now
   --force                             Proceed even if a network conflict (same subnet/duplicate default route) with
                                       another enabled interface is detected, or if the interface does not exist at all.
+                                      Also mutes the warning about a static gateway outside of the static IP subnet.
 '
 
 . /boot/dietpi/func/dietpi-globals
@@ -56,6 +57,9 @@ NEXT_MENU='main'
 MAIN_MENU_LASTITEM=
 IFACE_MENU_LASTITEM=
 PROXY_MENU_LASTITEM=
+WIFIMON_MENU_LASTITEM=
+# One-time hint or warning, shown at the top of the interface menu when it is drawn next, then unset
+MENU_HINT=
 PRESERVE_SELECTED_SETTINGS=0
 ACTION_VALUE=
 ACTION_EXTRA=
@@ -562,13 +566,21 @@ Change_StaticIp()
 	G_WHIP_INPUTBOX "Please enter a new static $(Current_Interface_Type_Text) IP address, optionally with CIDR netmask to define a subnet mask other than the default /24 (255.255.255.0), e.g.: 192.168.0.100/24" || return 0
 	CURRENT_IFACE_IP_STATIC=$G_WHIP_RETURNED_VALUE
 	[[ $CURRENT_IFACE_IP_STATIC == */* ]] || CURRENT_IFACE_IP_STATIC+='/24'
+
+	# Adjust the gateway automatically if it is outside of the new subnet. An empty gateway is kept, as this is a valid choice for interfaces without Internet access.
+	[[ $CURRENT_IFACE_GATEWAY_STATIC ]] || return 0
+	Subnets_Overlap "$CURRENT_IFACE_IP_STATIC" "$CURRENT_IFACE_GATEWAY_STATIC" && return 0
+	local gateway=$(Get_Subnet_Gateway "$CURRENT_IFACE_IP_STATIC")
+	[[ $gateway ]] || return 0
+	MENU_HINT="The static gateway has been changed from \"$CURRENT_IFACE_GATEWAY_STATIC\" to \"$gateway\", to match the subnet of the new static IP address."
+	CURRENT_IFACE_GATEWAY_STATIC=$gateway
 }
 
 Change_StaticGateway()
 {
 	G_WHIP_INPUTBOX_REGEX="^($REGEX_IPV4)?\$"
 	G_WHIP_INPUTBOX_REGEX_TEXT='be a valid IPv4 address, e.g. "192.168.0.1", or empty'
-	G_WHIP_DEFAULT_ITEM=${CURRENT_IFACE_GATEWAY_STATIC:-${CURRENT_IFACE_IP_STATIC%.*}.1}
+	G_WHIP_DEFAULT_ITEM=${CURRENT_IFACE_GATEWAY_STATIC:-$(Get_Subnet_Gateway "$CURRENT_IFACE_IP_STATIC")}
 	G_WHIP_INPUTBOX "Please enter a new static $(Current_Interface_Type_Text) gateway address. You can leave this empty if this interface shall not be used for Internet access." || return 0
 	CURRENT_IFACE_GATEWAY_STATIC=$G_WHIP_RETURNED_VALUE
 }
@@ -684,6 +696,21 @@ IP_To_Int()
 	echo $(( (a<<24) + (b<<16) + (c<<8) + d ))
 }
 
+Int_To_IP(){ echo "$(( $1 >> 24 & 255 )).$(( $1 >> 16 & 255 )).$(( $1 >> 8 & 255 )).$(( $1 & 255 ))"; }
+
+# Print the most likely gateway address for the subnet of the given IPv4 address with CIDR prefix length: The first host address of the subnet, e.g. "192.168.0.1" for "192.168.0.100/24", or the last one, if the given address is the first one itself.
+# Prints nothing for /31 and /32 subnets, which have no spare host address to guess.
+Get_Subnet_Gateway()
+{
+	[[ $1 == */* ]] || return 0
+	local ip=${1%/*} prefix=${1#*/}
+	(( $prefix < 31 )) || return 0
+	local int=$(IP_To_Int "$ip") mask=$(( ( 0xFFFFFFFF << ( 32 - prefix ) ) & 0xFFFFFFFF ))
+	local gateway=$(( ( int & mask ) + 1 ))
+	(( $gateway == $int )) && gateway=$(( ( int | ( ~mask & 0xFFFFFFFF ) ) - 1 ))
+	Int_To_IP "$gateway"
+}
+
 Subnets_Overlap()
 {
 	local ip1=${1%/*} p1=${1#*/} ip2=${2%/*} p2=${2#*/}
@@ -728,8 +755,28 @@ Disable_Conflicting_Interface()
 		[[ -f $fp ]] || continue
 		G_EXEC_NOEXIT=1 G_EXEC sed --follow-symlinks -i "/^[[:blank:]]*\(allow-hotplug\|auto\)[[:blank:]]\+$iface\([[:blank:]]\|\$\)/s/^/#/" "$fp"
 	done
-	ifdown --force "$iface" 2> /dev/null
+	G_EXEC_NOFAIL=1 G_EXEC ifdown --force "$iface"
 	G_DIETPI-NOTIFY 2 "Disabled interface \"$iface\" to resolve network conflict"
+}
+
+# Warn if the static gateway is outside of the subnet of the static IP address: It is then not reachable, hence the default route cannot be added and "ifup" fails: https://github.com/MichaIng/DietPi/issues/7542
+# - Setups with on-link gateway outside of the own subnet exist, but require additional manual config, so this is a warning only. Without terminal, the settings are applied as given.
+Check_Gateway_Subnet()
+{
+	[[ $CURRENT_IFACE_MODE == 'static' && $CURRENT_IFACE_IP_STATIC && $CURRENT_IFACE_GATEWAY_STATIC ]] || return 0
+	Subnets_Overlap "$CURRENT_IFACE_IP_STATIC" "$CURRENT_IFACE_GATEWAY_STATIC" && return 0
+	local gateway=$(Get_Subnet_Gateway "$CURRENT_IFACE_IP_STATIC")
+	local reason="The static gateway \"$CURRENT_IFACE_GATEWAY_STATIC\" is outside of the subnet of the static IP address \"$CURRENT_IFACE_IP_STATIC\" of interface \"$CURRENT_IFACE\". It can hence not be reached, which usually breaks Internet access, while DNS and local network access can still work."
+
+	# Without terminal, this cannot be confirmed
+	(( $G_INTERACTIVE )) || { G_DIETPI-NOTIFY 2 "[WARNING] $reason${gateway:+ A common gateway address for this subnet is \"$gateway\".} Use --force to mute this warning."; return 0; }
+
+	G_WHIP_MENU_ARRAY=()
+	[[ $gateway ]] && G_WHIP_MENU_ARRAY+=('Adjust' ": Use \"$gateway\" as gateway and proceed")
+	G_WHIP_MENU_ARRAY+=('Ignore' ': Proceed with the gateway outside of the subnet (NOT recommended)')
+	G_WHIP_MENU "[WARNING] Gateway outside of subnet detected:\n\n$reason\n\nThe gateway is usually the address of your router, and needs to share the subnet part of the IP address, e.g. \"192.168.0.1\" for \"192.168.0.100/24\".\n\nPlease select how to proceed, or cancel to change the settings manually:" || return 1
+	[[ $G_WHIP_RETURNED_VALUE == 'Adjust' ]] && CURRENT_IFACE_GATEWAY_STATIC=$gateway
+	return 0
 }
 
 # Avoid two enabled interfaces on the same subnet (asymmetric routing risk) or two default routes (static gateways, or DHCP which usually assigns one)
@@ -738,6 +785,7 @@ Check_Network_Conflicts()
 	(( $APPLY_FORCE )) && return 0 # skip check if settings are to be applied anyway
 	(( $CURRENT_IFACE_ENABLED )) || return 0
 	[[ $CURRENT_IFACE_MODE == 'static' || $CURRENT_IFACE_MODE == 'dhcp' ]] || return 0
+	Check_Gateway_Subnet || return 1
 	local iface o_enabled o_mode o_cidr o_gateway reason
 	for iface in /sys/class/net/*
 	do
@@ -955,6 +1003,42 @@ Menu_Proxy()
 	Apply_Proxy_Settings
 }
 
+Menu_WifiMonitor()
+{
+	local state_text='Off' interval
+	(( $CURRENT_IFACE_WIFI_AUTO_RECONNECT )) && state_text='On'
+	interval=$(sed -n '/^[[:blank:]]*CONFIG_WIFI_MONITOR_INTERVAL=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+	[[ $interval =~ ^([3-9]|[1-9][0-9]+)$ ]] || interval=10
+	G_WHIP_MENU_ARRAY=(
+		'State' ": [$state_text]"
+		'Interval' ": [$interval seconds]"
+	)
+	G_WHIP_DEFAULT_ITEM=$WIFIMON_MENU_LASTITEM
+	G_WHIP_MENU 'The WiFi monitor checks the WiFi connection via ping to the default gateway. It sends further pings every second until receiving a reply, within a 10 seconds timeout. The interface is only restarted on an error reply, or after the timeout without any reply. The "Interval" option defines the time until the next connection check happens.
+\nIt is suitable especially for mobile devices, which move between multiple WiFi networks, to reconnect automatically once connectivity to one network is lost.
+It is not that well suited to address flaky signals. If a single AP signal is just a bit weak, the connection is still held by itself, without the need to restart the whole interface. The WiFi monitor can cause unnecessarily long regular outages in such case, since an interface restart, which includes fresh WPA authentication, DHCP etc, may take a few seconds.' || { NEXT_MENU="iface:$CURRENT_IFACE"; return 0; }
+	WIFIMON_MENU_LASTITEM=$G_WHIP_RETURNED_VALUE
+	case $G_WHIP_RETURNED_VALUE in
+		'State')
+			if (( $CURRENT_IFACE_WIFI_AUTO_RECONNECT ))
+			then
+				G_EXEC_NOEXIT=1 G_EXEC systemctl disable --now dietpi-wifi-monitor && CURRENT_IFACE_WIFI_AUTO_RECONNECT=0
+			else
+				G_EXEC_NOEXIT=1 G_EXEC systemctl enable --now dietpi-wifi-monitor && CURRENT_IFACE_WIFI_AUTO_RECONNECT=1
+			fi
+		;;
+		'Interval')
+			G_WHIP_INPUTBOX_REGEX='^([3-9]|[1-9][0-9]+)$'
+			G_WHIP_INPUTBOX_REGEX_TEXT='a number of seconds of 3 or higher'
+			G_WHIP_DEFAULT_ITEM=$interval
+			G_WHIP_INPUTBOX 'Please enter the interval in seconds between connection checks (min 3):' || return 0
+			G_CONFIG_INJECT 'CONFIG_WIFI_MONITOR_INTERVAL=' "CONFIG_WIFI_MONITOR_INTERVAL=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt
+			(( $CURRENT_IFACE_WIFI_AUTO_RECONNECT )) && G_EXEC_NOEXIT=1 G_EXEC systemctl restart dietpi-wifi-monitor
+		;;
+		*) :;;
+	esac
+}
+
 Apply_Static_IP_Defaults()
 {
 	[[ $CURRENT_IFACE_MODE == 'static' ]] || return 0
@@ -976,6 +1060,9 @@ Menu_Interface()
 	Load_Interface_State "$iface"
 	Net_Update_UsageStats "$iface"
 	local title=$(Interface_Menu_Title)
+	# One-time hint
+	[[ $MENU_HINT ]] && title="Hint: $MENU_HINT\n\n$title"
+	MENU_HINT=
 	if [[ $CURRENT_IFACE_TYPE == 'eth' ]]
 	then
 		local speed='auto (default, recommended)'
@@ -1137,14 +1224,7 @@ Menu_Interface()
 			'Static Gateway') Change_StaticGateway;;
 			'Static DNS') Change_StaticDns;;
 			'Country') Change_WifiCountryCode;;
-			'Auto Reconnect')
-				if (( $CURRENT_IFACE_WIFI_AUTO_RECONNECT ))
-				then
-					G_EXEC_NOEXIT=1 G_EXEC systemctl disable --now dietpi-wifi-monitor
-				else
-					G_EXEC_NOEXIT=1 G_EXEC systemctl enable --now dietpi-wifi-monitor
-				fi
-			;;
+			'Auto Reconnect') NEXT_MENU='monitor';;
 			'Boot Mode') Change_BootMode;;
 			'Enable') CURRENT_IFACE_ENABLED=1; Apply_Current_Interface 1;;
 			'Disable') CURRENT_IFACE_ENABLED=0; G_EXEC_NOEXIT=1 G_EXEC systemctl disable --now dietpi-wifi-monitor; Apply_Current_Interface 1 && Return_From_Submenu "iface:$iface";;
@@ -1391,6 +1471,7 @@ Menu_Loop()
 		'iface:'*) Menu_Interface "${NEXT_MENU#iface:}"; PRESERVE_SELECTED_SETTINGS=1;; # do not override changed CURRENT_IFACE_* settings from values in config files while in this menu
 		'country') Load_Interface_State "${WIFI_INTERFACES[0]:-wlan0}"; Change_WifiCountryCode; return 1;; # called via NEXT_MENU from CLI only
 		'proxy') Menu_Proxy;;
+		'monitor') Menu_WifiMonitor;;
 		'exit') return 1;;
 		*) NEXT_MENU='main';;
 	esac

@@ -63,6 +63,9 @@
 	# - 1337 moments ;)
 	alias 1337='echo "Indeed, you are =)"'
 
+	# Tab completion: Do not duplicate characters after the cursor which match the completion, e.g. "foo<cursor>bar<tab>" now gives "foobarbaz" instead of "foobarbazbar"
+	bind 'set skip-completed-text on'
+
 	# "G_DIETPI-NOTIFY -2 message" starts a process animation. If scripts fail to kill the animation, e.g. cancelled by user, terminal bash prompt has to do it as last resort.
 	[[ $PROMPT_COMMAND == *'dietpi-process.pid'* ]] || PROMPT_COMMAND="[[ -w '/tmp/dietpi-process.pid' ]] && rm -f /tmp/dietpi-process.pid &> /dev/null && echo -ne '\r\e[J'; $PROMPT_COMMAND"
 
