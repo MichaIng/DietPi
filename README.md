@@ -339,6 +339,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Paperless-ngx](https://github.com/paperless-ngx/paperless-ngx)
 - [Yuvomi](https://github.com/ulsklyc/yuvomi)
 - [SolidPing](https://github.com/fclairamb/solidping)
+- [NextExplorer](https://github.com/cerede2000/NextExplorer)
 
 ---
 
