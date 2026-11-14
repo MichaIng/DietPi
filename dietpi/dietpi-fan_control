@@ -466,17 +466,34 @@ dtoverlay='
 		fi
 
 		# Remove fan overlays and trip point dtparams which were loaded at runtime, highest index first
-		while read -r i
+		# - Disabling the RPi 5 fan port at runtime crashes the kernel. Removing an overlay can imply to remove and re-apply all overlays which were loaded after it.
+		#   Hence do not touch anything if a runtime "cooling_fan" dtparam was loaded after an overlay we need to remove.
+		local aremove=() port_index
+		mapfile -t aremove < <(sed -En "/$regex|^[0-9]+:[[:blank:]]+dtparam[[:blank:]].*fan_temp/s/:.*//p" <<< "$loaded" | sort -rn)
+		port_index=$(sed -En '/^[0-9]+:[[:blank:]]+dtparam[[:blank:]].*cooling_fan/s/:.*//p' <<< "$loaded" | sort -rn | head -1)
+		[[ ${aremove[0]} && $port_index ]] && (( $port_index > ${aremove[-1]} )) && return 1
+		for i in "${aremove[@]}"
 		do
 			G_DIETPI-NOTIFY 2 "Removing runtime overlay $i"
 			dtoverlay -r "$i" || return 1
 			changed=1
-
-		done < <(sed -En "/$regex|^[0-9]+:[[:blank:]]+dtparam[[:blank:]].*fan_temp/s/:.*//p" <<< "$loaded" | sort -rn)
+		done
 
 		# RPi 5 fan port: Apply chosen trip points, or turn it off via speed 0 if it is not the chosen method
 		local port=0
 		(( $ENABLED )) && [[ $METHOD == 'rpi5' ]] && port=1
+		# - Enable it if the firmware did not, since no fan was detected at boot. This dtparam must never be removed at runtime, hence it is loaded separately.
+		if (( $port )) && [[ ! -e '/sys/bus/platform/drivers/pwm-fan/cooling_fan' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Enabling RPi 5 fan port'
+			dtparam cooling_fan=on || return 1
+			for i in 1 2 3 4 5
+			do
+				[[ -e '/sys/bus/platform/drivers/pwm-fan/cooling_fan' ]] && break
+				G_SLEEP 1
+			done
+			changed=1
+		fi
 		if [[ -e '/sys/bus/platform/drivers/pwm-fan/cooling_fan' ]]
 		then
 			local dt='/proc/device-tree/thermal-zones/cpu-thermal/trips' node files=() live want params=() aT=("${aTEMP[@]}") aH=("${aHYST[@]}") aS=("${aSPEED[@]}")
@@ -501,7 +518,7 @@ dtoverlay='
 
 		elif (( $port ))
 		then
-			# Fan port disabled at boot: Enabling it at runtime is untested, and disabling it at runtime crashes the kernel.
+			# Fan port could not be enabled
 			return 1
 		fi
 
