@@ -169,6 +169,7 @@ Process_Software()
 			'icecast') aSERVICES[$i]='icecast2' aTCP[$i]='8000' aCOMMANDS[$i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start on GitHub runner as it requires a hardware capture device, and those runners do not provide the dummy audio kernel module
 			'immich') aSERVICES[$i]='immich' aTCP[$i]='2283';;
 			'immichml') aSERVICES[$i]='immich-ml' aTCP[$i]='3003';;
+			'paperlessngx') aSERVICES[$i]='paperless-webserver paperless-consumer paperless-task-queue paperless-scheduler' aTCP[$i]='8010';;
 			'influxdb') aSERVICES[$i]='influxdb' aTCP[$i]='8086 8088';;
 			'jackett') aSERVICES[$i]='jackett' aTCP[$i]='9117';;
 			'javajdk') aCOMMANDS[$i]='javac -version';;
@@ -195,7 +196,6 @@ Process_Software()
 			'mineos') aSERVICES[$i]='mineos' aTCP[$i]='8443';;
 			'minio') aSERVICES[$i]='minio' aTCP[$i]='9001 9004' aCOMMANDS[$i]='bash -ic '\''mc mb local/test'\';;
 			'mjpgstreamer') aCOMMANDS[$i]='/opt/mjpg-streamer/mjpg_streamer -v';; # aSERVICES[$i]='mjpg-streamer' aTCP[$i]='8082' Service does not start without an actual video device
-			'mono') aCOMMANDS[$i]='mono -V';;
 			'mopidy') aSERVICES[$i]='mopidy' aTCP[$i]='6680';;
 			'mosquitto') aSERVICES[$i]='mosquitto' aTCP[$i]='1883';;
 			'motioneye') aSERVICES[$i]='motioneye' aTCP[$i]='8765';;
@@ -210,7 +210,7 @@ Process_Software()
 			'nfsclient') aCOMMANDS[$i]='mount.nfs -V';;
 			'nfsserver') aSERVICES[$i]='nfs-kernel-server' aTCP[$i]='2049';;
 			'nginx') aSERVICES[$i]='nginx' aTCP[$i]='80';;
-			'nodejs') aCOMMANDS[$i]='node -v';;
+			'nodejs') aCOMMANDS[$i]='node -v && npm -v';;
 			'nodered') aSERVICES[$i]='node-red' aTCP[$i]='1880'; (( $emulation )) && aDELAY[$i]=30;;
 			'nomachine') aSERVICES[$i]='nxserver' aTCP[$i]='4000';;
 			'nukkit') aSERVICES[$i]='nukkit' aUDP[$i]='19132'; (( $emulation )) && aDELAY[$i]=60;;
@@ -240,7 +240,6 @@ Process_Software()
 			'radarr') aSERVICES[$i]='radarr' aTCP[$i]='7878';;
 			'raspotify') aSERVICES[$i]='raspotify';;
 			'rclone') aCOMMANDS[$i]='rclone version';;
-			'readarr') aSERVICES[$i]='readarr' aTCP[$i]='8787';;
 			'readymedia') aSERVICES[$i]='minidlna' aTCP[$i]='8200';;
 			'redis') aSERVICES[$i]='redis-server' aTCP[$i]='6379';;
 			'remoteit') aSERVICES[$i]='schannel' aUDP[$i]='5980';; # remoteit@.service service listens on random high UDP port
@@ -261,7 +260,8 @@ Process_Software()
 			'snapcastclient') aSERVICES[$i]='snapclient';;
 			'snapcastserver') aSERVICES[$i]='snapserver' aTCP[$i]='1704 1780';;
 			'soju') aSERVICES[$i]='soju' aTCP[$i]='6667';;
-			'sonarr') (( $arch == 1 )) || aSERVICES[$i]='sonarr' aTCP[$i]='8989';; # Skip on ARMv6 failing in container with "If you're reading this, the MonoMod.RuntimeDetour selftest failed."
+			'sonarr') aSERVICES[$i]='sonarr' aTCP[$i]='8989';;
+			'solidping') aSERVICES[$i]='solidping' aTCP[$i]='4002' aCOMMANDS[$i]='curl -sSf '\''http://127.0.0.1:4002/api/mgmt/health'\'' | grep '\''"status":"ok"'\';;
 			'spotifyd') aSERVICES[$i]='spotifyd' aUDP[$i]='5353';; # + random high TCP port
 			'sqlite') aCOMMANDS[$i]='sqlite3 -version';;
 			'squeezelite') aSERVICES[$i]='squeezelite';; # Service listens on random high UDP port
@@ -296,6 +296,7 @@ Process_Software()
 			'yacy') aSERVICES[$i]='yacy' aTCP[$i]='8090' aDELAY[$i]=30; (( $emulation )) && aDELAY[$i]=120;;
 			'ympd') aSERVICES[$i]='ympd' aTCP[$i]='1337';;
 			'ytdlp') aCOMMANDS[$i]='yt-dlp --version';;
+			'yuvomi') aSERVICES[$i]='yuvomi' aTCP[$i]='3004'; (( $emulation )) && aDELAY[$i]=60;;
 			'zerotier') aSERVICES[$i]='zerotier-one' aTCP[$i]='9993';;
 			# Software titles without further tests
 			# - Software which requires interactive input
@@ -325,7 +326,7 @@ do
 		'alloguifull') Process_Software squeezelite shairportsync netdata mariadb php sambaserver roonbridge naadaemon mpd ompd avahidaemon allogui gmediarender webserver;;
 		'nextcloud'|'nextcloudtalk') Process_Software mariadb php redis webserver;;
 		'javajdk'|'ubooquity'|'yacy'|'nukkit'|'komga'|'papermc'|'openhab') Process_Software javajre;;
-		'nodered') Process_Software nodejs;;
+		'nodered'|'uptimekuma'|'scrypted'|'yuvomi') Process_Software nodejs;;
 		'mineos'|'blynkserver') Process_Software nodejs javajre;;
 		'ympd'|'mympd'|'cava') Process_Software mpd;;
 		'ompd') Process_Software mariadb php mpd webserver;;
@@ -340,6 +341,7 @@ do
 		'soju') Process_Software git go;;
 		'vaultwarden') Process_Software sqlite;;
 		'immich') Process_Software ffmpeg nodejs redis postgresql;;
+		'paperlessngx') Process_Software redis python3;;
 		'virtualhere'|'cups') Process_Software avahidaemon;;
 		'lasp') Process_Software apache sqlite php;;
 		'lamp') Process_Software apache mariadb php;;
@@ -547,8 +549,8 @@ then
 	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/i\sed -i '\''/^DocumentRoot/a\Mutex posixsem'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 fi
 
-# Workaround for Readarr/Kavita explicitly calling uname without shell, breaking our ARM workaround
-if (( ${aINSTALL[readarr]} )) || (( ${aINSTALL[kavita]} )) && [[ -f 'rootfs/usr/local/bin/uname' ]]
+# Workaround for Kavita explicitly calling uname without shell, breaking our ARM workaround
+if (( ${aINSTALL[kavita]} )) && [[ -f 'rootfs/usr/local/bin/uname' ]]
 then
 	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/i\sed -i '\''/# Custom 1st run script/i\\rm /usr/local/bin/uname'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 fi

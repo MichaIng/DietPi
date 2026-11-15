@@ -1351,7 +1351,7 @@ Turning off IPv6 for them removes the IPv6 addresses from the server and client 
 		# SBC-specific WiFi kernel modules which need to be blacklisted, to not load automatically during boot
 		local aWIFI_MODULES=()
 		case $G_HW_MODEL in
-			40|44|52) aWIFI_MODULES+=('r8723bs');; # PINE A64, Pinebook, ASUS Tinker Board
+			40|44|52) aWIFI_MODULES+=('r8723bs');; # PINE A64, Pinebook, ASUS Tinker Board. ToDo: Will be rtw88_8723bs from Linux 7.4 with RTW88
 			64|95) aWIFI_MODULES+=('brcmfmac');; # NanoPi NEO Air, Orange Pi CM5. On RPi, it is not needed to blacklist it, since it is not loaded with dtoverlay=disable-wifi
 			67) aWIFI_MODULES+=('8189es');; # NanoPi K1 Plus
 			73) aWIFI_MODULES+=('8723ds');; # ROCK Pi S. ToDo: rtw88_8723ds after moving to mainline driver
@@ -1464,8 +1464,19 @@ Turning off IPv6 for them removes the IPv6 addresses from the server and client 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# serialconsole
 	#/////////////////////////////////////////////////////////////////////////////////////
+	GRUB_SKIP=0
 	Serial_Main()
 	{
+		# GRUB
+		if (( ! $GRUB_SKIP ))
+		then
+			IS_GRUB=0
+			if command -v update-grub > /dev/null
+			then
+				IS_GRUB=1 FP_GRUB='/etc/default/grub.d/95-dietpi-consoles.cfg' GRUB_CONSOLES=()
+				[[ -f $FP_GRUB ]] && read -ra GRUB_CONSOLES < <(sed -En '1s/^dietpi_consoles='\''(.*)'\''$/\1/p' "$FP_GRUB")
+			fi
+		fi
 		#-------------------------------------------------------------------------------------
 		# Enable
 		if [[ $INPUT_DEVICE_VALUE == 'enable' ]]
@@ -1517,11 +1528,18 @@ Turning off IPv6 for them removes the IPv6 addresses from the server and client 
 					if [[ $G_HW_MODEL =~ ^(14|18|19|42|43|46|47|49|55|56|58|68|72|76|77|78|79|80|82|85|87|90|91|92|93|94|95|100|101|105|106|109)$ && $INPUT_ADDITIONAL =~ ^('ttyS2'|'ttyFIQ0')$ ]] || [[ $G_HW_MODEL =~ ^(73|102|103|104)$ && $INPUT_ADDITIONAL =~ ^('ttyS0'|'ttyFIQ0')$ ]]
 					then
 						baudrate='1500000'
+
+					elif [[ $G_HW_MODEL == 13 && $INPUT_ADDITIONAL == 'ttyS0' ]]
+					then
+						baudrate='921600'
+					fi
+					if (( $baudrate != 115200 ))
+					then
 						[[ -d /etc/systemd/system/serial-getty@$INPUT_ADDITIONAL.service.d ]] || G_EXEC mkdir "/etc/systemd/system/serial-getty@$INPUT_ADDITIONAL.service.d"
-						cat << _EOF_ > "/etc/systemd/system/serial-getty@$INPUT_ADDITIONAL.service.d/dietpi-baudrate.conf"
+						cat << _EOF_ > "/etc/systemd/system/serial-getty@$INPUT_ADDITIONAL.service.d/dietpi-baudrate.conf" || exit 1
 [Service]
 ExecStart=
-$(sed -n '/^ExecStart=/s/ 115200/ 1500000,115200/p' '/lib/systemd/system/serial-getty@.service')
+$(sed -n "/^ExecStart=/s/ 115200/ $baudrate,115200/p" /lib/systemd/system/serial-getty@.service)
 _EOF_
 						G_EXEC systemctl daemon-reload
 					fi
@@ -1538,6 +1556,17 @@ _EOF_
 					fi
 				fi
 
+				# GRUB
+				if [[ $IS_GRUB == 1 && $INPUT_ADDITIONAL != 'ttyGS'[0-9]* ]]
+				then
+					local i
+					for i in "${!GRUB_CONSOLES[@]}"
+					do
+						[[ ${GRUB_CONSOLES[i]%%,*} == "$INPUT_ADDITIONAL" ]] && unset -v 'GRUB_CONSOLES[i]'
+					done
+					GRUB_CONSOLES+=("$INPUT_ADDITIONAL")
+				fi
+
 				G_DIETPI-NOTIFY 2 "Enabling serial-getty on: /dev/$INPUT_ADDITIONAL"
 				G_EXEC systemctl unmask "serial-getty@$INPUT_ADDITIONAL"
 				G_EXEC systemctl enable "serial-getty@$INPUT_ADDITIONAL"
@@ -1546,11 +1575,13 @@ _EOF_
 
 			# Enable for all detected Serial/UART devices
 			else
+				GRUB_SKIP=1
 				for i in /dev/{tty{S,AMA,SAC,AML,SC,GS,FIQ,MV},hvc}[0-9]*
 				do
 					[[ -e $i ]] || continue
 					INPUT_ADDITIONAL=${i/\/dev\/} Serial_Main
 				done
+				GRUB_SKIP=0
 
 				# On RPi enable primary UART device
 				(( $G_HW_MODEL > 9 )) || G_CONFIG_INJECT 'enable_uart=' 'enable_uart=1' /boot/firmware/config.txt
@@ -1606,8 +1637,21 @@ _EOF_
 					fi
 				fi
 
+				# GRUB
+				if (( $IS_GRUB ))
+				then
+					local i
+					for i in "${!GRUB_CONSOLES[@]}"
+					do
+						[[ ${GRUB_CONSOLES[i]%%,*} == "$INPUT_ADDITIONAL" ]] || continue
+						unset -v 'GRUB_CONSOLES[i]'
+						break
+					done
+				fi
+
 			# Disable for all detected Serial/UART devices
 			else
+				GRUB_SKIP=1
 				for i in /dev/{serial,tty{S,AMA,SAC,AML,SC,GS,FIQ,MV},hvc}[0-9]*
 				do
 					[[ -e $i ]] || continue
@@ -1621,6 +1665,8 @@ _EOF_
 					i=${i%.service}
 					INPUT_ADDITIONAL=${i##*@} Serial_Main
 				done
+				GRUB_CONSOLES=()
+				GRUB_SKIP=0
 
 				# On RPi disable primary UART device
 				(( $G_HW_MODEL > 9 )) || G_CONFIG_INJECT 'enable_uart=' 'enable_uart=0' /boot/firmware/config.txt
@@ -1630,6 +1676,44 @@ _EOF_
 			fi
 		else
 			Unknown_Input_Mode
+			return 1
+		fi
+		#-------------------------------------------------------------------------------------
+		# GRUB
+		if (( ! $GRUB_SKIP && $IS_GRUB ))
+		then
+			if (( ${#GRUB_CONSOLES[@]} ))
+			then
+				{
+					echo "dietpi_consoles='${GRUB_CONSOLES[*]}'"
+					cat << '_EOF_'
+# Append tty1, unless already present, then the UARTs. The last console= entry is /dev/console.
+case " ${GRUB_CMDLINE_LINUX} ${GRUB_CMDLINE_LINUX_DEFAULT} " in
+	*' console=tty'[01]' '*) :;;
+	*) GRUB_CMDLINE_LINUX="${GRUB_CMDLINE_LINUX:+${GRUB_CMDLINE_LINUX} }console=tty1";;
+esac
+for dietpi_console in ${dietpi_consoles}
+do
+	GRUB_CMDLINE_LINUX="${GRUB_CMDLINE_LINUX:+${GRUB_CMDLINE_LINUX} }console=${dietpi_console},115200"
+done
+unset -v dietpi_console dietpi_consoles
+_EOF_
+				} > "$FP_GRUB"
+			else
+				if [[ $G_HW_ARCH =~ ^(3|11)$ && -e '/sys/firmware/acpi/tables/SPCR' ]]
+				then
+					cat << '_EOF_' > "$FP_GRUB"
+# Append tty1, unless already present
+case " ${GRUB_CMDLINE_LINUX} ${GRUB_CMDLINE_LINUX_DEFAULT} " in
+	*' console=tty'[01]' '*) :;;
+	*) GRUB_CMDLINE_LINUX="${GRUB_CMDLINE_LINUX:+${GRUB_CMDLINE_LINUX} }console=tty1";;
+esac
+_EOF_
+				else
+					[[ -f $FP_GRUB ]] && G_EXEC rm "$FP_GRUB"
+				fi
+			fi
+			G_EXEC_OUTPUT=1 G_EXEC update-grub
 		fi
 	}
 
@@ -1637,7 +1721,7 @@ _EOF_
 	# soundcard
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Disable all sound cards and reset all settings
-	Soundcard_Reset_All()
+	Soundcard_Reset()
 	{
 		G_DIETPI-NOTIFY 2 'Resetting all sound card settings...'
 
@@ -1666,119 +1750,78 @@ _EOF_
 		# - RPi
 		if (( $G_HW_MODEL < 10 ))
 		then
-			Soundcard_Reset_RPi
+			# Remove device tree overlays which disable HDMI audio and 3.5mm jack and those for known sound card, disable I2S and HDMI drive
+			G_EXEC sed --follow-symlinks -Ei -e '/^[[:blank:]]*(dtoverlay=(allo-|applepi-dac|dionaudio-|googlevoicehat-soundcard|hifiberry-|i-sabre-q2m|iqaudio-|justboom-|rpi-dac)|dtparam=i2s)/d' -e 's/^[[:blank:]]*(hdmi_drive(:[01])?=.*$)/#\1/' /boot/firmware/config.txt
+
+			# Disable onboard sound
+			G_CONFIG_INJECT 'dtparam=audio=' 'dtparam=audio=off' /boot/firmware/config.txt
+
+			# Blacklist onboard sound kernel module
+			G_EXEC eval 'echo '\''blacklist snd_bcm2835'\'' > /etc/modprobe.d/dietpi-disable_rpi_audio.conf'
+
+			# Remove kernel module options
+			G_EXEC sed --follow-symlinks -Ei '/root=/s/[[:blank:]]*snd_bcm2835.enable_[^[:blank:]]*([[:blank:]]*$)?//g' /boot/firmware/cmdline.txt
+
+			# Disable VC4 HDMI audio
+			local kms=$(grep -Em1 '^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi[45])?(,|$)' /boot/firmware/config.txt)
+			[[ $kms && ! $kms =~ ',noaudio'(,|$) ]] && G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi[45])?(,|$)/s/$/,noaudio/' /boot/firmware/config.txt
+
+			# On RPi 5, use "hdmi" by default, else "auto": https://dietpi.com/forum/t/19760
+			if [[ $INPUT_DEVICE_VALUE == 'default' ]]
+			then
+				if (( $G_HW_MODEL == 5 ))
+				then
+					INPUT_DEVICE_VALUE='rpi-bcm2835-hdmi'
+				else
+					INPUT_DEVICE_VALUE='rpi-bcm2835-auto'
+				fi
+
+			# RPi 5: Enforce HDMI audio if any onboard audio was selected, as it does not have a 3.5mm jack.
+			elif [[ $G_HW_MODEL == 5 && $INPUT_DEVICE_VALUE == 'rpi-bcm2835-'* ]]
+			then
+				INPUT_DEVICE_VALUE='rpi-bcm2835-hdmi'
+			fi
+
+		# - Odroid C2
+		elif [[ $G_HW_MODEL == 12 && -f '/boot/dietpiEnv.txt' ]]
+		then
+			# Remove HiFi Shield 2/Plus overlay from dietpiEnv.txt
+			grep -Eq '^[[:blank:]]*overlays=(.*[[:blank:]])?odroidc2-hifishield2?([[:blank:]]|$)' /boot/dietpiEnv.txt && G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*overlays=/s/[[:blank:]]*odroidc2-hifishield2?([[:blank:]]*$)?//g' /boot/dietpiEnv.txt
+
+		# - Odroid C5
+		elif (( $G_HW_MODEL == 13 ))
+		then
+			SOUNDCARD_TARGET_DEVICE=3 # HDMI
 
 		# - Odroid N2
-		elif [[ $G_HW_MODEL == 15 && -f '/boot/dietpiEnv.txt' ]]
+		elif (( $G_HW_MODEL == 15 ))
 		then
-			Soundcard_Reset_OdroidN2
+			[[ $INPUT_DEVICE_VALUE == 'default' ]] && INPUT_DEVICE_VALUE='odroidn2_hdmi'
 
 		# - Odroid C4/HC4
-		elif [[ $G_HW_MODEL == 1[67] && -f '/boot/dietpiEnv.txt' ]]
+		elif (( $G_HW_MODEL == 16 || $G_HW_MODEL == 17 ))
 		then
-			Soundcard_Reset_OdroidC4
-
-		# - Odroid legacy
-		elif (( $G_HW_MODEL < 20 ))
-		then
-			Soundcard_Reset_Odroid
+			[[ $INPUT_DEVICE_VALUE == 'default' ]] && INPUT_DEVICE_VALUE='odroidc4_hdmi'
 
 		# - ASUS TB
 		elif (( $G_HW_MODEL == 52 ))
 		then
-			Soundcard_Reset_Asus
+			SOUNDCARD_TARGET_CARD=1 # HDMI
 
 		# - ROCK Pi 4
 		elif (( $G_HW_MODEL == 72 ))
 		then
-			Soundcard_Reset_ROCKPi4
+			# Enable 3.5mm output, if available: https://github.com/MichaIng/DietPi/issues/5941
+			amixer -c 0 get 'Left Headphone Mixer Left DAC' &> /dev/null || return 0
+			G_EXEC amixer -c 0 set 'Left Headphone Mixer Left DAC' 'on'
+			G_EXEC amixer -c 0 set 'Right Headphone Mixer Right DAC' 'on'
 
 		# - Allwinner H3
 		elif (( $G_HW_CPUID == 1 ))
 		then
-			Soundcard_Reset_H3
+			# Remove analogue 3.5mm jack device tree overlay
+			grep -Eq '^[[:blank:]]*overlays=(.*[[:blank:]])?analog-codec([[:blank:]]|$)' "$FP_UENV" && G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*overlays=/s/[[:blank:]]*analog-codec([[:blank:]]*$)?//g' "$FP_UENV"
 		fi
-	}
-
-	Soundcard_Reset_RPi()
-	{
-		# Remove device tree overlays which disable HDMI audio and 3.5mm jack and those for known sound card, disable I2S and HDMI drive
-		G_EXEC sed --follow-symlinks -Ei -e '/^[[:blank:]]*(dtoverlay=(allo-|applepi-dac|dionaudio-|googlevoicehat-soundcard|hifiberry-|i-sabre-q2m|iqaudio-|justboom-|rpi-dac)|dtparam=i2s)/d' -e 's/^[[:blank:]]*(hdmi_drive(:[01])?=.*$)/#\1/' /boot/firmware/config.txt
-
-		# Disable onboard sound
-		G_CONFIG_INJECT 'dtparam=audio=' 'dtparam=audio=off' /boot/firmware/config.txt
-
-		# Blacklist onboard sound kernel module
-		G_EXEC eval 'echo '\''blacklist snd_bcm2835'\'' > /etc/modprobe.d/dietpi-disable_rpi_audio.conf'
-
-		# Remove kernel module options
-		G_EXEC sed --follow-symlinks -Ei '/root=/s/[[:blank:]]*snd_bcm2835.enable_[^[:blank:]]*([[:blank:]]*$)?//g' /boot/firmware/cmdline.txt
-
-		# Disable VC4 HDMI audio
-		local kms=$(grep -Em1 '^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi[45])?(,|$)' /boot/firmware/config.txt)
-		[[ $kms && ! $kms =~ ',noaudio'(,|$) ]] && G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi[45])?(,|$)/s/$/,noaudio/' /boot/firmware/config.txt
-
-		# On RPi 5, use "hdmi" by default, else "auto": https://dietpi.com/forum/t/19760
-		if [[ $INPUT_DEVICE_VALUE == 'default' ]]
-		then
-			if (( $G_HW_MODEL == 5 ))
-			then
-				INPUT_DEVICE_VALUE='rpi-bcm2835-hdmi'
-			else
-				INPUT_DEVICE_VALUE='rpi-bcm2835-auto'
-			fi
-
-		# RPi 5: Enforce HDMI audio if any onboard audio was selected, as it does not have a 3.5mm jack.
-		elif [[ $G_HW_MODEL == 5 && $INPUT_DEVICE_VALUE == 'rpi-bcm2835-'* ]]
-		then
-			INPUT_DEVICE_VALUE='rpi-bcm2835-hdmi'
-		fi
-	}
-
-	Soundcard_Reset_Odroid()
-	{
-		# Odroid C2 USB SMP affinity tweak
-		[[ -f '/var/lib/dietpi/postboot.d/c2_smp.sh' ]] && G_EXEC rm /var/lib/dietpi/postboot.d/c2_smp.sh
-
-		# HiFi Shield 2 setup
-		if [[ -f '/etc/systemd/system/odroid-hifishield2.service' ]]
-		then
-			G_EXEC systemctl disable --now odroid-hifishield2
-			G_EXEC rm /etc/systemd/system/odroid-hifishield2.service
-		fi
-		[[ -d '/etc/systemd/system/odroid-hifishield2.service.d' ]] && G_EXEC rm -R /etc/systemd/system/odroid-hifishield2.service.d
-
-		# HiFi Shield Plus and 2 kernel modules
-		G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*snd-soc-(odroid-dac|pcm51)/d' /etc/modules
-	}
-
-	Soundcard_Reset_OdroidN2()
-	{
-		[[ $INPUT_DEVICE_VALUE == 'default' ]] && INPUT_DEVICE_VALUE='odroidn2_hdmi'
-	}
-
-	Soundcard_Reset_OdroidC4()
-	{
-		[[ $INPUT_DEVICE_VALUE == 'default' ]] && INPUT_DEVICE_VALUE='odroidc4_hdmi'
-	}
-
-	Soundcard_Reset_Asus()
-	{
-		SOUNDCARD_TARGET_CARD=1 # HDMI
-	}
-
-	Soundcard_Reset_ROCKPi4()
-	{
-		# Enable 3.5mm output, if available: https://github.com/MichaIng/DietPi/issues/5941
-		amixer -c 0 get 'Left Headphone Mixer Left DAC' &> /dev/null || return 0
-		G_EXEC amixer -c 0 set 'Left Headphone Mixer Left DAC' 'on'
-		G_EXEC amixer -c 0 set 'Right Headphone Mixer Right DAC' 'on'
-	}
-
-	Soundcard_Reset_H3()
-	{
-		# Remove analogue 3.5mm jack device tree overlay
-		(( $ARMBIAN || $DIETPIENV )) && grep -Eq '^[[:blank:]]*overlays=(.*[[:blank:]])?analog-codec([[:blank:]]|$)' "$FP_UENV" && G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*overlays=/s/[[:blank:]]*analog-codec([[:blank:]]*$)?//g' "$FP_UENV"
 	}
 
 	Soundcard_Main(){
@@ -1796,7 +1839,7 @@ _EOF_
 			G_AG_CHECK_INSTALL_PREREQ alsa-utils
 		fi
 		# Always reset sound cards and revert back to defaults
-		Soundcard_Reset_All
+		Soundcard_Reset
 		# Print info
 		G_DIETPI-NOTIFY 2 'Applying new sound card settings...'
 		# Save selection to dietpi.txt
@@ -1830,39 +1873,6 @@ _EOF_
 
 				SOUNDCARD_TARGET_CARD=$(mawk -F, '{print $1}' <<< "${INPUT_DEVICE_VALUE#hw:}")
 				SOUNDCARD_TARGET_DEVICE=$(mawk -F, '{print $2}' <<< "${INPUT_DEVICE_VALUE#hw:}")
-			;;
-
-			# Auto detect USB DAC
-			'usb-dac'*)
-
-				local usb_detection_card_index=$([[ -f '/proc/asound/cards' ]] && mawk '/USB/ && $1 == /[0-9]/ {print $1;exit}' /proc/asound/cards)
-				if [[ $usb_detection_card_index ]]; then
-
-					SOUNDCARD_TARGET_CARD=$usb_detection_card_index
-					SOUNDCARD_TARGET_DEVICE=0
-
-					# Odroid C2: https://github.com/MichaIng/DietPi/issues/2101
-					if (( $G_HW_MODEL == 12 )) && grep -q '^[[:blank:]]*63:.*dwc_otg' /proc/interrupts; then
-
-						cat << '_EOF_' > /var/lib/dietpi/postboot.d/c2_smp.sh
-#!/bin/dash
-echo 4 > /proc/irq/63/smp_affinity
-echo 8 > /proc/irq/62/smp_affinity
-_EOF_
-						# shellcheck disable=SC1091
-						. /var/lib/dietpi/postboot.d/c2_smp.sh
-
-					fi
-
-				# Not found
-				else
-
-					G_DIETPI-NOTIFY 1 'Unable to find any USB DAC on your system, reverting to "none"...'
-					EXIT_CODE=1
-					G_CONFIG_INJECT 'CONFIG_SOUNDCARD=' 'CONFIG_SOUNDCARD=none' /boot/dietpi.txt
-					return
-
-				fi
 			;;
 
 			# Intel SST DSP
@@ -1956,40 +1966,16 @@ _EOF_
 			# --------------- Odroid ----------------
 			'odroid-hifishield-plus')
 
-				G_CONFIG_INJECT 'snd-soc-pcm5102' 'snd-soc-pcm5102' /etc/modules
-				G_CONFIG_INJECT 'snd-soc-odroid-dac' 'snd-soc-odroid-dac' /etc/modules
-				G_EXEC modprobe snd-soc-pcm5102 snd-soc-odroid-dac
-
+				# Add overlay to dietpiEnv.txt
+				grep -Eq '^[[:blank:]]*overlays=(.*[[:blank:]])?odroidc2-hifishield([[:blank:]]|$)' /boot/dietpiEnv.txt || G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*overlays=/s/[[:blank:]]*$/ odroidc2-hifishield/' /boot/dietpiEnv.txt
 				SOUNDCARD_TARGET_CARD=1
 			;;
 
 			'odroid-hifishield-2')
 
-				G_CONFIG_INJECT 'aml_i2c' 'aml_i2c' /etc/modules
-				G_CONFIG_INJECT 'snd-soc-pcm512x' 'snd-soc-pcm512x' /etc/modules
-				G_CONFIG_INJECT 'snd-soc-pcm512x-i2c' 'snd-soc-pcm512x-i2c' /etc/modules
-				G_CONFIG_INJECT 'snd-soc-odroid-dac2' 'snd-soc-odroid-dac2' /etc/modules
-				G_EXEC modprobe aml_i2c snd-soc-pcm512x snd-soc-pcm512x-i2c snd-soc-odroid-dac2
-
+				# Add overlay to dietpiEnv.txt
+				grep -Eq '^[[:blank:]]*overlays=(.*[[:blank:]])?odroidc2-hifishield2([[:blank:]]|$)' /boot/dietpiEnv.txt || G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*overlays=/s/[[:blank:]]*$/ odroidc2-hifishield2/' /boot/dietpiEnv.txt
 				SOUNDCARD_TARGET_CARD=1
-
-				cat << _EOF_ > /etc/systemd/system/odroid-hifishield2.service
-[Unit]
-Description=Odroid HiFi Shield 2 activation
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/dash -c 'echo pcm5242 0x4c > /sys/class/i2c-adapter/i2c-1/new_device'
-ExecStart=$(command -v amixer) -c 1 set Analogue 0
-ExecStart=$(command -v amixer) -c 1 set Digital 201
-ExecStart=$(command -v amixer) -c 1 set Deemphasis on
-
-[Install]
-WantedBy=sound.target
-_EOF_
-				G_EXEC systemctl daemon-reload
-				G_EXEC systemctl enable --now odroid-hifishield2
 			;;
 
 			'odroidn2_hdmi')
@@ -2048,7 +2034,7 @@ _EOF_
 			'h3-analogue')
 
 				# Add analogue 3.5mm jack device tree overlay
-				(( $ARMBIAN || $DIETPIENV )) && G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*overlays=/s/[[:blank:]]*$/ analog-codec/' "$FP_UENV"
+				G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*overlays=/s/[[:blank:]]*$/ analog-codec/' "$FP_UENV"
 			;;
 
 			# --------------- ASUS TB ---------------
