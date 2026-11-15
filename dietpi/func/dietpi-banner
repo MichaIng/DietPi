@@ -596,7 +596,10 @@ For example: "/mnt/*" or "re:^/mnt/.*/*$"'
 
 		# Build mount list from findmnt (preserve findmnt order)
 		local -a available_mounts
-		mapfile -t available_mounts < <(findmnt -nro TARGET --fstab --real 2>/dev/null)
+		mapfile -t available_mounts < <(findmnt -nro TARGET --fstab --real 2> /dev/null)
+		# Decode "findmnt -r" encoded output
+		local i m p
+		for i in "${!available_mounts[@]}"; do printf -v "available_mounts[$i]" '%b' "${available_mounts[$i]}"; done
 		# Build quick lookup maps used to determine which mounts are present
 		# and which are configured by the user:
 		# - `avail_map`: mounts currently detected on the system
@@ -725,29 +728,77 @@ For example: "/mnt/*" or "re:^/mnt/.*/*$"'
 
 	Print_Disk_Usage()
 	{
-		local results=()
-		local -A seen=()
-
 		if (( ( ${#aDISK_SPACE_PATTERNS[@]} == 0 ) || ( ${aENABLED[disk_patterns]} == 0 ) )) && (( ${#aDISK_SPACE_MOUNTS[@]} == 0 ))
 		then
 			echo -e "${aCOLOUR[highlight]}No disk patterns provided, nothing to display."
 			return 0
 		fi
 
-		local -a mount_order=() mount_lines
-		declare -A mount_used mount_size mount_perc mount_name
-		local line mnt_target used size perc name
+		# Trixie+: Pre-select mounts via findmnt's --filter option (util-linux 2.40+). It evaluates the filter before gathering
+		# other column data, hence statfs() for USED/SIZE is called for matching mounts only, and an offline network share which
+		# is not shown in the banner cannot block it: https://github.com/MichaIng/DietPi/issues/8288
+		# - This is a pre-selection only, the actual matching is done below. Hence it may be broader, but never narrower than the patterns.
+		# - Exact mounts are matched as is. For globs, the literal prefix up to the first "[" or "\" is matched. "re:" patterns are passed as is.
+		# - The filter is skipped if a regex has invalid syntax, or contains single quotes and double quotes at same time, which cannot be reliably escaped.
+		local p filter skip=0
+		if (( $G_DISTRO > 7 ))
+		then
+			for p in "${aDISK_SPACE_MOUNTS[@]}"
+			do
+				[[ $p ]] || continue
+				[[ $p == *\'* ]] || { filter+="${filter:+ || }TARGET == '$p'"; continue; }
+				[[ $p == *\"* ]] || { filter+="${filter:+ || }TARGET == \"$p\""; continue; }
+				skip=1
+				break
+			done
+			(( ! $skip && ${aENABLED[disk_patterns]} )) && for p in "${aDISK_SPACE_PATTERNS[@]}"
+			do
+				if [[ $p == 're:'* ]]
+				then
+					p=${p#re:}
+					# shellcheck disable=SC2319
+					[[ '' =~ $p ]] || (( $? != 2 )) || { skip=1; break; }
+					[[ $p == *\'* ]] || { filter+="${filter:+ || }TARGET =~ '$p'"; continue; }
+					[[ $p == *\"* ]] || { filter+="${filter:+ || }TARGET =~ \"$p\""; continue; }
+					skip=1
+					break
+				else
+					local q=${p%%[[\\]*}            # strip everything from first "[" or "\" which cannot be reliably converted to regex
+					local r=${q//[.^\$+(){\}|]/\\&} # escape characters without special meaning in glob but regex
+					r=${r//\*/.*}                   # migrate * glob => regex
+					r=${r//\?/.}                    # migrate ? glob => regex
+					[[ $q == "$p" ]] && r+='$'      # add end anchor if nothing was stripped
+					[[ $r == *\'* ]] || { filter+="${filter:+ || }TARGET =~ '^$r'"; continue; }
+					[[ $r == *\"* ]] || { filter+="${filter:+ || }TARGET =~ \"^$r\""; continue; }
+					filter+="${filter:+ || }TARGET =~ '^${r//\'/.}'"
+				fi
+			done
+		fi
 
-		# Pull all mounts once (-D -n -r) in bytes (-b). Rebuild TARGET safely
-		# (handles spaces) and compute USE% with one decimal using mawk from USED/SIZE.
+		# Pull matching mounts (or all on Bookworm) once (-n -r) in bytes (-b).
+		local findmnt_out
+		if [[ $skip == 0 && $filter ]]
+		then
+			findmnt_out=$(findmnt -bnro TARGET,USED,SIZE --real -Q "$filter" 2> /dev/null)
+		else
+			findmnt_out=$(findmnt -bnro TARGET,USED,SIZE --real)
+		fi
+
+		# Compute USE% with one decimal using mawk from USED/SIZE.
 		# Use ASCII Unit Separator (0x1F) as a safe field delimiter to avoid collisions with mount names
-		mapfile -t mount_lines < <(findmnt -bnro TARGET,USED,SIZE --real | mawk -v SEP="$(printf '\037')" '{used=$(NF-1); size=$NF; target=$1; for(i=2;i<=NF-2;i++) target=target" "$i; perc=(size>0? used/size*100 : 0); printf "%s%s%s%s%s%s%s\n", target, SEP, used, SEP, size, SEP, sprintf("%.1f%%", perc)}')
+		local -a mount_lines
+		[[ $findmnt_out ]] && mapfile -t mount_lines < <(mawk -v SEP="$(printf '\037')" '{used=$(NF-1); size=$NF; target=$1; for(i=2;i<=NF-2;i++) target=target" "$i; perc=(size>0? used/size*100 : 0); printf "%s%s%s%s%s%s%s\n", target, SEP, used, SEP, size, SEP, sprintf("%.1f%%", perc)}' <<< "$findmnt_out")
 
 		# Keep mount_order[] to preserve findmnt's (consistent) order and aDISK_SPACE_PATTERNS' order.
+		local line mnt_target used size perc name
+		local -a mount_order
+		local -A mount_used mount_size mount_perc mount_name
 		for line in "${mount_lines[@]}"
 		do
 			# Each line fields are separated by ASCII Unit Separator (0x1F): TARGET<US>USED<US>SIZE<US>USE%
 			IFS=$'\x1f' read -r mnt_target used size perc <<< "$line"
+			# Decode "findmnt -r" encoded output
+			printf -v mnt_target '%b' "$mnt_target"
 			mount_used["$mnt_target"]=$used
 			mount_size["$mnt_target"]=$size
 			mount_perc["$mnt_target"]=$perc
@@ -756,6 +807,8 @@ For example: "/mnt/*" or "re:^/mnt/.*/*$"'
 		done
 
 		# Iterate mounts in the original findmnt order and match against patterns.
+		local -a results
+		local -A seen
 		for mnt_target in "${mount_order[@]}"
 		do
 			local matched=0
@@ -767,17 +820,13 @@ For example: "/mnt/*" or "re:^/mnt/.*/*$"'
 			done
 
 			# If not matched yet, test globs and regex patterns from match_patterns if enabled
-			if (( $matched == 0 && ${aENABLED[disk_patterns]} == 1 ))
+			if (( ! $matched && ${aENABLED[disk_patterns]} ))
 			then
 				for pattern in "${aDISK_SPACE_PATTERNS[@]}"
 				do
 					if [[ $pattern == 're:'* ]]
 					then
-						re=${pattern#re:}
-						if [[ $mnt_target =~ $re ]]
-						then
-							matched=1; break
-						fi
+						[[ $mnt_target =~ ${pattern#re:} ]] && { matched=1; break; }
 					else
 						# shellcheck disable=SC2254
 						case $mnt_target in
