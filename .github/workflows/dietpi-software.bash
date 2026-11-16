@@ -262,6 +262,7 @@ Process_Software()
 			'snapcastserver') aSERVICES[$i]='snapserver' aTCP[$i]='1704 1780';;
 			'soju') aSERVICES[$i]='soju' aTCP[$i]='6667';;
 			'sonarr') aSERVICES[$i]='sonarr' aTCP[$i]='8989';;
+			'solidping') aSERVICES[$i]='solidping' aTCP[$i]='4002' aCOMMANDS[$i]='curl -sSf '\''http://127.0.0.1:4002/api/mgmt/health'\'' | grep '\''"status":"ok"'\';;
 			'spotifyd') aSERVICES[$i]='spotifyd' aUDP[$i]='5353';; # + random high TCP port
 			'sqlite') aCOMMANDS[$i]='sqlite3 -version';;
 			'squeezelite') aSERVICES[$i]='squeezelite';; # Service listens on random high UDP port
@@ -296,6 +297,7 @@ Process_Software()
 			'yacy') aSERVICES[$i]='yacy' aTCP[$i]='8090' aDELAY[$i]=30; (( $emulation )) && aDELAY[$i]=120;;
 			'ympd') aSERVICES[$i]='ympd' aTCP[$i]='1337';;
 			'ytdlp') aCOMMANDS[$i]='yt-dlp --version';;
+			'yuvomi') aSERVICES[$i]='yuvomi' aTCP[$i]='3004'; (( $emulation )) && aDELAY[$i]=60;;
 			'zerotier') aSERVICES[$i]='zerotier-one' aTCP[$i]='9993';;
 			# Software titles without further tests
 			# - Software which requires interactive input
@@ -325,7 +327,7 @@ do
 		'alloguifull') Process_Software squeezelite shairportsync netdata mariadb php sambaserver roonbridge naadaemon mpd ompd avahidaemon allogui gmediarender webserver;;
 		'nextcloud'|'nextcloudtalk') Process_Software mariadb php redis webserver;;
 		'javajdk'|'ubooquity'|'yacy'|'nukkit'|'komga'|'papermc'|'openhab') Process_Software javajre;;
-		'nodered'|'uptimekuma'|'scrypted') Process_Software nodejs;;
+		'nodered'|'uptimekuma'|'scrypted'|'yuvomi') Process_Software nodejs;;
 		'mineos'|'blynkserver') Process_Software nodejs javajre;;
 		'ympd'|'mympd'|'cava') Process_Software mpd;;
 		'ompd') Process_Software mariadb php mpd webserver;;

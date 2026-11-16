@@ -42,6 +42,7 @@ Available options for "apply" command:
   --no-restart                        Write config only, do not reconnect the interface now
   --force                             Proceed even if a network conflict (same subnet/duplicate default route) with
                                       another enabled interface is detected, or if the interface does not exist at all.
+                                      Also mutes the warning about a static gateway outside of the static IP subnet.
 '
 
 . /boot/dietpi/func/dietpi-globals
@@ -57,6 +58,8 @@ MAIN_MENU_LASTITEM=
 IFACE_MENU_LASTITEM=
 PROXY_MENU_LASTITEM=
 WIFIMON_MENU_LASTITEM=
+# One-time hint or warning, shown at the top of the interface menu when it is drawn next, then unset
+MENU_HINT=
 PRESERVE_SELECTED_SETTINGS=0
 ACTION_VALUE=
 ACTION_EXTRA=
@@ -563,13 +566,21 @@ Change_StaticIp()
 	G_WHIP_INPUTBOX "Please enter a new static $(Current_Interface_Type_Text) IP address, optionally with CIDR netmask to define a subnet mask other than the default /24 (255.255.255.0), e.g.: 192.168.0.100/24" || return 0
 	CURRENT_IFACE_IP_STATIC=$G_WHIP_RETURNED_VALUE
 	[[ $CURRENT_IFACE_IP_STATIC == */* ]] || CURRENT_IFACE_IP_STATIC+='/24'
+
+	# Adjust the gateway automatically if it is outside of the new subnet. An empty gateway is kept, as this is a valid choice for interfaces without Internet access.
+	[[ $CURRENT_IFACE_GATEWAY_STATIC ]] || return 0
+	Subnets_Overlap "$CURRENT_IFACE_IP_STATIC" "$CURRENT_IFACE_GATEWAY_STATIC" && return 0
+	local gateway=$(Get_Subnet_Gateway "$CURRENT_IFACE_IP_STATIC")
+	[[ $gateway ]] || return 0
+	MENU_HINT="The static gateway has been changed from \"$CURRENT_IFACE_GATEWAY_STATIC\" to \"$gateway\", to match the subnet of the new static IP address."
+	CURRENT_IFACE_GATEWAY_STATIC=$gateway
 }
 
 Change_StaticGateway()
 {
 	G_WHIP_INPUTBOX_REGEX="^($REGEX_IPV4)?\$"
 	G_WHIP_INPUTBOX_REGEX_TEXT='be a valid IPv4 address, e.g. "192.168.0.1", or empty'
-	G_WHIP_DEFAULT_ITEM=${CURRENT_IFACE_GATEWAY_STATIC:-${CURRENT_IFACE_IP_STATIC%.*}.1}
+	G_WHIP_DEFAULT_ITEM=${CURRENT_IFACE_GATEWAY_STATIC:-$(Get_Subnet_Gateway "$CURRENT_IFACE_IP_STATIC")}
 	G_WHIP_INPUTBOX "Please enter a new static $(Current_Interface_Type_Text) gateway address. You can leave this empty if this interface shall not be used for Internet access." || return 0
 	CURRENT_IFACE_GATEWAY_STATIC=$G_WHIP_RETURNED_VALUE
 }
@@ -685,6 +696,21 @@ IP_To_Int()
 	echo $(( (a<<24) + (b<<16) + (c<<8) + d ))
 }
 
+Int_To_IP(){ echo "$(( $1 >> 24 & 255 )).$(( $1 >> 16 & 255 )).$(( $1 >> 8 & 255 )).$(( $1 & 255 ))"; }
+
+# Print the most likely gateway address for the subnet of the given IPv4 address with CIDR prefix length: The first host address of the subnet, e.g. "192.168.0.1" for "192.168.0.100/24", or the last one, if the given address is the first one itself.
+# Prints nothing for /31 and /32 subnets, which have no spare host address to guess.
+Get_Subnet_Gateway()
+{
+	[[ $1 == */* ]] || return 0
+	local ip=${1%/*} prefix=${1#*/}
+	(( $prefix < 31 )) || return 0
+	local int=$(IP_To_Int "$ip") mask=$(( ( 0xFFFFFFFF << ( 32 - prefix ) ) & 0xFFFFFFFF ))
+	local gateway=$(( ( int & mask ) + 1 ))
+	(( $gateway == $int )) && gateway=$(( ( int | ( ~mask & 0xFFFFFFFF ) ) - 1 ))
+	Int_To_IP "$gateway"
+}
+
 Subnets_Overlap()
 {
 	local ip1=${1%/*} p1=${1#*/} ip2=${2%/*} p2=${2#*/}
@@ -733,12 +759,33 @@ Disable_Conflicting_Interface()
 	G_DIETPI-NOTIFY 2 "Disabled interface \"$iface\" to resolve network conflict"
 }
 
+# Warn if the static gateway is outside of the subnet of the static IP address: It is then not reachable, hence the default route cannot be added and "ifup" fails: https://github.com/MichaIng/DietPi/issues/7542
+# - Setups with on-link gateway outside of the own subnet exist, but require additional manual config, so this is a warning only. Without terminal, the settings are applied as given.
+Check_Gateway_Subnet()
+{
+	[[ $CURRENT_IFACE_MODE == 'static' && $CURRENT_IFACE_IP_STATIC && $CURRENT_IFACE_GATEWAY_STATIC ]] || return 0
+	Subnets_Overlap "$CURRENT_IFACE_IP_STATIC" "$CURRENT_IFACE_GATEWAY_STATIC" && return 0
+	local gateway=$(Get_Subnet_Gateway "$CURRENT_IFACE_IP_STATIC")
+	local reason="The static gateway \"$CURRENT_IFACE_GATEWAY_STATIC\" is outside of the subnet of the static IP address \"$CURRENT_IFACE_IP_STATIC\" of interface \"$CURRENT_IFACE\". It can hence not be reached, which usually breaks Internet access, while DNS and local network access can still work."
+
+	# Without terminal, this cannot be confirmed
+	(( $G_INTERACTIVE )) || { G_DIETPI-NOTIFY 2 "[WARNING] $reason${gateway:+ A common gateway address for this subnet is \"$gateway\".} Use --force to mute this warning."; return 0; }
+
+	G_WHIP_MENU_ARRAY=()
+	[[ $gateway ]] && G_WHIP_MENU_ARRAY+=('Adjust' ": Use \"$gateway\" as gateway and proceed")
+	G_WHIP_MENU_ARRAY+=('Ignore' ': Proceed with the gateway outside of the subnet (NOT recommended)')
+	G_WHIP_MENU "[WARNING] Gateway outside of subnet detected:\n\n$reason\n\nThe gateway is usually the address of your router, and needs to share the subnet part of the IP address, e.g. \"192.168.0.1\" for \"192.168.0.100/24\".\n\nPlease select how to proceed, or cancel to change the settings manually:" || return 1
+	[[ $G_WHIP_RETURNED_VALUE == 'Adjust' ]] && CURRENT_IFACE_GATEWAY_STATIC=$gateway
+	return 0
+}
+
 # Avoid two enabled interfaces on the same subnet (asymmetric routing risk) or two default routes (static gateways, or DHCP which usually assigns one)
 Check_Network_Conflicts()
 {
 	(( $APPLY_FORCE )) && return 0 # skip check if settings are to be applied anyway
 	(( $CURRENT_IFACE_ENABLED )) || return 0
 	[[ $CURRENT_IFACE_MODE == 'static' || $CURRENT_IFACE_MODE == 'dhcp' ]] || return 0
+	Check_Gateway_Subnet || return 1
 	local iface o_enabled o_mode o_cidr o_gateway reason
 	for iface in /sys/class/net/*
 	do
@@ -1013,6 +1060,9 @@ Menu_Interface()
 	Load_Interface_State "$iface"
 	Net_Update_UsageStats "$iface"
 	local title=$(Interface_Menu_Title)
+	# One-time hint
+	[[ $MENU_HINT ]] && title="Hint: $MENU_HINT\n\n$title"
+	MENU_HINT=
 	if [[ $CURRENT_IFACE_TYPE == 'eth' ]]
 	then
 		local speed='auto (default, recommended)'

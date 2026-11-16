@@ -77,9 +77,6 @@ Patch_8_1()
 		[[ -f '/boot/overlays/dietpi-disable_vcsm.dtbo' ]] && G_EXEC rm /boot/overlays/dietpi-disable_vcsm.dtbo
 	fi
 
-	# Odroid C2 mainline image: Remove obsolete IRQ affinity: https://github.com/MichaIng/DietPi/issues/5235
-	[[ $G_HW_MODEL == 12 && -f '/var/lib/dietpi/postboot.d/c2_smp.sh' ]] && ! grep -q '^[[:blank:]]*63:.*dwc_otg' /proc/interrupts && G_EXEC rm /var/lib/dietpi/postboot.d/c2_smp.sh
-
 	# Fix Home Assistant restart: https://dietpi.com/phpbb/viewtopic.php?t=10025
 	[[ -f '/etc/systemd/system/home-assistant.service' ]] && G_CONFIG_INJECT 'RestartForceExitStatus=100' 'RestartForceExitStatus=100' /etc/systemd/system/home-assistant.service '\[Service\]'
 }
@@ -243,11 +240,6 @@ Patch_8_10()
 	# Inform about available software updates and do needed migrations
 	if [[ -f '/boot/dietpi/.installed' ]]
 	then
-		# Home Assistant
-		grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[157\]=2' /boot/dietpi/.installed && G_WHIP_MSG '[ INFO ] HACS integration for Home Assistant available
-\nThe Home Assistant Community Store (HACS) is now installed by default with Home Assistant. Add it via reinstall:
-# dietpi-software reinstall 157
-\nTo activate it, follow this guide: https://hacs.xyz/docs/use/configuration/basic/#to-set-up-the-hacs-integration'
 		# GMediaRender
 		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[163\]=2' /boot/dietpi/.installed
 		then
@@ -2882,12 +2874,51 @@ _EOF_
 
 Patch_10_9()
 {
+	# Odroid C1/C2 with mainline Linux
+	if [[ $G_HW_MODEL == 1[12] ]] && dpkg-query -l | grep -Eq '^ii[[:blank:]]*linux-image-(current|edge)-meson(64)?[[:blank:]:]'
+	then
+		G_DIETPI-NOTIFY 2 'Disabling possibly enabled dysfunctional legacy HiFi Shield 2/Plus modules/service'
+		# Odroid C2 USB SMP affinity tweak
+		[[ -f '/var/lib/dietpi/postboot.d/c2_smp.sh' ]] && G_EXEC rm /var/lib/dietpi/postboot.d/c2_smp.sh
+		# HiFi Shield 2 setup
+		if [[ -f '/etc/systemd/system/odroid-hifishield2.service' ]]
+		then
+			G_EXEC systemctl disable --now odroid-hifishield2
+			G_EXEC rm /etc/systemd/system/odroid-hifishield2.service
+		fi
+		[[ -d '/etc/systemd/system/odroid-hifishield2.service.d' ]] && G_EXEC rm -R /etc/systemd/system/odroid-hifishield2.service.d
+		# HiFi Shield Plus and 2 kernel modules
+		grep -Eq '^[[:blank:]]*(snd-soc-(odroid-dac|pcm51)|aml_i2c)' /etc/modules && G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*(snd-soc-(odroid-dac|pcm51)|aml_i2c)/d' /etc/modules
+
 	# ROCK 4
-	if (( $G_HW_MODEL == 72 ))
+	elif (( $G_HW_MODEL == 72 ))
 	then
 		G_DIETPI-NOTIFY 2 'Flashing U-Boot to solve potential boot issues with latest Linux'
 		G_EXEC_OUTPUT=1 G_EXEC /boot/dietpi/func/dietpi-set_hardware flash-u-boot-mmc
 	fi
+
+	# Pre-login banner: It has been migrated from a dietpi-postboot print to /etc/issue.d/dietpi-banner.issue, which agetty prints above the login prompt on all consoles.
+	# - dietpi-update updates it from now on, but this update runs with old dietpi-update code. And the target version is not saved yet at this stage, hence apply it from the update archive.
+	G_DIETPI-NOTIFY 2 'Creating pre-login banner /etc/issue.d/dietpi-banner.issue'
+	G_EXEC /boot/dietpi/func/dietpi-banner issue
+	[[ -f /tmp/DietPi-Update/DietPi-${G_GITBRANCH//\//-}/.update/version ]] && (
+		# shellcheck disable=SC1090
+		. "/tmp/DietPi-Update/DietPi-${G_GITBRANCH//\//-}/.update/version"
+		# shellcheck disable=SC2154
+		G_EXEC sed --follow-symlinks -i "s/DietPi v[0-9]*\.[0-9]*\.[0-9]*/DietPi v$G_REMOTE_VERSION_CORE.$G_REMOTE_VERSION_SUB.$G_REMOTE_VERSION_RC/" /etc/issue.d/dietpi-banner.issue
+	)
+
+	# dietpi-banner: decode "findmnt -r" encoded aDISK_SPACE_MOUNTS entries
+	[[ -f '/boot/dietpi/.dietpi-banner' ]] && (
+		G_EXEC cp /boot/dietpi/.dietpi-banner .
+		aDISK_SPACE_MOUNTS=()
+		# shellcheck disable=SC1091
+		. .dietpi-banner
+		for i in "${!aDISK_SPACE_MOUNTS[@]}"; do printf -v "aDISK_SPACE_MOUNTS[$i]" '%b' "${aDISK_SPACE_MOUNTS[$i]}"; done
+		G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*aDISK_SPACE_MOUNTS\[/d' .dietpi-banner
+		for i in "${!aDISK_SPACE_MOUNTS[@]}"; do echo "aDISK_SPACE_MOUNTS[$i]='${aDISK_SPACE_MOUNTS[$i]//\'/\'\\\'\'}'"; done >> .dietpi-banner
+		G_EXEC mv .dietpi-banner /boot/dietpi/.dietpi-banner
+	)
 
 	# Software updates, migrations and patches
 	if [[ -f '/boot/dietpi/.installed' ]]
@@ -2903,6 +2934,23 @@ Patch_10_9()
 
 		# Mono and Readarr removal
 		grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(mono|readarr)\]=' /boot/dietpi/.installed && G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(mono|readarr)\]=/d' /boot/dietpi/.installed
+
+		if [[ -f '/etc/fish/conf.d/dietpi.fish' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Updating fish session load script /etc/fish/conf.d/dietpi.fish'
+			G_EXEC eval 'echo '\''if status is-interactive'\'' > /etc/fish/conf.d/dietpi.fish'
+			# - Take aliases from /etc/bashrc.d/dietpi.bash
+			mawk '/# - DietPi programs/ {flag=1; next}
+			/# - Optional DietPi software aliases/ {flag=0}
+			flag {print}' /etc/bashrc.d/dietpi.bash >> /etc/fish/conf.d/dietpi.fish || exit 1
+			# - Launch dietpi-login script for first run setup and autostart features
+			cat << '_EOF_' >> /etc/fish/conf.d/dietpi.fish || exit 1
+	function fish_greeting
+		/boot/dietpi/dietpi-login
+	end
+end
+_EOF_
+		fi
 
 		# Pi-hole v6 migration
 		# - /etc/pihole/pihole.toml indicates that Pi-hole has been upgraded to v6 already.
