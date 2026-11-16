@@ -10505,6 +10505,20 @@ _EOF_
 
 		if To_Install podman
 		then
+			# Config: Run first to prevent errors during package postinst already
+			# - Log containers and events to systemd-journald (journalctl), like Docker
+			# - Let aardvark-dns listen on port 54 instead of 53, to not conflict with DNS servers on the host, like Pi-hole, AdGuard Home or Unbound, and with containers which publish port 53. netavark redirects DNS queries from containers to this port.
+			# - Without D-Bus, use the cgroupfs cgroup manager, as the default systemd cgroup manager fails to start containers: "crun: cannot open sd-bus". Containers created with either cgroup manager keep working when D-Bus is installed later.
+			# - Also, without D-Bus netavark-firewalld-reload.service (Trixie+) is doomed to fail. We do not use firewalld, and it cannot work without D-Bus either, so it can be safely disabled.
+			local cgroup_manager=
+			if ! systemctl -q is-active dbus dbus-broker
+			then
+				cgroup_manager='\ncgroup_manager = "cgroupfs"'
+				G_EXEC systemctl mask --now netavark-firewalld-reload
+			fi
+			G_EXEC mkdir -p /etc/containers/containers.conf.d
+			G_EXEC eval "echo -e '[containers]\nlog_driver = \"journald\"\n\n[network]\ndns_bind_port = 54\n\n[engine]\nevents_logger = \"journald\"$cgroup_manager' > /etc/containers/containers.conf.d/97-dietpi.conf"
+
 			# APT packages
 			# - netavark: Network backend. Installed explicitly, as otherwise the legacy CNI plugins (containernetworking-plugins) may be used: On Bookworm, podman does not depend on any network stack, on Trixie+ any provider of container-network-stack satisfies the dependency.
 			# - Bookworm: netavark requires iptables, but does neither depend on nor recommend it.
@@ -10531,15 +10545,6 @@ _EOF_
 					G_EXEC eval 'echo -e '\''[storage]\ndriver = "overlay"\nrunroot = "/run/containers/storage"\ngraphroot = "/mnt/dietpi_userdata/podman-data"'\'' > /etc/containers/storage.conf'
 				fi
 			fi
-
-			# Config
-			# - Log containers and events to systemd-journald (journalctl), like Docker
-			# - Let aardvark-dns listen on port 54 instead of 53, to not conflict with DNS servers on the host, like Pi-hole, AdGuard Home or Unbound, and with containers which publish port 53. netavark redirects DNS queries from containers to this port.
-			# - Without D-Bus, use the cgroupfs cgroup manager, as the default systemd cgroup manager fails to start containers: "crun: cannot open sd-bus". Containers created with either cgroup manager keep working when D-Bus is installed later.
-			local cgroup_manager=
-			systemctl -q is-active dbus dbus-broker || cgroup_manager='\ncgroup_manager = "cgroupfs"'
-			G_EXEC mkdir -p /etc/containers/containers.conf.d
-			G_EXEC eval "echo -e '[containers]\nlog_driver = \"journald\"\n\n[network]\ndns_bind_port = 54\n\n[engine]\nevents_logger = \"journald\"$cgroup_manager' > /etc/containers/containers.conf.d/97-dietpi.conf"
 
 			Enable_memory_cgroup
 			(( $G_DISTRO < 8 )) && Configure_iptables
@@ -14800,6 +14805,8 @@ _EOF_
 			[[ -d '/etc/containers/storage.conf.d' ]] && G_EXEC rmdir -p --ignore-fail-on-non-empty /etc/containers/storage.conf.d
 			[[ -f '/etc/containers/storage.conf' ]] && G_EXEC rm /etc/containers/storage.conf
 			[[ -d '/etc/containers' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /etc/containers
+			# netavark-firewalld-reload.service mask
+			G_EXEC rm -f /etc/systemd/system/netavark-firewalld-reload.service
 			# Docker drop-in for Podman FORWARD rules
 			if [[ -f '/etc/systemd/system/docker.service.d/dietpi-podman.conf' ]]
 			then

@@ -589,6 +589,13 @@ _EOF_'
 	G_EXEC eval 'echo '\''include <abstractions/base>'\'' > /var/lib/snapd/apparmor/snap-confine.internal/net'
 fi
 
+# Podman in QEMU-emulated container: QEMU does not implement set_robust_list, hence use file locks to allow "podman info" test.
+if (( $emulation && ${aINSTALL[podman]:-0} ))
+then
+	G_EXEC mkdir -p rootfs/etc/containers/containers.conf.d
+	G_EXEC eval 'echo -e '\''[engine]\nlock_type = "file"'\'' > rootfs/etc/containers/containers.conf.d/99-qemu-container.conf'
+fi
+
 # Check for service status, ports and commands
 # - Start all services
 # shellcheck disable=SC2016
