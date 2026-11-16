@@ -229,7 +229,7 @@ Process_Software()
 			esac;;
 			'pihole') aSERVICES[$i]='pihole-FTL' aUDP[$i]='53';;
 			'plex') aSERVICES[$i]='plexmediaserver' aTCP[$i]='32400';;
-			'podman') aCOMMANDS[$i]='podman -v';;
+			'podman') aCOMMANDS[$i]='podman info';;
 			'portainer') aTCP[$i]='9002 9442' SYSCALLS+=' add_key keyctl bpf';;
 			'postgresql') aSERVICES[$i]='postgresql';;
 			'proftpd') aSERVICES[$i]='proftpd' aTCP[$i]='21';;
