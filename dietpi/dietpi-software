@@ -1334,6 +1334,12 @@ Names are accepted as well, e.g. "Node-RED". Legacy numeric IDs are still suppor
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/system_stats/#docker-compose'
 		aSOFTWARE_DEPS[$software_id]='docker'
 		#------------------
+		software_id='podman'
+		aSOFTWARE_NAME[$software_id]='Podman'
+		aSOFTWARE_DESC[$software_id]='Daemonless container engine with Docker-compatible CLI and API'
+		aSOFTWARE_CATX[$software_id]=8
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/system_stats/#podman'
+		#------------------
 		software_id='k3s'
 		aSOFTWARE_ID_LEGACY[193]=$software_id
 		aSOFTWARE_NAME[$software_id]='K3s'
@@ -2770,6 +2776,20 @@ _EOF_
 			iptables-nft -L &> /dev/null || alt='legacy'
 			G_EXEC update-alternatives --set iptables "/usr/sbin/iptables-$alt"
 			G_EXEC update-alternatives --set ip6tables "/usr/sbin/ip6tables-$alt"
+		}
+
+		# Allow Podman container traffic and published ports through the iptables FORWARD chain, where Docker sets the policy to DROP: https://github.com/MichaIng/DietPi/pull/8480
+		# - Appended to FORWARD, as DOCKER-USER may not exist yet when ExecStartPost runs.
+		# - podman+ matches all Podman network bridges (podman0, podman1, ...), also before they exist.
+		# - RELATED,ESTABLISHED for replies, DNAT for connections to published ports. Direct access to container IPs stays blocked.
+		# - The leading "-" prevents a failure from failing docker.service.
+		Configure_podman_docker()
+		{
+			local rules='iptables -C FORWARD -i podman+ -j ACCEPT 2> /dev/null || iptables -A FORWARD -i podman+ -j ACCEPT; iptables -C FORWARD -o podman+ -m conntrack --ctstate RELATED,ESTABLISHED,DNAT -j ACCEPT 2> /dev/null || iptables -A FORWARD -o podman+ -m conntrack --ctstate RELATED,ESTABLISHED,DNAT -j ACCEPT'
+			G_EXEC mkdir -p /etc/systemd/system/docker.service.d
+			G_EXEC eval "echo -e '[Service]\nExecStartPost=-/bin/dash -c '\''$rules'\' > /etc/systemd/system/docker.service.d/dietpi-podman.conf"
+			# Apply now if Docker runs already, to not require a Docker restart
+			systemctl -q is-active docker && G_EXEC_NOHALT=1 G_EXEC eval "$rules"
 		}
 
 		Enable_memory_cgroup()
@@ -10467,6 +10487,9 @@ _EOF_
 
 			Enable_memory_cgroup
 			Configure_iptables
+
+			# Allow Podman container traffic through the FORWARD policy DROP
+			(( ${aSOFTWARE_INSTALL_STATE[podman]} == 2 )) && Configure_podman_docker
 		fi
 
 		if To_Install dockercompose
@@ -10478,6 +10501,56 @@ _EOF_
 			else
 				G_AGI docker-compose-plugin
 			fi
+		fi
+
+		if To_Install podman
+		then
+			# Config: Run first to prevent errors during package postinst already
+			# - Log containers and events to systemd-journald (journalctl), like Docker
+			# - Let aardvark-dns listen on port 54 instead of 53, to not conflict with DNS servers on the host, like Pi-hole, AdGuard Home or Unbound, and with containers which publish port 53. netavark redirects DNS queries from containers to this port.
+			# - Without D-Bus, use the cgroupfs cgroup manager, as the default systemd cgroup manager fails to start containers: "crun: cannot open sd-bus". Containers created with either cgroup manager keep working when D-Bus is installed later.
+			# - Also, without D-Bus netavark-firewalld-reload.service (Trixie+) is doomed to fail. We do not use firewalld, and it cannot work without D-Bus either, so it can be safely disabled.
+			local cgroup_manager=
+			if ! systemctl -q is-active dbus dbus-broker
+			then
+				cgroup_manager='\ncgroup_manager = "cgroupfs"'
+				G_EXEC systemctl mask --now netavark-firewalld-reload
+			fi
+			G_EXEC mkdir -p /etc/containers/containers.conf.d
+			G_EXEC eval "echo -e '[containers]\nlog_driver = \"journald\"\n\n[network]\ndns_bind_port = 54\n\n[engine]\nevents_logger = \"journald\"$cgroup_manager' > /etc/containers/containers.conf.d/97-dietpi.conf"
+
+			# APT packages
+			# - netavark: Network backend. Installed explicitly, as otherwise the legacy CNI plugins (containernetworking-plugins) may be used: On Bookworm, podman does not depend on any network stack, on Trixie+ any provider of container-network-stack satisfies the dependency.
+			# - Bookworm: netavark requires iptables, but does neither depend on nor recommend it.
+			# - Trixie+: netavark manages netfilter via nftables by default, which it only recommends.
+			# - aardvark-dns: DNS server for containers in additional networks. netavark starts it on demand only, so it does not run with the default "podman" network, which has DNS disabled. Without it, containers in additional networks cannot resolve any names.
+			local packages=('podman' 'netavark' 'aardvark-dns')
+			# shellcheck disable=SC2015
+			(( $G_DISTRO < 8 )) && packages+=('iptables') || packages+=('nftables')
+			G_AGI "${packages[@]}"
+
+			# Storage: Move images and containers to dietpi_userdata, like Docker
+			G_EXEC mkdir -p /mnt/dietpi_userdata/podman-data
+			# - Podman v6+ supports storage.conf.d drop-ins. Older versions read only the first storage.conf found, so to keep the defaults of the optional containers-storage package, copy them to /etc first. Without it, driver and runroot need to be set as well: Podman v4.3 and v5.4 fail with "runroot must be set", and warn if no driver is set.
+			if dpkg --compare-versions "$(dpkg-query -Wf '${Version}' podman)" ge 6
+			then
+				G_EXEC mkdir -p /etc/containers/storage.conf.d
+				G_EXEC eval 'echo -e '\''[storage]\ngraphroot = "/mnt/dietpi_userdata/podman-data"'\'' > /etc/containers/storage.conf.d/97-dietpi.conf'
+			else
+				[[ ! -f '/etc/containers/storage.conf' && -f '/usr/share/containers/storage.conf' ]] && G_EXEC cp -a /usr/share/containers/storage.conf /etc/containers/storage.conf
+				if [[ -f '/etc/containers/storage.conf' ]]
+				then
+					GCI_PRESERVE=1 G_CONFIG_INJECT 'graphroot[[:blank:]]*=' 'graphroot = "/mnt/dietpi_userdata/podman-data"' /etc/containers/storage.conf '^\[storage\]'
+				else
+					G_EXEC eval 'echo -e '\''[storage]\ndriver = "overlay"\nrunroot = "/run/containers/storage"\ngraphroot = "/mnt/dietpi_userdata/podman-data"'\'' > /etc/containers/storage.conf'
+				fi
+			fi
+
+			Enable_memory_cgroup
+			(( $G_DISTRO < 8 )) && Configure_iptables
+
+			# Docker sets the iptables FORWARD policy to DROP, which blocks Podman container traffic and published ports
+			(( ${aSOFTWARE_INSTALL_STATE[docker]} > 0 )) && Configure_podman_docker
 		fi
 
 		if To_Install fuguhub bdd
@@ -14710,6 +14783,35 @@ _EOF_
 				local image=$(docker image ls -aqf 'reference=portainer/portainer' -f 'reference=portainer/portainer-ce' -f 'reference=portainer/portainer-ee')
 				[[ $image ]] && G_EXEC docker image rm "$image"
 				[[ $(docker volume ls -qf 'name=^portainer_data$') ]] && G_EXEC docker volume rm 'portainer_data'
+			fi
+		fi
+
+		if To_Uninstall podman
+		then
+			# Remove all containers, images, volumes and networks while podman is still installed
+			command -v podman > /dev/null && G_EXEC_NOHALT=1 G_EXEC podman system reset -f
+
+			# Packages: iptables and nftables are kept, as other software may use them
+			G_AGP podman netavark aardvark-dns
+
+			# DietPi data dir
+			[[ -d '/mnt/dietpi_userdata/podman-data' ]] && G_EXEC rm -R /mnt/dietpi_userdata/podman-data
+			# Default data dir
+			[[ -d '/var/lib/containers' ]] && G_EXEC rm -R /var/lib/containers
+			# Configs
+			[[ -f '/etc/containers/containers.conf.d/97-dietpi.conf' ]] && G_EXEC rm /etc/containers/containers.conf.d/97-dietpi.conf
+			[[ -d '/etc/containers/containers.conf.d' ]] && G_EXEC rmdir -p --ignore-fail-on-non-empty /etc/containers/containers.conf.d
+			[[ -f '/etc/containers/storage.conf.d/97-dietpi.conf' ]] && G_EXEC rm /etc/containers/storage.conf.d/97-dietpi.conf
+			[[ -d '/etc/containers/storage.conf.d' ]] && G_EXEC rmdir -p --ignore-fail-on-non-empty /etc/containers/storage.conf.d
+			[[ -f '/etc/containers/storage.conf' ]] && G_EXEC rm /etc/containers/storage.conf
+			[[ -d '/etc/containers' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /etc/containers
+			# netavark-firewalld-reload.service mask
+			G_EXEC rm -f /etc/systemd/system/netavark-firewalld-reload.service
+			# Docker drop-in for Podman FORWARD rules
+			if [[ -f '/etc/systemd/system/docker.service.d/dietpi-podman.conf' ]]
+			then
+				G_EXEC rm /etc/systemd/system/docker.service.d/dietpi-podman.conf
+				G_EXEC rmdir --ignore-fail-on-non-empty /etc/systemd/system/docker.service.d
 			fi
 		fi
 

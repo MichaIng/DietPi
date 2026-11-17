@@ -229,6 +229,7 @@ Process_Software()
 			esac;;
 			'pihole') aSERVICES[$i]='pihole-FTL' aUDP[$i]='53';;
 			'plex') aSERVICES[$i]='plexmediaserver' aTCP[$i]='32400';;
+			'podman') aCOMMANDS[$i]='podman info';;
 			'portainer') aTCP[$i]='9002 9442' SYSCALLS+=' add_key keyctl bpf';;
 			'postgresql') aSERVICES[$i]='postgresql';;
 			'proftpd') aSERVICES[$i]='proftpd' aTCP[$i]='21';;
@@ -586,6 +587,13 @@ _EOF_'
 	# apparmor="DENIED" operation="sendmsg" class="net" profile="/snap/snapd/24792/usr/lib/snapd/snap-confine" pid=218663 comm="snap-confine" family="unix" sock_type="stream" protocol=0 requested_mask="send" denied_mask="send"
 	G_EXEC mkdir -p /var/lib/snapd/apparmor/snap-confine.internal
 	G_EXEC eval 'echo '\''include <abstractions/base>'\'' > /var/lib/snapd/apparmor/snap-confine.internal/net'
+fi
+
+# Podman in QEMU-emulated container: QEMU does not implement set_robust_list, hence use file locks to allow "podman info" test.
+if (( $emulation && ${aINSTALL[podman]:-0} ))
+then
+	G_EXEC mkdir -p rootfs/etc/containers/containers.conf.d
+	G_EXEC eval 'echo -e '\''[engine]\nlock_type = "file"'\'' > rootfs/etc/containers/containers.conf.d/99-qemu-container.conf'
 fi
 
 # Check for service status, ports and commands
