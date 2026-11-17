@@ -97,7 +97,7 @@ emulation=0
 # - PostgreSQL and dependants (Synapse): https://gitlab.com/qemu-project/qemu/-/issues/3068
 # - WireGuard: "Unable to modify/access interface: Protocol not supported"
 # - Docker containers (Roon Extension Manager and Portainer): Docker daemon fails with "iptables: Failed to initialize nft: Protocol not supported" and similar error with iptables-legacy
-[[ $arch == 11 && $emulation == 1 && $SOFTWARE =~ (^| )(roonextensionmanager|synapse|wireguard|portainer|postgresql)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager, PostgreSQL, WireGuard, Portainer, and Synapse from test installs as they fail in emulated RISC-V containers'; SOFTWARE=$(sed -E 's/(^| )(roonextensionmanager|synapse|wireguard|portainer|postgresql)( |$)/\1\3/g' <<< "$SOFTWARE"); }
+[[ $arch == 11 && $emulation == 1 && $SOFTWARE =~ (^| )(roonextmanager|synapse|wireguard|portainer|postgresql)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager, PostgreSQL, WireGuard, Portainer, and Synapse from test installs as they fail in emulated RISC-V containers'; SOFTWARE=$(sed -E 's/(^| )(roonextmanager|synapse|wireguard|portainer|postgresql)( |$)/\1\3/g' <<< "$SOFTWARE"); }
 
 ##########################################
 # Create service and port lists
@@ -234,7 +234,7 @@ Process_Software()
 			'postgresql') aSERVICES[$i]='postgresql';;
 			'proftpd') aSERVICES[$i]='proftpd' aTCP[$i]='21';;
 			'prometheus') aSERVICES[$i]='prometheus' aTCP[$i]='9090' aCOMMANDS[$i]='curl -sSf '\''http://127.0.0.1:9090/api/v1/query?query=up'\'' | grep '\''"status":"success"'\';;
-			'prometheusnodeexporter') aSERVICES[$i]='node_exporter' aTCP[$i]='9100';;
+			'prometheusexporter') aSERVICES[$i]='node_exporter' aTCP[$i]='9100';;
 			'prowlarr') aSERVICES[$i]='prowlarr' aTCP[$i]='9696';;
 			'python3') aCOMMANDS[$i]='python3 -V';;
 			'qbittorrent') aSERVICES[$i]='qbittorrent' aTCP[$i]='1340 6881';;
@@ -246,7 +246,7 @@ Process_Software()
 			'remoteit') aSERVICES[$i]='schannel' aUDP[$i]='5980';; # remoteit@.service service listens on random high UDP port
 			'restic') aCOMMANDS[$i]='restic version';;
 			'roonbridge') aSERVICES[$i]='roonbridge' aUDP[$i]='9003';;
-			'roonextensionmanager') aSERVICES[$i]='roon-extension-manager' SYSCALLS+=' add_key keyctl bpf';;
+			'roonextmanager') aSERVICES[$i]='roon-extension-manager' SYSCALLS+=' add_key keyctl bpf';;
 			'roonserver') aSERVICES[$i]='roonserver';; # Listens on a variety of different port ranges
 			'rpimonitor') aSERVICES[$i]='rpimonitor' aTCP[$i]='8888';;
 			'rsyslog') aSERVICES[$i]='rsyslog';;
@@ -334,7 +334,7 @@ do
 		'gogs'|'gitea'|'forgejo') Process_Software opensshclient git mariadb;;
 		'torhotspot') Process_Software wifihotspot;;
 		'synapse') Process_Software postgresql;;
-		'roonextensionmanager'|'dockercompose'|'portainer') Process_Software docker;;
+		'roonextmanager'|'dockercompose'|'portainer') Process_Software docker;;
 		'adsbfeeder') Process_Software git dockercompose docker;;
 		'pispc') Process_Software wiringpi;;
 		'bazarr') (( $arch == 10 || $arch == 3 )) || Process_Software unrar;;
