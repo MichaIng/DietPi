@@ -9,25 +9,68 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-15, macos-15-intel, macos-26, macos-26-intel, xcode-27]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
+        arch: [x86_64, ARMv8]
+        boot: [BIOS, UEFI]
+        utm: ['4', '5']
+        runner: [macos-15, macos-26, xcode-27]
+        exclude:
+          - { arch: ARMv8, boot: BIOS }        # no BIOS on ARM
+          - { runner: xcode-27, arch: x86_64 } # no Intel runner for macOS 27
+    runs-on: ${{ matrix.runner }}${{ matrix.arch == 'x86_64' && '-intel' || '' }}
+    env:
+      IMAGE: DietPi_UTM-${{ matrix.boot == 'UEFI' && 'UEFI-' || '' }}${{ matrix.arch }}-Trixie
+    name: ${{ matrix.arch }}-${{ matrix.boot }} via UTM ${{ matrix.utm }} on ${{ matrix.runner }}
+    timeout-minutes: 5
     steps:
-      - name: Download image
+      - name: Download ${{ env.IMAGE }}
         run: |
-          case '${{ runner.arch }}' in
-            'ARM64') arch='UEFI-ARMv8';;
-            'X64') arch='x86_64';;
-          esac
-          curl -sSfLO "https://dietpi.com/downloads/images/testing/DietPi_UTM-$arch-Trixie.tar.xz"
-          tar xf DietPi_UTM-$arch-Trixie.tar.xz
-      - run: brew install --cask utm
-      - name: Import
+          curl -sSfLO "https://dietpi.com/downloads/images/testing/$IMAGE.tar.xz" || curl -sSfLO "https://dietpi.com/downloads/images/$IMAGE.tar.xz"
+          tar xf "$IMAGE.tar.xz"
+      - run: plutil -lint "$IMAGE.utm/config.plist"
+      - name: Install latest UTM v${{ matrix.utm }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          plutil -lint "DietPi_UTM-$arch-Trixie.utm/config.plist" # syntax check first
-          read -r uuid < <(/usr/libexec/PlistBuddy -c 'Print :Information:UUID' "DietPi_UTM-$arch-Trixie.utm/config.plist")
-          open -a UTM "DietPi_UTM-$arch-Trixie.utm"
-          sleep 15
-          utmctl list | tee list.txt
-          grep -i "$uuid" list.txt
-          utmctl status "$uuid" # expect "stopped"
+          tag=$(gh release list -R utmapp/UTM --exclude-pre-releases --limit 100 --json tagName --jq '[.[].tagName | select(startswith("v${{ matrix.utm }}."))] | first')
+          echo "UTM release: $tag"
+          curl -sSfLO "https://github.com/utmapp/UTM/releases/download/$tag/UTM.dmg"
+          hdiutil attach -nobrowse -readonly -mountpoint /Volumes/UTM UTM.dmg
+          cp -R /Volumes/UTM/UTM.app /Applications/
+          echo /Applications/UTM.app/Contents/MacOS >> "$GITHUB_PATH"
+          defaults read /Applications/UTM.app/Contents/Info.plist CFBundleShortVersionString
+      - name: Permit CLI access via TCC database
+        run: |
+          csrutil status
+          agent=$(ps -axo comm= | grep 'hosted-compute-agent$' | head -1)
+          echo "Agent: $agent"
+          db=$(lsof -a -c tccd -u runner -Fn | sed -n 's|^n\(.*/com\.apple\.TCC/TCC\.db\)$|\1|p' | head -1)
+          db=${db:-"$HOME/Library/Application Support/com.apple.TCC/TCC.db"}
+          echo "TCC DB: $db"
+          echo 'Access table scheme:'
+          echo '-----------------------------------------'
+          sqlite3 "$db" '.schema access'
+          echo '-----------------------------------------'
+          sqlite3 "$db" "
+            INSERT OR REPLACE INTO access
+              (service, client, client_type, auth_value, auth_reason, auth_version, indirect_object_identifier_type, indirect_object_identifier, flags, last_modified)
+            VALUES
+              ('kTCCServiceAppleEvents', '$agent', 1, 2, 3, 1, 0, 'com.utmapp.UTM', 0, CAST(strftime('%s','now') AS INTEGER));"
+      - name: Launch UTM
+        timeout-minutes: 1
+        run: |
+          open -a /Applications/UTM.app "$IMAGE.utm"
+          read -r UUID < <(/usr/libexec/PlistBuddy -c 'Print :Information:UUID' "$IMAGE.utm/config.plist")
+          for i in {1..30}; do
+            utmctl status "$UUID" 2> /dev/null && break
+            sleep 1
+          done
+          utmctl list
+          log show --last 1m --predicate 'process == "UTM"' | grep -iE 'error|decod|invalid' | tail -30
+          [[ "$(utmctl status "$UUID")" == 'stopped' ]]
+      - run: screencapture -x 'screenshot-${{ matrix.arch }}-${{ matrix.boot }}-UTMv${{ matrix.utm }}-${{ matrix.runner }}.png'
+        if: always()
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          path: screenshot-${{ matrix.arch }}-${{ matrix.boot }}-UTMv${{ matrix.utm }}-${{ matrix.runner }}.png
+          archive: false
