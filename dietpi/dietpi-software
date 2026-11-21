@@ -1447,7 +1447,7 @@ Names are accepted as well, e.g. "Node-RED". Legacy numeric IDs are still suppor
 		aSOFTWARE_CATX[$software_id]=10
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/hardware_projects/#wiringpi'
 		# RPi, Odroids and Orange Pi only
-		(( $G_HW_MODEL > 19 )) && [[ ! $G_HW_MODEL =~ ^(80|82|83|87|88|89|91|93|94|95|96|97|98|99|105|106|107|108)$ ]] && aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$G_HW_MODEL]=0
+		(( $G_HW_MODEL > 19 )) && [[ ! $G_HW_MODEL =~ ^(80|82|83|87|88|89|91|93|94|95|96|97|98|99|105|106|107|108|111)$ ]] && aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$G_HW_MODEL]=0
 		#------------------
 		software_id='webiopi'
 		aSOFTWARE_ID_LEGACY[71]=$software_id
@@ -4300,18 +4300,18 @@ sudo sysctl -p /etc/sysctl.d/98-dietpi-redis.conf'
 				# Set static PATH, not passed by Lighttpd and Nginx by default but required by some web applications: https://github.com/MichaIng/DietPi/issues/5161#issuecomment-1013381362
 				G_CONFIG_INJECT 'env\[PATH\][[:blank:]=]' 'env[PATH] = /usr/local/bin:/usr/bin' "/etc/php/$PHP_VERSION/fpm/pool.d/www.conf"
 
-				# Force service to start after database servers
+				# Force service to start after database servers and add PrivateTmp=1 as hardening
 				G_EXEC mkdir -p "/etc/systemd/system/php$PHP_VERSION-fpm.service.d"
-				G_EXEC eval "echo -e '[Unit]\nAfter=redis-server.service mariadb.service postgresql.service' > '/etc/systemd/system/php$PHP_VERSION-fpm.service.d/dietpi.conf'"
+				G_EXEC eval "echo -e '[Unit]\nAfter=redis-server.service mariadb.service postgresql.service\n\n[Service]\nPrivateTmp=1' > '/etc/systemd/system/php$PHP_VERSION-fpm.service.d/dietpi.conf'"
 			fi
 
 			# We create our own PHP mod to add DietPi specific configs.
-			target_php_ini="/etc/php/$PHP_VERSION/mods-available/dietpi.ini"
-			echo -e '; DietPi PHP settings\n; priority=97' > "$target_php_ini"
+			local target_php_ini="/etc/php/$PHP_VERSION/mods-available/dietpi.ini"
+			G_EXEC eval "echo -e '; DietPi PHP settings\n; priority=97' > '$target_php_ini'"
 
-			# Session files need to be outside of /tmp and /var/tmp due to PrivateTmp=true, else phpsessionclean.service cannot clean sessions
+			# Move session dir to tmpfs, but outside of /tmp due to PrivateTmp=true, else phpsessionclean.service cannot clean it
 			G_EXEC mkdir -pm 1733 /run/php_sessions
-			echo -e '# Pre-create PHP sessions dir\nd /run/php_sessions 1733' > /etc/tmpfiles.d/dietpi-php_sessions.conf
+			G_EXEC eval 'echo -e '\''# Pre-create PHP sessions dir\nd /run/php_sessions 1733'\'' > /etc/tmpfiles.d/dietpi-php_sessions.conf'
 			G_CONFIG_INJECT 'session.save_path[[:blank:]=]' 'session.save_path="/run/php_sessions"' "$target_php_ini"
 
 			# File uploads: https://github.com/MichaIng/DietPi/issues/546
@@ -4416,9 +4416,8 @@ sudo sysctl -p /etc/sysctl.d/98-dietpi-redis.conf'
 			fi
 
 			# Pre-create TempDir: https://docs.phpmyadmin.net/en/latest/config.html#cfg_TempDir
-			G_EXEC mkdir -p /var/www/phpmyadmin/tmp
-			G_EXEC chown www-data:root /var/www/phpmyadmin/tmp
-			G_EXEC chmod 700 /var/www/phpmyadmin/tmp
+			G_EXEC mkdir -pm 0700 /var/www/phpmyadmin/tmp
+			G_EXEC chown www-data:0 /var/www/phpmyadmin/tmp
 		fi
 
 		if To_Install synapse synapse # Synapse: https://element-hq.github.io/synapse/latest/setup/installation.html#installing-as-a-python-module-from-pypi
@@ -6711,6 +6710,7 @@ See the manual below for instructions on how to do this.
 					106) board='orangepi5b';;
 					107) board='orangepi4pro';;
 					108) board='orangepizero3w';;
+					111) board='orangepizero4';;
 					*) G_DIETPI-NOTIFY 1 "Invalid hardware model \"$G_HW_MODEL_NAME\" (ID \"$G_HW_MODEL\"). Aborting ..."; exit 1;;
 				esac
 				>> /etc/orangepi-release
@@ -8155,10 +8155,10 @@ _EOF_
 
 			# Enable iptables NAT rules
 			iptables -t nat -A POSTROUTING -s 192.168.42.0/24 -o "$eth_iface" -j MASQUERADE
-			iptables -A FORWARD -i "$eth_iface" -o "$wifi_iface" -m state --state RELATED,ESTABLISHED -j ACCEPT
+			iptables -A FORWARD -i "$eth_iface" -o "$wifi_iface" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 			iptables -A FORWARD -i "$wifi_iface" -o "$eth_iface" -j ACCEPT
 			ip6tables -t nat -A POSTROUTING -o "$eth_iface" -j MASQUERADE
-			ip6tables -A FORWARD -i "$eth_iface" -o "$wifi_iface" -m state --state RELATED,ESTABLISHED -j ACCEPT
+			ip6tables -A FORWARD -i "$eth_iface" -o "$wifi_iface" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 			ip6tables -A FORWARD -i "$wifi_iface" -o "$eth_iface" -j ACCEPT
 
 			# Save iptables rules, applied via /etc/network/interfaces.d/<iface>.conf
@@ -10457,10 +10457,6 @@ _EOF_
 			G_AGI "${packages[@]}"
 			G_EXEC systemctl unmask docker # --no-reload breaks docker.socket start the same way it would break docker.service start: https://github.com/MichaIng/DietPi/issues/8108
 			G_EXEC systemctl start docker.socket
-
-			# Change Docker service type to "simple": https://github.com/MichaIng/DietPi/issues/2238#issuecomment-439474766
-			G_EXEC mkdir -p /lib/systemd/system/docker.service.d
-			G_EXEC eval "echo -e '[Service]\nType=simple' > /lib/systemd/system/docker.service.d/dietpi-simple.conf"
 
 			# Config: https://docs.docker.com/engine/reference/commandline/dockerd/#daemon-configuration-file
 			# - Move Docker containers to dietpi_userdata
@@ -13549,7 +13545,6 @@ _EOF_
 			G_AGP 'php*-*' 'libapache2-mod-php*'
 			G_EXEC rm -Rf /{etc,var/lib}/php /var/log/php*-fpm.log
 			[[ -f '/etc/tmpfiles.d/dietpi-php_sessions.conf' ]] && G_EXEC rm /etc/tmpfiles.d/dietpi-php_sessions.conf
-			[[ -d '/var/tmp/php_upload_tmp' ]] && G_EXEC rm -R /var/tmp/php_upload_tmp # Pre-v6.32
 		fi
 
 		if To_Uninstall phpmyadmin
