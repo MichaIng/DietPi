@@ -169,7 +169,6 @@ Process_Software()
 			'icecast') aSERVICES[$i]='icecast2' aTCP[$i]='8000' aCOMMANDS[$i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start on GitHub runner as it requires a hardware capture device, and those runners do not provide the dummy audio kernel module
 			'immich') aSERVICES[$i]='immich' aTCP[$i]='2283';;
 			'immichml') aSERVICES[$i]='immich-ml' aTCP[$i]='3003';;
-			'paperlessngx') aSERVICES[$i]='paperless-webserver paperless-consumer paperless-task-queue paperless-scheduler' aTCP[$i]='8010';;
 			'influxdb') aSERVICES[$i]='influxdb' aTCP[$i]='8086 8088';;
 			'jackett') aSERVICES[$i]='jackett' aTCP[$i]='9117';;
 			'javajdk') aCOMMANDS[$i]='javac -version';;
@@ -222,6 +221,7 @@ Process_Software()
 			'opensshserver') aSERVICES[$i]='ssh' aTCP[$i]='22';;
 			'opentyrian') aCOMMANDS[$i]='/usr/games/opentyrian/opentyrian -h';;
 			'openvpn') aCOMMANDS[$i]='openvpn --version';; # aSERVICES[$i]='openvpn' aUDP[$i]='1194' GitHub Actions runners do not support the TUN module
+			'paperlessngx') aSERVICES[$i]='paperless-webserver paperless-consumer paperless-task-queue paperless-scheduler' aTCP[$i]='8010';;
 			'papermc') aSERVICES[$i]='papermc' aTCP[$i]='25565 25575' aDELAY[$i]=60; (( $emulation )) && aDELAY[$i]=900;;
 			'php') case $DISTRO in
 				'bookworm') aSERVICES[$i]='php8.2-fpm';;
