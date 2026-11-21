@@ -500,7 +500,7 @@ then
 		[[ -f $i ]] || continue
 		grep -Eq '^(Import|Load)Credential=' "$i" || continue
 		G_EXEC mkdir "${i/lib/etc}.d"
-		G_EXEC eval "echo -e '[Service]\nImportCredential=\nLoadCredential=' > '${i/lib/etc}.d/dietpi-no-credentials.conf'"
+		G_EXEC eval "echo -e '[Service]\nImportCredential=\nLoadCredential=' > '${i/lib/etc}.d/zz-dietpi-no-credentials.conf'"
 	done
 
 	# PrivateUsers causes "Failed to set up user namespacing"
@@ -509,7 +509,7 @@ then
 	for i in ${aSERVICES[@]}
 	do
 		G_EXEC mkdir "rootfs/etc/systemd/system/$i.service.d"
-		G_EXEC eval "echo -e '[Service]\nPrivateUsers=0\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths=\nProtectProc=default\nProcSubset=all\nNoExecPaths=\nExecPaths=\nInaccessiblePaths=' > 'rootfs/etc/systemd/system/$i.service.d/dietpi-container.conf'"
+		G_EXEC eval "echo -e '[Service]\nPrivateUsers=0\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths=\nProtectProc=default\nProcSubset=all\nNoExecPaths=\nExecPaths=\nInaccessiblePaths=' > 'rootfs/etc/systemd/system/$i.service.d/zz-dietpi-no-namespacing.conf'"
 	done
 
 	# Failing 32-bit ARM Rust builds on ext4 with 64-bit host: https://github.com/rust-lang/cargo/issues/9545

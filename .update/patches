@@ -2956,6 +2956,40 @@ _EOF_
 		G_EXEC sed --follow-symlinks -i 's/prometheusnodeexporter/prometheusexporter/' /boot/dietpi/.installed
 		G_EXEC sed --follow-symlinks -i 's/roonextensionmanager/roonextmanager/' /boot/dietpi/.installed
 
+		# Harden PHP-FPM
+		for f in /etc/systemd/system/php*-fpm.service.d/dietpi.conf
+		do
+			[[ -f $f ]] || continue
+			G_DIETPI-NOTIFY 2 'Hardinng PHP-FPM service to use a private /tmp dir'
+			G_EXEC eval "echo -e '[Unit]\nAfter=redis-server.service mariadb.service postgresql.service\n\n[Service]\nPrivateTmp=1' > '$f'"
+		done
+
+		if [[ -f '/lib/systemd/system/docker.service.d/dietpi-simple.conf' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Reverting Docker service to default Type=notify'
+			G_EXEC rm /lib/systemd/system/docker.service.d/dietpi-simple.conf
+			G_EXEC rmdir --ignore-fail-on-non-empty /lib/systemd/system/docker.service.d
+		fi
+
+		# WireGuard: accept forwarded replies to VPN clients, required if the FORWARD policy is DROP, which is set by Docker: https://github.com/MichaIng/DietPi/issues/8500
+		# - Only if the server config contains our default forward rule, which excludes client configs, and if no PreUp/PostUp hook handles forwarding rules otherwise already, via iptables, nftables or anything else
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[wireguard\]=2' /boot/dietpi/.installed && [[ -f '/etc/wireguard/wg0.conf' ]] &&
+			grep -Eq '^[[:blank:]]*PostUp[[:blank:]]*=.*\<iptables -A FORWARD -i %i -j ACCEPT\>' /etc/wireguard/wg0.conf &&
+			! sed -En '/^[[:blank:]]*P(re|ost)Up[[:blank:]]*=/I{s/\<ip6?tables -A FORWARD -i %i -j ACCEPT\>//g;p}' /etc/wireguard/wg0.conf | grep -iq '\<forward\>'
+		then
+			G_DIETPI-NOTIFY 2 'Adding forward rules for replies to VPN clients to WireGuard server config /etc/wireguard/wg0.conf'
+			G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*PostUp[[:blank:]]*=/s/\<(ip6?tables) -A FORWARD -i %i -j ACCEPT\>/&; \1 -A FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT/g;/^[[:blank:]]*PostDown[[:blank:]]*=/s/\<(ip6?tables) -D FORWARD -i %i -j ACCEPT\>/&; \1 -D FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT/g' /etc/wireguard/wg0.conf
+			# Add them to the running server as well: a restart would interrupt VPN connections, possibly the one this update runs through, and the PostDown hooks would fail without them.
+			if [[ -e '/sys/class/net/wg0' ]]
+			then
+				for i in iptables ip6tables
+				do
+					grep -Eq "^[[:blank:]]*PostUp[[:blank:]]*=.*\<$i -A FORWARD -o %i -m conntrack " /etc/wireguard/wg0.conf || continue
+					"$i" -C FORWARD -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2> /dev/null || G_EXEC_NOHALT=1 G_EXEC "$i" -A FORWARD -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+				done
+			fi
+		fi
+
 		# Pi-hole v6 migration
 		# - /etc/pihole/pihole.toml indicates that Pi-hole has been upgraded to v6 already.
 		# - The /var/www/pihole symlink indicates that an instance installed via dietpi-software has not been migrated yet.
