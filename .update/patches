@@ -77,9 +77,6 @@ Patch_8_1()
 		[[ -f '/boot/overlays/dietpi-disable_vcsm.dtbo' ]] && G_EXEC rm /boot/overlays/dietpi-disable_vcsm.dtbo
 	fi
 
-	# Odroid C2 mainline image: Remove obsolete IRQ affinity: https://github.com/MichaIng/DietPi/issues/5235
-	[[ $G_HW_MODEL == 12 && -f '/var/lib/dietpi/postboot.d/c2_smp.sh' ]] && ! grep -q '^[[:blank:]]*63:.*dwc_otg' /proc/interrupts && G_EXEC rm /var/lib/dietpi/postboot.d/c2_smp.sh
-
 	# Fix Home Assistant restart: https://dietpi.com/phpbb/viewtopic.php?t=10025
 	[[ -f '/etc/systemd/system/home-assistant.service' ]] && G_CONFIG_INJECT 'RestartForceExitStatus=100' 'RestartForceExitStatus=100' /etc/systemd/system/home-assistant.service '\[Service\]'
 }
@@ -243,11 +240,6 @@ Patch_8_10()
 	# Inform about available software updates and do needed migrations
 	if [[ -f '/boot/dietpi/.installed' ]]
 	then
-		# Home Assistant
-		grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[157\]=2' /boot/dietpi/.installed && G_WHIP_MSG '[ INFO ] HACS integration for Home Assistant available
-\nThe Home Assistant Community Store (HACS) is now installed by default with Home Assistant. Add it via reinstall:
-# dietpi-software reinstall 157
-\nTo activate it, follow this guide: https://hacs.xyz/docs/use/configuration/basic/#to-set-up-the-hacs-integration'
 		# GMediaRender
 		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[163\]=2' /boot/dietpi/.installed
 		then
@@ -1247,12 +1239,6 @@ Patch_9_9()
 		then
 			# Recreate symlink deleted with package update: https://dietpi.com/forum/t/influxdb-not-working-after-update/21868
 			[[ -e '/var/lib/influxdb' ]] || G_EXEC ln -sf /mnt/dietpi_userdata/influxdb /var/lib/influxdb
-			# Migrate to now existing Bookworm suite
-			if [[ -f '/etc/apt/sources.list.d/influxdb.list' ]]
-			then
-				G_EXEC sed --follow-symlinks -i 's/bullseye/bookworm/g' /etc/apt/sources.list.d/influxdb.list
-				G_EXEC mv /etc/apt/sources.list.d/{,dietpi-}influxdb.list
-			fi
 		fi
 		# Mopidy: Migrate to now existing Bookworm suite
 		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[118\]=2' /boot/dietpi/.installed && [[ -f '/etc/apt/sources.list.d/mopidy.list' ]]
@@ -2656,60 +2642,6 @@ Patch_10_8()
 
 		[[ -f '/etc/fail2ban/fail2ban.d/97_dietpi.conf' ]] && G_CONFIG_INJECT 'logtarget[[:blank:]]' 'logtarget = SYSTEMD-JOURNAL' /etc/fail2ban/fail2ban.d/97_dietpi.conf
 
-		# Pi-hole v6 migration
-		# - /etc/pihole/pihole.toml indicates that Pi-hole has been upgraded to v6 already.
-		# - The /var/www/pihole symlink indicates that an instance installed via dietpi-software has not been migrated yet.
-		if [[ -f '/etc/pihole/pihole.toml' && -L '/var/www/pihole' ]] && grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(93|pihole)\]=2' /boot/dietpi/.installed
-		then
-			# Remove DietPi specific v5 files
-			# - Symlinks
-			G_EXEC rm /var/www/pihole
-			[[ -L '/var/www/admin' ]] && G_EXEC rm /var/www/admin
-			# - Webserver configs
-			[[ -d '/etc/apache2/sites-available' ]] && G_EXEC rm -f /etc/apache2/sites-{available,enabled}/dietpi-pihole*
-			[[ -d '/etc/lighttpd/conf-available' ]] && G_EXEC rm -f /etc/lighttpd/conf-{available,enabled}/99-dietpi-pihole*
-			[[ -d '/etc/nginx/sites-dietpi' ]] && G_EXEC rm -f /etc/nginx/sites-dietpi/dietpi-pihole*
-
-			# Remove www-data user from pihole group
-			getent group pihole | grep -Eq '(:|,)www-data(,|$)' && G_EXEC gpasswd -d www-data pihole
-
-			# Change web UI port to 8089 and 8489 (HTTPS) to avoid conflict with webservers and other web applications
-			G_EXEC pihole-FTL --config webserver.port 8089,8489s
-
-			# Inform user about differences to stock Pi-hole installation
-			G_WHIP_MSG "[ INFO ] Pi-hole network ports changed to 8089 and 8489
-\nTo align migrated Pi-hole v6 instances with fresh installs, and avoid possible conflicts with dedicated webservers, the network ports have been changed to 8089 and 8489 (HTTPS). Your Pi-hole instance will hence be available at:
-- http://$(G_GET_NET ip):8089/admin/
-- https://$(G_GET_NET ip):8489/admin/
-\nThis can be changed via web UI or following console command, e.g. for ports 80 and 443 (HTTPS):
-- sudo pihole-FTL --config webserver.port 80,443s"
-
-			# Offer to uninstall webserver and PHP if no dependant is installed
-			# - If only PHP or only a webserver is installed, one has been uninstalled already, and the other is assumed to be still needed for something else.
-			if grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(89|php)\]=2' /boot/dietpi/.installed && grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(83|apache|84|lighttpd|85|nginx)\]=2' /boot/dietpi/.installed
-			then
-				G_WHIP_CHECKLIST_ARRAY=()
-				# - webserver
-				if ! /boot/dietpi/dietpi-software list | grep -q '| =2 |.*+webserver'
-				then
-					grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(83|apache)\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(apache 'Apache webserver' off)
-					grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(84|lighttpd)\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(lighttpd 'Lighttpd webserver' off)
-					grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(85|nginx)\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(nginx 'Nginx webserver' off)
-				fi
-				# - PHP: Exclude webserver stacks which are meta selections only
-				/boot/dietpi/dietpi-software list | grep '| =2 |.*+PHP' | grep -vEq '^.\[32mID (lasp|lamp|lesp|lemp|llsp|llmp) ' || G_WHIP_CHECKLIST_ARRAY+=(php 'PHP server' off)
-				if (( ${#G_WHIP_CHECKLIST_ARRAY[@]} ))
-				then
-					G_WHIP_BUTTON_CANCEL_TEXT='Skip'
-					# shellcheck disable=SC2086
-					G_WHIP_CHECKLIST '[ INFO ] Possibly obsolete webserver and/or PHP installation detected
-\nYou recently updated Pi-hole to v6, which now does not require any webserver or PHP anymore.
-\nWe detected a webserver and/or PHP installation on your system, but no dependant among installed dietpi-software options.
-\nIf you are sure that you do not require the webserver and/or PHP anymore, you can select them for uninstall below. Use the space bar to (de)select the ones which shall be uninstalled:' && /boot/dietpi/dietpi-software uninstall $G_WHIP_RETURNED_VALUE
-				fi
-			fi
-		fi
-
 		# Migrate software IDs in install states file from numeric to named IDs
 		G_DIETPI-NOTIFY 2 'Migrating software IDs in /boot/dietpi/.installed to named IDs'
 		mawk '
@@ -2800,7 +2732,7 @@ FILENAME == "-" { name[$1] = $2; next }
 83 apache
 84 lighttpd
 85 nginx
-86 roonextensionmanager
+86 roonextmanager
 87 sqlite
 88 mariadb
 89 php
@@ -2813,7 +2745,7 @@ FILENAME == "-" { name[$1] = $2; next }
 96 sambaserver
 97 openvpn
 98 haproxy
-99 prometheusnodeexporter
+99 prometheusexporter
 100 pijuice
 101 logrotate
 102 rsyslog
@@ -2864,7 +2796,6 @@ FILENAME == "-" { name[$1] = $2; next }
 147 jackett
 148 mympd
 149 nzbget
-150 mono
 151 prowlarr
 152 avahidaemon
 153 octoprint
@@ -2917,7 +2848,6 @@ FILENAME == "-" { name[$1] = $2; next }
 200 dietpidashboard
 201 zerotier
 202 rclone
-203 readarr
 204 navidrome
 205 homer
 206 openhab
@@ -2939,6 +2869,180 @@ _EOF_
 		# Remove left legacy numeric index states, e.g. from removed software titles, or DietPi-RAMlog and Dropbear =0 states
 		G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[[0-9]*\]=/d' .installed
 		G_EXEC mv .installed /boot/dietpi/.installed
+	fi
+}
+
+Patch_10_9()
+{
+	# Odroid C1/C2 with mainline Linux
+	if [[ $G_HW_MODEL == 1[12] ]] && dpkg-query -l | grep -Eq '^ii[[:blank:]]*linux-image-(current|edge)-meson(64)?[[:blank:]:]'
+	then
+		G_DIETPI-NOTIFY 2 'Disabling possibly enabled dysfunctional legacy HiFi Shield 2/Plus modules/service'
+		# Odroid C2 USB SMP affinity tweak
+		[[ -f '/var/lib/dietpi/postboot.d/c2_smp.sh' ]] && G_EXEC rm /var/lib/dietpi/postboot.d/c2_smp.sh
+		# HiFi Shield 2 setup
+		if [[ -f '/etc/systemd/system/odroid-hifishield2.service' ]]
+		then
+			G_EXEC systemctl disable --now odroid-hifishield2
+			G_EXEC rm /etc/systemd/system/odroid-hifishield2.service
+		fi
+		[[ -d '/etc/systemd/system/odroid-hifishield2.service.d' ]] && G_EXEC rm -R /etc/systemd/system/odroid-hifishield2.service.d
+		# HiFi Shield Plus and 2 kernel modules
+		grep -Eq '^[[:blank:]]*(snd-soc-(odroid-dac|pcm51)|aml_i2c)' /etc/modules && G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*(snd-soc-(odroid-dac|pcm51)|aml_i2c)/d' /etc/modules
+
+	# ROCK 4
+	elif (( $G_HW_MODEL == 72 ))
+	then
+		G_DIETPI-NOTIFY 2 'Flashing U-Boot to solve potential boot issues with latest Linux'
+		G_EXEC_OUTPUT=1 G_EXEC /boot/dietpi/func/dietpi-set_hardware flash-u-boot-mmc
+	fi
+
+	# Pre-login banner: It has been migrated from a dietpi-postboot print to /etc/issue.d/dietpi-banner.issue, which agetty prints above the login prompt on all consoles.
+	# - dietpi-update updates it from now on, but this update runs with old dietpi-update code. And the target version is not saved yet at this stage, hence apply it from the update archive.
+	G_DIETPI-NOTIFY 2 'Creating pre-login banner /etc/issue.d/dietpi-banner.issue'
+	G_EXEC /boot/dietpi/func/dietpi-banner issue
+	[[ -f /tmp/DietPi-Update/DietPi-${G_GITBRANCH//\//-}/.update/version ]] && (
+		# shellcheck disable=SC1090
+		. "/tmp/DietPi-Update/DietPi-${G_GITBRANCH//\//-}/.update/version"
+		# shellcheck disable=SC2154
+		G_EXEC sed --follow-symlinks -i "s/DietPi v[0-9]*\.[0-9]*\.[0-9]*/DietPi v$G_REMOTE_VERSION_CORE.$G_REMOTE_VERSION_SUB.$G_REMOTE_VERSION_RC/" /etc/issue.d/dietpi-banner.issue
+	)
+
+	# dietpi-banner: decode "findmnt -r" encoded aDISK_SPACE_MOUNTS entries
+	[[ -f '/boot/dietpi/.dietpi-banner' ]] && (
+		G_EXEC cp /boot/dietpi/.dietpi-banner .
+		aDISK_SPACE_MOUNTS=()
+		# shellcheck disable=SC1091
+		. .dietpi-banner
+		for i in "${!aDISK_SPACE_MOUNTS[@]}"; do printf -v "aDISK_SPACE_MOUNTS[$i]" '%b' "${aDISK_SPACE_MOUNTS[$i]}"; done
+		G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*aDISK_SPACE_MOUNTS\[/d' .dietpi-banner
+		for i in "${!aDISK_SPACE_MOUNTS[@]}"; do echo "aDISK_SPACE_MOUNTS[$i]='${aDISK_SPACE_MOUNTS[$i]//\'/\'\\\'\'}'"; done >> .dietpi-banner
+		G_EXEC mv .dietpi-banner /boot/dietpi/.dietpi-banner
+	)
+
+	# Software updates, migrations and patches
+	if [[ -f '/boot/dietpi/.installed' ]]
+	then
+		# Reset ownership of files extracted from upstream archives, which kept the UID/GID of the upstream build system: https://github.com/MichaIng/DietPi/pull/8382
+		local i
+		for i in uv:/usr/local/bin/uv frp:/usr/local/bin/frps frp:/usr/local/bin/frpc kubo:/usr/local/bin/ipfs spotifyd:/opt/spotifyd birdnetgo:/opt/birdnet openvpn:/etc/openvpn/easy-rsa
+		do
+			grep -q "^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[${i%%:*}\]=2" /boot/dietpi/.installed && [[ -e ${i#*:} ]] || continue
+			G_DIETPI-NOTIFY 2 "Resetting ownership of ${i#*:} to root"
+			G_EXEC chown -R 0:0 "${i#*:}"
+		done
+
+		# Mono and Readarr removal
+		grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(mono|readarr)\]=' /boot/dietpi/.installed && G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(mono|readarr)\]=/d' /boot/dietpi/.installed
+
+		if [[ -f '/etc/fish/conf.d/dietpi.fish' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Updating fish session load script /etc/fish/conf.d/dietpi.fish'
+			G_EXEC eval 'echo '\''if status is-interactive'\'' > /etc/fish/conf.d/dietpi.fish'
+			# - Take aliases from /etc/bashrc.d/dietpi.bash
+			mawk '/# - DietPi programs/ {flag=1; next}
+			/# - Optional DietPi software aliases/ {flag=0}
+			flag {print}' /etc/bashrc.d/dietpi.bash >> /etc/fish/conf.d/dietpi.fish || exit 1
+			# - Launch dietpi-login script for first run setup and autostart features
+			cat << '_EOF_' >> /etc/fish/conf.d/dietpi.fish || exit 1
+	function fish_greeting
+		/boot/dietpi/dietpi-login
+	end
+end
+_EOF_
+		fi
+
+		# Update 2 IDs
+		G_EXEC sed --follow-symlinks -i 's/prometheusnodeexporter/prometheusexporter/' /boot/dietpi/.installed
+		G_EXEC sed --follow-symlinks -i 's/roonextensionmanager/roonextmanager/' /boot/dietpi/.installed
+
+		# Harden PHP-FPM
+		for f in /etc/systemd/system/php*-fpm.service.d/dietpi.conf
+		do
+			[[ -f $f ]] || continue
+			G_DIETPI-NOTIFY 2 'Hardinng PHP-FPM service to use a private /tmp dir'
+			G_EXEC eval "echo -e '[Unit]\nAfter=redis-server.service mariadb.service postgresql.service\n\n[Service]\nPrivateTmp=1' > '$f'"
+		done
+
+		if [[ -f '/lib/systemd/system/docker.service.d/dietpi-simple.conf' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Reverting Docker service to default Type=notify'
+			G_EXEC rm /lib/systemd/system/docker.service.d/dietpi-simple.conf
+			G_EXEC rmdir --ignore-fail-on-non-empty /lib/systemd/system/docker.service.d
+		fi
+
+		# WireGuard: accept forwarded replies to VPN clients, required if the FORWARD policy is DROP, which is set by Docker: https://github.com/MichaIng/DietPi/issues/8500
+		# - Only if the server config contains our default forward rule, which excludes client configs, and if no PreUp/PostUp hook handles forwarding rules otherwise already, via iptables, nftables or anything else
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[wireguard\]=2' /boot/dietpi/.installed && [[ -f '/etc/wireguard/wg0.conf' ]] &&
+			grep -Eq '^[[:blank:]]*PostUp[[:blank:]]*=.*\<iptables -A FORWARD -i %i -j ACCEPT\>' /etc/wireguard/wg0.conf &&
+			! sed -En '/^[[:blank:]]*P(re|ost)Up[[:blank:]]*=/I{s/\<ip6?tables -A FORWARD -i %i -j ACCEPT\>//g;p}' /etc/wireguard/wg0.conf | grep -iq '\<forward\>'
+		then
+			G_DIETPI-NOTIFY 2 'Adding forward rules for replies to VPN clients to WireGuard server config /etc/wireguard/wg0.conf'
+			G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*PostUp[[:blank:]]*=/s/\<(ip6?tables) -A FORWARD -i %i -j ACCEPT\>/&; \1 -A FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT/g;/^[[:blank:]]*PostDown[[:blank:]]*=/s/\<(ip6?tables) -D FORWARD -i %i -j ACCEPT\>/&; \1 -D FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT/g' /etc/wireguard/wg0.conf
+			# Add them to the running server as well: a restart would interrupt VPN connections, possibly the one this update runs through, and the PostDown hooks would fail without them.
+			if [[ -e '/sys/class/net/wg0' ]]
+			then
+				for i in iptables ip6tables
+				do
+					grep -Eq "^[[:blank:]]*PostUp[[:blank:]]*=.*\<$i -A FORWARD -o %i -m conntrack " /etc/wireguard/wg0.conf || continue
+					"$i" -C FORWARD -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2> /dev/null || G_EXEC_NOHALT=1 G_EXEC "$i" -A FORWARD -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+				done
+			fi
+		fi
+
+		# Pi-hole v6 migration
+		# - /etc/pihole/pihole.toml indicates that Pi-hole has been upgraded to v6 already.
+		# - The /var/www/pihole symlink indicates that an instance installed via dietpi-software has not been migrated yet.
+		if [[ -f '/etc/pihole/pihole.toml' && -L '/var/www/pihole' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[pihole\]=2' /boot/dietpi/.installed
+		then
+			# Remove DietPi specific v5 files
+			# - Symlinks
+			G_EXEC rm /var/www/pihole
+			[[ -L '/var/www/admin' ]] && G_EXEC rm /var/www/admin
+			# - Webserver configs
+			[[ -d '/etc/apache2/sites-available' ]] && G_EXEC rm -f /etc/apache2/sites-{available,enabled}/dietpi-pihole*
+			[[ -d '/etc/lighttpd/conf-available' ]] && G_EXEC rm -f /etc/lighttpd/conf-{available,enabled}/99-dietpi-pihole*
+			[[ -d '/etc/nginx/sites-dietpi' ]] && G_EXEC rm -f /etc/nginx/sites-dietpi/dietpi-pihole*
+
+			# Remove www-data user from pihole group
+			getent group pihole | grep -Eq '(:|,)www-data(,|$)' && G_EXEC gpasswd -d www-data pihole
+
+			# Change web UI port to 8089 and 8489 (HTTPS) to avoid conflict with webservers and other web applications
+			G_EXEC pihole-FTL --config webserver.port 8089,8489s
+
+			# Inform user about differences to stock Pi-hole installation
+			G_WHIP_MSG "[ INFO ] Pi-hole network ports changed to 8089 and 8489
+\nTo align migrated Pi-hole v6 instances with fresh installs, and avoid possible conflicts with dedicated webservers, the network ports have been changed to 8089 and 8489 (HTTPS). Your Pi-hole instance will hence be available at:
+- http://$(G_GET_NET ip):8089/admin/
+- https://$(G_GET_NET ip):8489/admin/
+\nThis can be changed via web UI or following console command, e.g. for ports 80 and 443 (HTTPS):
+- sudo pihole-FTL --config webserver.port 80,443s"
+
+			# Offer to uninstall webserver and PHP if no dependant is installed
+			# - If only PHP or only a webserver is installed, one has been uninstalled already, and the other is assumed to be still needed for something else.
+			if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[php\]=2' /boot/dietpi/.installed && grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(apache|lighttpd|nginx)\]=2' /boot/dietpi/.installed
+			then
+				G_WHIP_CHECKLIST_ARRAY=()
+				# - webserver
+				if ! /boot/dietpi/dietpi-software list | grep -q '| =2 |.*+webserver'
+				then
+					grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[apache\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(apache 'Apache webserver' off)
+					grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[lighttpd\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(lighttpd 'Lighttpd webserver' off)
+					grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[nginx\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(nginx 'Nginx webserver' off)
+				fi
+				# - PHP: Exclude webserver stacks which are meta selections only
+				/boot/dietpi/dietpi-software list | grep '| =2 |.*+PHP' | grep -vEq '^.\[32mID (lasp|lamp|lesp|lemp|llsp|llmp) ' || G_WHIP_CHECKLIST_ARRAY+=(php 'PHP server' off)
+				if (( ${#G_WHIP_CHECKLIST_ARRAY[@]} ))
+				then
+					G_WHIP_BUTTON_CANCEL_TEXT='Skip'
+					# shellcheck disable=SC2086
+					G_WHIP_CHECKLIST '[ INFO ] Possibly obsolete webserver and/or PHP installation detected
+\nYou recently updated Pi-hole to v6, which now does not require any webserver or PHP anymore.
+\nWe detected a webserver and/or PHP installation on your system, but no dependant among installed dietpi-software options.
+\nIf you are sure that you do not require the webserver and/or PHP anymore, you can select them for uninstall below. Use the space bar to (de)select the ones which shall be uninstalled:' && /boot/dietpi/dietpi-software uninstall $G_WHIP_RETURNED_VALUE
+				fi
+			fi
+		fi
 	fi
 }
 
