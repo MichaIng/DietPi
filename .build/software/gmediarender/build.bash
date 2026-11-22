@@ -44,7 +44,7 @@ version=${version#v}
 G_DIETPI-NOTIFY 2 "Compiling $name_pretty"
 G_EXEC cd "gmrender-resurrect-$version"
 # Fix callback signature with libupnp >= 1.18 (libupnp22 on Forky): https://github.com/hzeller/gmrender-resurrect/pull/298
-[[ $G_DISRO == 9 && $G_HW_ARCH_NAME != 'armv6l' ]] && { grep -q 'UPNP_VERSION < 11800' src/upnp_compat.h && Error_Exit 'Forky workaround became obsolete!' || G_EXEC curl -sSfo src/upnp_compat.h 'https://raw.githubusercontent.com/hzeller/gmrender-resurrect/ceaed140de449753e78912be1fd28a302f9fa20b/src/upnp_compat.h'; }
+[[ $G_DISTRO == 9 && $G_HW_ARCH_NAME != 'armv6l' ]] && { grep -q 'UPNP_VERSION < 11800' src/upnp_compat.h && Error_Exit 'Forky workaround became obsolete!' || G_EXEC curl -sSfo src/upnp_compat.h 'https://raw.githubusercontent.com/hzeller/gmrender-resurrect/ceaed140de449753e78912be1fd28a302f9fa20b/src/upnp_compat.h'; }
 G_EXEC_OUTPUT=1 G_EXEC ./autogen.sh
 CFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --prefix='/usr'
 G_EXEC_OUTPUT=1 G_EXEC make
