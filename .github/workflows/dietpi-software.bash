@@ -506,7 +506,7 @@ then
 	# PrivateUsers causes "Failed to set up user namespacing"
 	# ProtectHome/ProtectSystem/PrivateTmp/... cause "Failed to set up mount namespacing: Invalid argument": https://github.com/systemd/systemd/issues/39951
 	# shellcheck disable=SC2068
-	for i in ${aSERVICES[@]}
+	for i in 'systemd-logind' ${aSERVICES[@]}
 	do
 		G_EXEC mkdir "rootfs/etc/systemd/system/$i.service.d"
 		G_EXEC eval "echo -e '[Service]\nPrivateUsers=0\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths=\nProtectProc=default\nProcSubset=all\nNoExecPaths=\nExecPaths=\nInaccessiblePaths=' > 'rootfs/etc/systemd/system/$i.service.d/zz-dietpi-no-namespacing.conf'"
