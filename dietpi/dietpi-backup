@@ -13,25 +13,33 @@
 	# - Allows for a complete system back and restore of the linux filesystem (/)
 	#
 	# Usage:
-	# - dietpi-backup -1 = Restore
-	# - dietpi-backup    = Menu
-	# - dietpi-backup  1 = Backup
+	# - dietpi-backup                        = Menu
+	# - dietpi-backup backup [<dir>]         = Backup
+	# - dietpi-backup restore [<dir>] [<N>]  = Restore, optionally backup number N from the archive
+	# - dietpi-backup list [<dir>|--search]  = List backups at the backup location, or search all filesystems for backups
+	# - Legacy: "1" = backup, "-1" = restore
 	#
-	# $2 = optional directory location to use with backup/restore input:
-	# - dietpi-backup -1 /path/to/target = Restore
-	# - dietpi-backup  1 /path/to/target = Backup
+	# <dir> = optional backup location to use instead of the configured one
 	#////////////////////////////////////
 
 	# Import DietPi-Globals --------------------------------------------------------------
 	. /boot/dietpi/func/dietpi-globals
 	readonly G_PROGRAM_NAME='DietPi-Backup'
-	G_CHECK_ROOT_USER "$@"
-	G_CHECK_ROOTFS_RW
-	G_INIT
+	if [[ $1 != 'list' ]]
+	then
+		G_CHECK_ROOT_USER "$@"
+		G_CHECK_ROOTFS_RW
+		G_INIT
+	fi
 	# Import DietPi-Globals --------------------------------------------------------------
 
 	# Grab input
-	[[ $1 =~ ^-?1$ ]] && INPUT=$1 || INPUT=0
+	case $1 in
+		'backup'|'1') INPUT=1;;
+		'restore'|'-1') INPUT=-1;;
+		'list') INPUT=2;;
+		*) INPUT=0;;
+	esac
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Backup System
@@ -365,6 +373,7 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 
 		# Error: Backup not found
 		[[ -f $FP_TARGET/$FP_STATS ]] || { G_WHIP_MSG "Restore failed:\n\n$FP_TARGET/$FP_STATS does not exist\n\nHave you created a backup?"; return 1; }
+		[[ -d $FP_TARGET/$DATA ]] || { G_WHIP_MSG "Restore failed:\n\nBackup number ${1:-1} ($FP_TARGET/$DATA) does not exist\n\nRun \"dietpi-backup list\" to see available backups."; return 1; }
 
 		# Check for matching filesystem UUIDs of backup and running system
 		Check_UUIDs || return 1
@@ -434,6 +443,42 @@ _EOF_
 
 	# shellcheck disable=SC1090
 	Read_Settings_File(){ [[ -f $FP_SETTINGS ]] && . "$FP_SETTINGS"; }
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# List
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# $1: Backup location
+	List_Location()
+	{
+		local dir=$1 i
+		echo -e "\e[1m$dir\e[0m"
+		[[ -f $dir/$FP_STATS ]] || { echo ' - No backup found'; return 1; }
+
+		i=$(grep 'ompleted' "$dir/$FP_STATS" | tail -1)
+		echo " - Last: ${i:-No completed backup}"
+
+		# Backup number 1 is "data", archive backups are "data_N"
+		[[ -d $dir/data ]] && echo "   1: $(date -r "$dir/data" '+%F %T')"
+		while read -r i
+		do
+			echo "   $i: $(date -r "$dir/data_$i" '+%F %T')"
+		done < <(for i in "$dir/data_"*; do i=${i#"$dir/data_"}; [[ $i =~ ^[1-9][0-9]*$ ]] && echo "$i"; done | sort -n)
+	}
+
+	List_Backups()
+	{
+		(( $LIST_SEARCH )) || { List_Location "$FP_TARGET"; return; }
+
+		G_DIETPI-NOTIFY 2 'Searching all filesystems for backups, please wait...'
+		# Skip virtual filesystems, and the data directories of found backups, which each contain a full copy of the root filesystem
+		local stats found=0
+		while read -r stats
+		do
+			List_Location "${stats%"/$FP_STATS"}"
+			found=1
+		done < <(find / \( -path /proc -o -path /sys -o -path /dev -o -path /run \) -prune -o -type d \( -name 'data' -o -name 'data_*' \) -execdir test -f "$FP_STATS" \; -prune -o -type f -name "$FP_STATS" -print 2> /dev/null)
+		(( $found )) || echo 'No backups found'
+	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Menus
@@ -605,11 +650,26 @@ _EOF_
 	# Read settings
 	Read_Settings_File
 
-	# $2 Optional directory input
-	[[ $2 ]] && FP_TARGET=$2
+	# Optional arguments in any order: backup location, backup number from the archive for restore, search option for list
+	RESTORE_POINT=1 LIST_SEARCH=0
+	for i in "${@:2}"
+	do
+		if [[ $INPUT == -1 && $i =~ ^[1-9][0-9]*$ ]]
+		then
+			RESTORE_POINT=$i
+
+		elif [[ $INPUT == 2 && $i == '--search' ]]
+		then
+			LIST_SEARCH=1
+
+		elif [[ $i ]]
+		then
+			FP_TARGET=$i
+		fi
+	done
 
 	# Create default filter file, if not yet present
-	[[ -f $FP_FILTER_CUSTOM ]] || cat << '_EOF_' > "$FP_FILTER_CUSTOM"
+	[[ $INPUT == 2 || -f $FP_FILTER_CUSTOM ]] || cat << '_EOF_' > "$FP_FILTER_CUSTOM"
 # DietPi-Backup include/exclude filter
 
 # Prefix "-" exclude items, "+" include items which would match a wildcard exclude rule.
@@ -641,7 +701,13 @@ _EOF_
 	# Run Restore
 	elif (( $INPUT == -1 )); then
 
-		Run_Restore
+		Run_Restore "$RESTORE_POINT"
+
+	# List backups
+	elif (( $INPUT == 2 )); then
+
+		List_Backups
+		EXIT_CODE=$?
 
 	#-----------------------------------------------------------------------------
 	# Run menu, if interactive
