@@ -16,15 +16,14 @@ case $G_DISTRO in
 	7) adeps+=('libasound2' 'libssl3' 'libconfig9' 'libglib2.0-0' 'libavcodec59') adeps2+=('libsodium23' 'libplist3');;
 	8) adeps+=('libasound2t64' 'libssl3t64' 'libconfig11' 'libglib2.0-0t64' 'libavcodec61') adeps2+=('libsodium23' 'libplist-2.0-4') adeps_build+=('systemd-dev');;
 	9) adeps+=('libasound2t64' 'libssl3t64' 'libconfig15' 'libglib2.0-0t64') adeps2+=('libsodium26' 'libplist-2.0-4') adeps_build+=('systemd-dev'); [[ $G_HW_ARCH_NAME == 'armv6l' ]] && adeps+=('libavcodec62') || adeps+=('libavcodec63');;
-	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
+	*) Error_Exit "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)";;
 esac
 G_AGUP
 G_AGDUG "${adeps_build[@]}"
 for i in "${adeps[@]}" "${adeps2[@]}"
 do
 	dpkg-query -s "$i" 2> /dev/null | grep -q '^Status: install ok installed$' && continue
-	G_DIETPI-NOTIFY 1 "Expected dependency package was not installed: $i"
-	exit 1
+	Error_Exit "Expected dependency package was not installed: $i"
 done
 
 # -------------------------
@@ -431,7 +430,7 @@ DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 
 # - Obtain version suffix
 G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/${NAME}_$G_HW_ARCH_NAME.deb"
-old_version=$(dpkg-deb -f package.deb Version)
+old_version=$(dpkg-deb -f package.deb Version) || exit 1
 G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
 # - Leave $version variable untouched, used by AirPlay 2 build below
