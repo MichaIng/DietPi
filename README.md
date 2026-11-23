@@ -319,7 +319,6 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Homebridge](https://github.com/homebridge/homebridge)
 - [ADS-B Feeder](https://github.com/dirkhh/adsb-feeder-image)
 - [Kavita](https://github.com/Kareadita/Kavita)
-- [Tvheadend](https://github.com/tvheadend/tvheadend)
 - [Forgejo](https://codeberg.org/forgejo/forgejo)
 - [soju](https://github.com/emersion/soju)
 - [fish](https://github.com/fish-shell/fish-shell)
@@ -341,6 +340,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Yuvomi](https://github.com/ulsklyc/yuvomi)
 - [SolidPing](https://github.com/fclairamb/solidping)
 - [Podman](https://github.com/podman-container-tools/podman)
+- [Tvheadend](https://github.com/tvheadend/tvheadend)
 
 ---
 
