@@ -38,13 +38,6 @@ then
 	G_AGP docker-compose
 fi
 
-if grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(130|python3)\]=2' /boot/dietpi/.installed
-then
-	G_DIETPI-NOTIFY 2 'Allow Python 3 pip, setuptools, and wheel APT packages autoremoval, which conflict with the Python 3 pip installation of DietPi'
-	# shellcheck disable=SC2046
-	apt-mark auto $(dpkg --get-selections python3-{pip,setuptools,wheel} 2> /dev/null | mawk '{print $1}') 2> /dev/null
-fi
-
 if [[ -f '/etc/apt/trusted.gpg' ]]
 then
 	G_DIETPI-NOTIFY 2 'Removing /etc/apt/trusted.gpg, deprecated since Bookworm and obsolete since Trixie'
@@ -68,6 +61,9 @@ mapfile -t apackages < <(apt-mark showhold)
 [[ ${apackages[0]} ]] && G_EXEC_DESC='Unholding all packages' G_EXEC apt-mark unhold "${apackages[@]}"
 unset -v apackages
 
+G_DIETPI-NOTIFY 2 'Removing obsolete package lists, including those obsoleted with Bookworm'
+G_EXEC rm -f /etc/apt/sources.list.d/dietpi-{mono,wsdd}.list /etc/apt/trusted.gpg.d/dietpi-{mono,wsdd}.gpg
+
 G_DIETPI-NOTIFY 2 'Migrating package lists to Trixie suite'
 # Update Microsoft list properly: https://dietpi.com/blog/?p=3128#comment-6199
 if dpkg-query -s 'packages-microsoft-prod' 2> /dev/null | grep -q '^Status: install ok installed$'
@@ -78,26 +74,20 @@ then
 	G_EXEC rm packages-microsoft-prod.deb
 fi
 G_EXEC sed --follow-symlinks -i 's/bookworm/trixie/g' /etc/apt/sources.list
-# Remove obsolete lists, including those obsoleted with Bookworm
-G_EXEC rm -f /etc/apt/sources.list.d/dietpi-{mono,wsdd}.list /etc/apt/trusted.gpg.d/dietpi-{mono,wsdd}.gpg
-for i in /etc/apt/sources.list.d/*.list
+for i in /etc/apt/sources.list.d/*.{list,sources}
 do
 	[[ $i == '/etc/apt/sources.list.d/*.list' ]] && break
+	[[ $i == '/etc/apt/sources.list.d/*.sources' ]] && break
 	G_EXEC sed --follow-symlinks -i 's/bookworm/trixie/g' "$i"
-	G_EXEC sed --follow-symlinks -i '/download\.opensuse\.org/s/Debian_12/Debian_13/' "$i"
-	G_EXEC sed --follow-symlinks -i '/download\.opensuse\.org/s/Raspbian_12/Raspbian_13/' "$i"
+	G_EXEC sed --follow-symlinks -i '/download\.opensuse\.org/s/Debian_1[012]/Debian_13/' "$i"
+	G_EXEC sed --follow-symlinks -i '/download\.opensuse\.org/s/Raspbian_1[012]/Raspbian_13/' "$i"
 done
 
 G_DIETPI-NOTIFY 2 'Reverting some package lists to Bookworm which have no Trixie suite (yet)'
-[[ -f '/etc/apt/sources.list.d/dietpi-influxdb.list' ]] && G_EXEC sed --follow-symlinks -i 's/trixie/bookworm/g' /etc/apt/sources.list.d/dietpi-influxdb.list
 [[ $G_RASPBIAN == 1 && -f '/etc/apt/sources.list.d/docker.list' ]] && G_EXEC sed --follow-symlinks -i 's/trixie/bookworm/g' /etc/apt/sources.list.d/docker.list
-[[ -f '/etc/apt/sources.list.d/dietpi-moonlight.list' ]] && G_EXEC sed --follow-symlinks -i 's/trixie/bookworm/g' /etc/apt/sources.list.d/dietpi-moonlight.list
 
-if [[ $G_HW_ARCH != 1 ]]
-then
-	G_DIETPI-NOTIFY 2 'Removing obsolete APT pinnings'
-	[[ -f '/etc/apt/preferences.d/dietpi-openhab' ]] && G_EXEC rm /etc/apt/preferences.d/dietpi-openhab
-fi
+G_DIETPI-NOTIFY 2 'Removing obsolete APT pinnings'
+[[ $G_HW_ARCH != 1  && -f '/etc/apt/preferences.d/dietpi-openhab' ]] && G_EXEC rm /etc/apt/preferences.d/dietpi-openhab
 
 if dpkg --compare-versions "$(dpkg-query -Wf '${Version}' syncplay-server 2> /dev/null)" lt-nl '1.7.4+repack1-1' && ! dpkg-query -s 'syncplay-common' &> /dev/null
 then
@@ -249,8 +239,15 @@ then
 	G_AGP mime-support
 fi
 
-# Purge PHP 8.2 packages, obsolete after PHP 8.2 install
+# Purge PHP 8.2 packages, obsolete after PHP 8.4 install
 G_AGP '*php8.2*'
+
+# Update PHP-related webserver drop-ins
+for i in apache2 nginx lighttpd
+do
+	[[ -f /etc/systemd/system/$i.service.d/dietpi.conf ]] || continue
+	G_EXEC eval "echo -e '[Unit]\nAfter=php8.4-fpm.service' > '/etc/systemd/system/$i.service.d/dietpi.conf'"
+done
 
 # Remove obsolete PHP 8.2 configs and Python 3.11 modules, obsolete after Python 3.13 install
 G_EXEC rm -Rf /etc/php/8.2 /usr/local/lib/python3.11 /usr/local/bin/pip3*
@@ -315,10 +312,11 @@ fi
 
 # Reinstalls:
 # - PHP and all PHP applications which require additional PHP modules: 38 40 89 114 143 210
-# - Python and all Python applications which require pip installs: 118 125 130 136 139 141 153 155 180
+# - Python and all Python applications which require pip installs: python3 mopidy sabnzbd bazarr htpcmanager lazylibrarian immichml synapse motioneye octoprint
+# - ADS-B Feeder to migrate to Debian's python3-* packages
 # - Java for migration to Adoptium Temurin 26 or OpenJDK 21 on ARMv7 respectively: 8 196
 # - UrBackup for migration to APT repo => 32-bit ARM and x86_64 support: 111
-# - Medusa to assure Python 3.13 compatible verion: 116
+# - Medusa to assure Python 3.13 compatible version: 116
 # - NAA Daemon for 32-bit ARM support and latest version: 124
 # - PaperMC for latest version: 181
 extra=()

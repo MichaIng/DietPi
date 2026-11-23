@@ -233,6 +233,18 @@ _EOF_
 		# Disable serial console if set in dietpi.txt
 		grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware serialconsole disable
 
+		# x86_64 PC: Check ttyS0-ttyS3, since they are always present, even if not functional
+		if (( $G_HW_MODEL == 21 ))
+		then
+			local has_uart=0
+			for i in {0..3}
+			do
+				# shellcheck disable=SC2015
+				stty -F "/dev/ttyS$i" &> /dev/null && has_uart=1 || rm -fv "/etc/systemd/system/serial-getty@ttyS$i.service"
+			done
+			(( $has_uart )) || G_CONFIG_INJECT 'CONFIG_SERIAL_CONSOLE_ENABLE=' 'CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt
+		fi
+
 		# Regenerate unique Dropbear host keys
 		# ToDo: Do as well for OpenSSH if installed
 		if dpkg-query -s 'dropbear-bin' 2> /dev/null | grep -q '^Status: install ok installed$'

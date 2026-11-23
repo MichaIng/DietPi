@@ -1,26 +1,35 @@
 #!/bin/bash
 {
 . /boot/dietpi/func/dietpi-globals
+grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l'
+Error_Exit(){ G_DIETPI-NOTIFY 1 "$1, aborting ..."; exit 1; }
+
+# Apply GitHub token if set
+header=()
+[[ $GH_TOKEN ]] && header=('-H' "Authorization: token $GH_TOKEN")
 
 # Build deps
 G_AGUP
-G_AGDUG automake pkg-config gcc libc6-dev make libgstreamer1.0-dev libupnp-dev gstreamer1.0-alsa gstreamer1.0-libav gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
-adeps=('libc6' 'gstreamer1.0-alsa' 'gstreamer1.0-libav' 'gstreamer1.0-plugins-good' 'gstreamer1.0-plugins-bad' 'gstreamer1.0-plugins-ugly')
-(( $G_DISTRO > 7 )) && adeps+=('libupnp17') || adeps+=('libupnp13')
+G_AGDUG automake pkg-config gcc libc6-dev make libgstreamer1.0-dev libupnp-dev gstreamer1.0-alsa gstreamer1.0-libav gstreamer1.0-plugins-good
+adeps=('libc6' 'gstreamer1.0-alsa' 'gstreamer1.0-libav' 'gstreamer1.0-plugins-good')
+case $G_DISTRO in
+	7) adeps+=('libupnp13');;
+	8) adeps+=('libupnp17t64');;
+	9) [[ $G_HW_ARCH_NAME == 'armv6l' ]] && adeps+=('libupnp17t64') || adeps+=('libupnp22');;
+	*) Error_Exit "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)";;
+esac
 for i in "${adeps[@]}"
 do
-	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Trixie: https://bugs.debian.org/1065394
-	dpkg-query -s "$i" &> /dev/null || dpkg-query -s "${i}t64" &> /dev/null && continue
-	G_DIETPI-NOTIFY 1 "Expected dependency package was not installed: $i"
-	exit 1
+	dpkg-query -s "$i" 2> /dev/null | grep -q '^Status: install ok installed$' && continue
+	Error_Exit "Expected dependency package was not installed: $i"
 done
 
 # Obtain latest version
 name='gmediarender'
 name_pretty='GMediaRender'
 repo='https://github.com/hzeller/gmrender-resurrect'
-version=$(curl -sSf 'https://api.github.com/repos/hzeller/gmrender-resurrect/releases/latest' | grep -Po '"tag_name": *"\K[^"]+(?=")')
-[[ $version ]] || { G_DIETPI-NOTIFY 1 "No latest $name_pretty version found, aborting ..."; exit 1; }
+version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/hzeller/gmrender-resurrect/releases/latest' | grep -Po '"tag_name": *"\K[^"]+(?=")')
+[[ $version ]] || Error_Exit "No latest $name_pretty version found"
 
 # Download
 G_DIETPI-NOTIFY 2 "Downloading $name_pretty version \e[33m$version"
@@ -34,6 +43,9 @@ version=${version#v}
 # Compile
 G_DIETPI-NOTIFY 2 "Compiling $name_pretty"
 G_EXEC cd "gmrender-resurrect-$version"
+# Fix callback signature with libupnp >= 1.18 (libupnp22 on Forky): https://github.com/hzeller/gmrender-resurrect/pull/298
+# shellcheck disable=SC2015
+[[ $G_DISTRO == 9 && $G_HW_ARCH_NAME != 'armv6l' ]] && { grep -q 'UPNP_VERSION < 11800' src/upnp_compat.h && Error_Exit 'Forky workaround became obsolete!' || G_EXEC curl -sSfo src/upnp_compat.h 'https://raw.githubusercontent.com/hzeller/gmrender-resurrect/ceaed140de449753e78912be1fd28a302f9fa20b/src/upnp_compat.h'; }
 G_EXEC_OUTPUT=1 G_EXEC ./autogen.sh
 CFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --prefix='/usr'
 G_EXEC_OUTPUT=1 G_EXEC make
@@ -42,7 +54,6 @@ G_EXEC strip --remove-section=.comment --remove-section=.note "src/$name"
 # Package dir: In case of Raspbian, force ARMv6
 G_DIETPI-NOTIFY 2 "Preparing $name_pretty DEB package directory"
 G_EXEC cd /tmp
-grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l'
 DIR="gmediarender_$G_HW_ARCH_NAME"
 [[ -d $DIR ]] && G_EXEC rm -R "$DIR"
 # - Control files, config, systemd service, executable, icons, copyright
@@ -55,11 +66,11 @@ G_EXEC mv "gmrender-resurrect-$version/src/gmediarender" "$DIR/usr/bin/"
 G_EXEC cp "gmrender-resurrect-$version/COPYING" "$DIR/usr/share/doc/gmediarender/copyright"
 
 # Icons
-> "$DIR/usr/share/gmediarender/grender-64x64.png"
-> "$DIR/usr/share/gmediarender/grender-128x128.png"
+> "$DIR/usr/share/gmediarender/grender-64x64.png" || exit 1
+> "$DIR/usr/share/gmediarender/grender-128x128.png" || exit 1
 
 # systemd service
-cat << '_EOF_' >  "$DIR/lib/systemd/system/$name.service"
+cat << '_EOF_' >  "$DIR/lib/systemd/system/$name.service" || exit 1
 [Unit]
 Description=GMediaRender (DietPi)
 Documentation=https://github.com/hzeller/gmrender-resurrect/blob/master/INSTALL.md#commandline-options
@@ -71,12 +82,36 @@ User=gmediarender
 EnvironmentFile=/etc/default/gmediarender
 ExecStart=/usr/bin/gmediarender $ARGS
 
+# Hardening
+ProtectSystem=strict
+ProtectHome=1
+PrivateTmp=1
+ProtectProc=invisible
+ProtectKernelTunables=1
+ProtectKernelModules=1
+ProtectKernelLogs=1
+ProtectControlGroups=1
+ProtectClock=1
+ProtectHostname=1
+NoNewPrivileges=1
+CapabilityBoundingSet=
+RestrictNamespaces=1
+RestrictRealtime=1
+RestrictSUIDSGID=1
+LockPersonality=1
+MemoryDenyWriteExecute=1
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+
 [Install]
 WantedBy=multi-user.target
 _EOF_
 
 # Environment file
-cat << '_EOF_' > "$DIR/etc/default/$name"
+cat << '_EOF_' > "$DIR/etc/default/$name" || exit 1
 # GMediaRender command-line arguments: https://github.com/hzeller/gmrender-resurrect/blob/master/INSTALL.md#commandline-options
 ARGS='-u UUID -f HOSTNAME -I eth0 --gstout-audiosink=alsasink --gstout-audiodevice=default --logfile=stdout'
 _EOF_
@@ -84,10 +119,10 @@ _EOF_
 # Control files
 
 # - conffiles
-echo "/etc/default/$name" > "$DIR/DEBIAN/conffiles"
+G_EXEC eval "echo '/etc/default/$name' > '$DIR/DEBIAN/conffiles'"
 
 # - postinst
-cat << '_EOF_' > "$DIR/DEBIAN/postinst"
+cat << '_EOF_' > "$DIR/DEBIAN/postinst" || exit 1
 #!/bin/dash -e
 if [ -d '/run/systemd/system' ]
 then
@@ -107,6 +142,7 @@ then
 	if getent passwd gmediarender > /dev/null
 	then
 		echo 'Configuring GMediaRender service user ...'
+		[ ~gmediarender = '/nonexistent' ] || systemctl stop gmediarender
 		usermod -aG audio -d /nonexistent -s /usr/sbin/nologin gmediarender
 	else
 		echo 'Creating GMediaRender service user ...'
@@ -116,12 +152,12 @@ then
 	echo 'Configuring GMediaRender systemd service ...'
 	systemctl --no-reload unmask gmediarender
 	systemctl enable gmediarender
-	pgrep -x 'dietpi-software' > /dev/null || systemctl restart gmediarender
+	pgrep -x 'dietpi-software' || systemctl restart gmediarender
 fi
 _EOF_
 
 # - prerm
-cat << _EOF_ > "$DIR/DEBIAN/prerm"
+cat << _EOF_ > "$DIR/DEBIAN/prerm" || exit 1
 #!/bin/dash -e
 if [ "\$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/$name.service' ]
 then
@@ -132,7 +168,7 @@ fi
 _EOF_
 
 # - postrm
-cat << _EOF_ > "$DIR/DEBIAN/postrm"
+cat << _EOF_ > "$DIR/DEBIAN/postrm" || exit 1
 #!/bin/dash -e
 if [ "\$1" = 'purge' ]
 then
@@ -159,14 +195,12 @@ _EOF_
 G_EXEC chmod +x "$DIR/DEBIAN/"{postinst,prerm,postrm}
 
 # - md5sums
-find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "s|$DIR/||" > "$DIR/DEBIAN/md5sums"
+find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "s|$DIR/||" > "$DIR/DEBIAN/md5sums" || exit 1
 
 # - Obtain DEB dependency versions
 DEPS_APT_VERSIONED=
 for i in "${adeps[@]}"
 do
-	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Trixie: https://bugs.debian.org/1065394
-	dpkg-query -s "$i" &> /dev/null || i+='t64'
 	DEPS_APT_VERSIONED+=" $i (>= $(dpkg-query -Wf '${VERSION}' "$i")),"
 done
 DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
@@ -183,7 +217,7 @@ G_DIETPI-NOTIFY 2 "Old package version is:       \e[33m${old_version:-N/A}"
 G_DIETPI-NOTIFY 2 "Building new package version: \e[33m$version"
 
 # control
-cat << _EOF_ > "$DIR/DEBIAN/control"
+cat << _EOF_ > "$DIR/DEBIAN/control" || exit 1
 Package: $name
 Version: $version
 Architecture: $(dpkg --print-architecture)
