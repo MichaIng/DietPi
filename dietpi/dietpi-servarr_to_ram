@@ -106,9 +106,7 @@ Supported programs:
 	# Check for valid input program
 	(( ${#aFILE[@]} )) || { error=1 Print "Invalid input program ($INPUT_PROG). Aborting...$USAGE"; exit 1; }
 
-	FP_DISK=
-	FP_RAM=
-
+	# Link database to RAM, expects program user as $i and paths as $FP_DISK and $FP_RAM from Toggle_Link_To_Ram
 	Link_To_Ram()
 	{
 		Print "Linking $FP_DISK to RAM ($FP_RAM)..."
@@ -120,160 +118,179 @@ Supported programs:
 		# Create a backup first, which includes -shm and -wal, then copy that to RAM. If it fails, skip that program.
 		[[ -L $FP_DISK.bak ]] && { error=1 Print "${i^} database backup ($FP_DISK.bak) is a symlink again. Skipping this program..."; return 1; }
 		sqlite3 "$FP_DISK" ".save ${FP_DISK}.bak" || { error=$? Print "Creating ${i^} database backup failed. Skipping this program..."; return 1; }
-		chown "$i" "${FP_DISK}.bak" || { error=$? Print "Setting ${i^} database backup ownership failed. Skipping this program..."; return 1; }
 		cp -aL --no-preserve=timestamps "${FP_DISK}.bak" "$FP_RAM" || { error=$? Print "Copying ${i^} database to RAM failed. Skipping this program..."; return 1; }
 
-		# Create all symlinks and chown them in case created by root but program user wants to store back to disk
+		# Create all symlinks
 		local j
 		for j in '' '-shm' '-wal'
 		do
 			ln -sf "$FP_RAM$j" "$FP_DISK$j" || EXIT_CODE=$?
-			chown -h "$i" "$FP_DISK$j" || EXIT_CODE=$?
 		done
 
 		Print "Linked ${i^} database to RAM."
 	}
 
+	# Handle database of program $1, always running as respective program user
 	Toggle_Link_To_Ram()
 	{
-		local astart_services=()
+		local i=$1
+		local FP_DISK="/mnt/dietpi_userdata/$i" FP_RAM="/tmp/${i}_db_link"
 
-		# Loop through programs
-		local i
+		# Skip non-installed program
+		[[ -d $FP_DISK ]] || return 0
+
+		Print "${i^} detected"
+
+		# Create update backup script
+		# - Remove script if it is a symlink, for security reasons
+		if [[ -L $FP_DISK/dietpi-servarr_to_ram.sh ]]
+		then
+			Print "Removing $FP_DISK/dietpi-servarr_to_ram.sh for security reasons, since it is a symlink..."
+			rm "$FP_DISK/dietpi-servarr_to_ram.sh" || { error=$? Print "Removing $FP_DISK/dietpi-servarr_to_ram.sh failed. Skipping this program..."; return 1; }
+		fi
+		if [[ ! -f $FP_DISK/dietpi-servarr_to_ram.sh ]]
+		then
+			Print "Creating $FP_DISK/dietpi-servarr_to_ram.sh to be used as ${i^} custom script"
+			# shellcheck disable=SC2320
+			echo -e '#!/bin/dash\n/boot/dietpi/dietpi-servarr_to_ram 2 '"$i" > "$FP_DISK/dietpi-servarr_to_ram.sh" || { error=$? Print "Creating $FP_DISK/dietpi-servarr_to_ram.sh failed."; }
+			chmod +x "$FP_DISK/dietpi-servarr_to_ram.sh" || { error=$? Print "Applying $FP_DISK/dietpi-servarr_to_ram.sh execute permissions failed."; }
+		fi
+
+		# Remove RAM dir and database backup if it is a symlink, for security reasons
+		if [[ -L $FP_RAM ]]
+		then
+			Print "Removing ${i^} RAM directory ($FP_RAM) for security reasons, since it is a symlink..."
+			rm "$FP_RAM" || { error=$? Print "Removing ${i^} RAM directory symlink ($FP_RAM) failed. Skipping this program..."; return 1; }
+		fi
+		if [[ -L $FP_DISK/${aFILE[$i]}.bak ]]
+		then
+			Print "Removing ${i^} database backup ($FP_DISK/${aFILE[$i]}.bak) for security reasons, since it is a symlink..."
+			rm "$FP_DISK/${aFILE[$i]}.bak" || { error=$? Print "Removing ${i^} database backup symlink ($FP_DISK/${aFILE[$i]}.bak) failed. Skipping this program..."; return 1; }
+		fi
+		# - Skip if RAM dir is owned by someone else, for security reasons
+		[[ -e $FP_RAM && ! -O $FP_RAM ]] && { error=1 Print "${i^} RAM directory ($FP_RAM) is not owned by ${i^} user. Skipping this program..."; return 1; }
+
+		# Update backup
+		if (( $INPUT == 2 ))
+		then
+			if [[ -f $FP_RAM/${aFILE[$i]} ]]
+			then
+				Print "Updating ${i^} database backup..."
+				[[ -L $FP_DISK/${aFILE[$i]}.bak ]] && { error=1 Print "${i^} database backup ($FP_DISK/${aFILE[$i]}.bak) is a symlink again. Skipping this program..."; return 1; }
+				sqlite3 "$FP_RAM/${aFILE[$i]}" ".save $FP_DISK/${aFILE[$i]}.bak" || { error=$? Print "Updating ${i^} database backup failed."; return 1; }
+				Print "Updated ${i^} database backup."
+			else
+				Print "${i^} database is not in RAM. Skipping this program..."
+			fi
+			return 0
+		fi
+
+		# Program must not run while its database is linked or stored back, and stopping it requires root
+		# - Check for a process with the program name owned by the program user, since systemctl requires D-Bus for non-root users, which may not be installed
+		local f comm
+		for f in /proc/[0-9]*/comm
+		do
+			[[ -O $f ]] && read -r comm < "$f" && [[ $comm == "${i^}" ]] && { error=1 Print "${i^} is running and can only be stopped as root. Skipping this program..."; return 1; }
+		done 2> /dev/null
+
+		# Link to RAM + backup
+		if (( $INPUT == 1 ))
+		then
+			Print "Linking ${i^} database to RAM..."
+			# - Pre-create RAM dir
+			[[ -L $FP_RAM ]] && { error=1 Print "${i^} RAM directory ($FP_RAM) is a symlink again. Skipping this program..."; return 1; }
+			# - No "-p", so that it fails if someone else created it meanwhile
+			[[ -d $FP_RAM ]] || mkdir -m 0700 "$FP_RAM" || { error=$? Print "Pre-creating RAM directory for ${i^} failed ($FP_RAM). Skipping this program..."; return 1; }
+
+			# Process database file
+			FP_DISK+="/${aFILE[$i]}"
+			FP_RAM+="/${aFILE[$i]}"
+
+			# Source exists
+			local fp_target
+			if fp_target=$(readlink -e "$FP_DISK")
+			then
+				# Link to target exists, should only happen when running the script two times in same session
+				if [[ $fp_target == "$FP_RAM" ]]
+				then
+					Print "$FP_DISK already linked to RAM ($FP_RAM). Skipping this program..."
+
+				# Source exist, but is not linked to RAM yet
+				else
+					Link_To_Ram
+				fi
+
+			# Source does not exist or is orphaned link, but backup exists, which is expected after system crash
+			elif [[ -f ${FP_DISK}.bak ]]
+			then
+				Print "$FP_DISK not found. Recovering from backup first (${FP_DISK}.bak)..."
+
+				# Remove possible orphaned symlink
+				[[ ! -L $FP_DISK ]] || rm "$FP_DISK" || { error=$? Print "Removing orphaned database symlink failed ($FP_DISK). Skipping this program..."; return 1; }
+
+				# Recover from backup
+				[[ -L $FP_DISK.bak ]] && { error=1 Print "${i^} database backup ($FP_DISK.bak) is a symlink again. Skipping this program..."; return 1; }
+				mv "${FP_DISK}.bak" "$FP_DISK" || { error=$? Print "Recovering database from backup failed (${FP_DISK}.bak). Skipping this program..."; return 1; }
+
+				Link_To_Ram
+			else
+				Print "$FP_DISK not found. Skipping this program..."
+			fi
+
+		# Store back to disk
+		elif (( $INPUT == 0 ))
+		then
+			if [[ -d $FP_RAM ]]
+			then
+				Print "Storing database from RAM ($FP_RAM) back to disk ($FP_DISK)..."
+				[[ -L $FP_RAM ]] && { error=1 Print "${i^} RAM directory ($FP_RAM) is a symlink again. Skipping this program..."; return 1; }
+				# "-u" will only copy newer files, thus actually used by program.
+				# "--remove-destination" will remove expected existing symlinks.
+				# Copy the contents only, not the directory itself, which would apply the RAM directory's mode to the data directory.
+				cp -au --remove-destination "$FP_RAM/"* "$FP_DISK" || { error=$? Print "Storing ${i^} database from RAM back to disk failed."; return 1; }
+				rm -R "$FP_RAM"
+				# Remove orphaned symlinks, possible when -shm and -wal do currently not exist
+				local j
+				for j in "$FP_DISK/${aFILE[$i]}"{,-shm,-wal}
+				do
+					[[ ! -L $j || -f $j ]] || rm "$j" || EXIT_CODE=$?
+				done
+				# Failsafe: "sync" now to prevent async issues!
+				sync
+				Print "Stored ${i^} database from RAM back to disk."
+			else
+				Print "${i^} database is not in RAM. Skipping this program..."
+			fi
+		fi
+	}
+
+	# Handle databases as respective program user, and as root stop and start services around it
+	Handle_Programs()
+	{
+		# As program user, handle the given program's database directly
+		(( $EUID )) && { Toggle_Link_To_Ram "$INPUT_PROG"; return; }
+
+		# As root, run Toggle_Link_To_Ram in a shell as respective program user, passing the required variables and functions
+		local i code astart_services=()
+		code=$(declare -p PROGRAM_NAME INPUT aFILE; declare -f Print Link_To_Ram Toggle_Link_To_Ram)
+		code+=$'\nEXIT_CODE=0\nToggle_Link_To_Ram "$1"\nexit "$EXIT_CODE"'
+
 		for i in "${!aFILE[@]}"
 		do
-
-			FP_DISK="/mnt/dietpi_userdata/$i"
-			FP_RAM="/tmp/${i}_db_link"
-
 			# Skip non-installed program
-			[[ -d $FP_DISK ]] || continue
-
-			Print "${i^} detected"
-
-			# Create update backup script
-			# - Remove script if it is a symlink, for security reasons
-			if [[ -L $FP_DISK/dietpi-servarr_to_ram.sh ]]
-			then
-				Print "Removing $FP_DISK/dietpi-servarr_to_ram.sh for security reasons, since it is a symlink..."
-				rm "$FP_DISK/dietpi-servarr_to_ram.sh" || { error=$? Print "Removing $FP_DISK/dietpi-servarr_to_ram.sh failed. Skipping this program..."; continue; }
-			fi
-			if [[ ! -f $FP_DISK/dietpi-servarr_to_ram.sh ]]
-			then
-				Print "Creating $FP_DISK/dietpi-servarr_to_ram.sh to be used as ${i^} custom script"
-				# shellcheck disable=SC2320
-				echo -e '#!/bin/dash\n/boot/dietpi/dietpi-servarr_to_ram 2 '"$i" > "$FP_DISK/dietpi-servarr_to_ram.sh" || { error=$? Print "Creating $FP_DISK/dietpi-servarr_to_ram.sh failed."; }
-				chmod +x "$FP_DISK/dietpi-servarr_to_ram.sh" || { error=$? Print "Applying $FP_DISK/dietpi-servarr_to_ram.sh execute permissions failed."; }
-				chown "$i:dietpi" "$FP_DISK/dietpi-servarr_to_ram.sh" || { error=$? Print "Applying $FP_DISK/dietpi-servarr_to_ram.sh ownership failed."; }
-			fi
-
-			# Remove RAM dir and database backup if it is a symlink, for security reasons
-			if [[ -L $FP_RAM ]]
-			then
-				Print "Removing ${i^} RAM directory ($FP_RAM) for security reasons, since it is a symlink..."
-				rm "$FP_RAM" || { error=$? Print "Removing ${i^} RAM directory symlink ($FP_RAM) failed. Skipping this program..."; continue; }
-			fi
-			if [[ -L $FP_DISK/${aFILE[$i]}.bak ]]
-			then
-				Print "Removing ${i^} database backup ($FP_DISK/${aFILE[$i]}.bak) for security reasons, since it is a symlink..."
-				rm "$FP_DISK/${aFILE[$i]}.bak" || { error=$? Print "Removing ${i^} database backup symlink ($FP_DISK/${aFILE[$i]}.bak) failed. Skipping this program..."; continue; }
-			fi
-
-			# Update backup
-			if (( $INPUT == 2 ))
-			then
-				if [[ -f $FP_RAM/${aFILE[$i]} ]]
-				then
-					Print "Updating ${i^} database backup..."
-					[[ -L $FP_DISK/${aFILE[$i]}.bak ]] && { error=1 Print "${i^} database backup ($FP_DISK/${aFILE[$i]}.bak) is a symlink again. Skipping this program..."; continue; }
-					sqlite3 "$FP_RAM/${aFILE[$i]}" ".save $FP_DISK/${aFILE[$i]}.bak" || { error=$? Print "Updating ${i^} database backup failed."; continue; }
-					Print "Updated ${i^} database backup."
-				else
-					Print "${i^} database is not in RAM. Skipping this program..."
-				fi
-				continue
-			fi
+			[[ -d /mnt/dietpi_userdata/$i ]] || continue
 
 			# If active, stop program before handling database and restart afterwards
-			if systemctl -q is-active "$i"
+			# - As root, systemctl uses the systemd private socket, so it works without D-Bus
+			if (( $INPUT != 2 )) && systemctl -q is-active "$i"
 			then
-				(( $EUID )) && { error=1 Print "${i^} service is running and can only be stopped as root. Skipping this program..."; continue; }
 				Print "Stopping ${i^} service..."
-				astart_services+=("$i")
 				systemctl stop "$i" || { error=$? Print "Stopping ${i^} service failed. Skipping this program..."; continue; }
+				astart_services+=("$i")
 			fi
 
-			# Link to RAM + backup
-			if (( $INPUT == 1 ))
-			then
-				Print "Linking ${i^} database to RAM..."
-				# - Pre-create RAM dir
-				[[ -L $FP_RAM ]] && { error=1 Print "${i^} RAM directory ($FP_RAM) is a symlink again. Skipping this program..."; continue; }
-				[[ -d $FP_RAM ]] || mkdir -p "$FP_RAM" || { error=$? Print "Pre-creating RAM directory for ${i^} failed ($FP_RAM). Skipping this program..."; continue; }
-				# - chown dir in case created by root but program user wants to store back to disk
-				chown "$i" "$FP_RAM" || EXIT_CODE=$?
-
-				# Process database file
-				FP_DISK+="/${aFILE[$i]}"
-				FP_RAM+="/${aFILE[$i]}"
-
-				# Source exists
-				local fp_target
-				if fp_target=$(readlink -e "$FP_DISK")
-				then
-					# Link to target exists, should only happen when running the script two times in same session
-					if [[ $fp_target == "$FP_RAM" ]]
-					then
-						Print "$FP_DISK already linked to RAM ($FP_RAM). Skipping this program..."
-
-					# Source exist, but is not linked to RAM yet
-					else
-						Link_To_Ram || continue
-					fi
-
-				# Source does not exist or is orphaned link, but backup exists, which is expected after system crash
-				elif [[ -f ${FP_DISK}.bak ]]
-				then
-					Print "$FP_DISK not found. Recovering from backup first (${FP_DISK}.bak)..."
-
-					# Remove possible orphaned symlink
-					[[ ! -L $FP_DISK ]] || rm "$FP_DISK" || { error=$? Print "Removing orphaned database symlink failed ($FP_DISK). Skipping this program..."; continue; }
-
-					# Recover from backup
-					[[ -L $FP_DISK.bak ]] && { error=1 Print "${i^} database backup ($FP_DISK.bak) is a symlink again. Skipping this program..."; continue; }
-					mv "${FP_DISK}.bak" "$FP_DISK" || { error=$? Print "Recovering database from backup failed (${FP_DISK}.bak). Skipping this program..."; continue; }
-
-					Link_To_Ram || continue
-				else
-					Print "$FP_DISK not found. Skipping this program..."
-				fi
-
-			# Store back to disk
-			elif (( $INPUT == 0 ))
-			then
-				if [[ -d $FP_RAM ]]
-				then
-					Print "Storing database from RAM ($FP_RAM) back to disk ($FP_DISK)..."
-					[[ -L $FP_RAM ]] && { error=1 Print "${i^} RAM directory ($FP_RAM) is a symlink again. Skipping this program..."; continue; }
-					# "-u" will only copy newer files, thus actually used by program.
-					# "--remove-destination" will remove expected existing symlinks.
-					cp -au --remove-destination "$FP_RAM/." "$FP_DISK" || { error=$? Print "Storing ${i^} database from RAM back to disk failed."; continue; }
-					rm -R "$FP_RAM"
-					# Remove orphaned symlinks, possible when -shm and -wal do currently not exist
-					local j
-					for j in "$FP_DISK/${aFILE[$i]}"{,-shm,-wal}
-					do
-						[[ ! -L $j || -f $j ]] || rm "$j" || EXIT_CODE=$?
-					done
-					Print "Stored ${i^} database from RAM back to disk."
-				else
-					Print "${i^} database is not in RAM. Skipping this program..."
-				fi
-			fi
+			setpriv --reuid="$i" --regid='dietpi' --init-groups --reset-env -- /bin/bash -c "$code" "$PROGRAM_NAME" "$i" || EXIT_CODE=$?
 		done
-
-		# Failsafe: When restoring to disk, "sync" now to prevent async issues!
-		(( $INPUT == 0 )) && sync
 
 		# Start programs we stopped before
 		# - NB: Due to Before=, *arr.service waits for dietpi-servarr_to_ram.service to finish, timing it out.
@@ -336,7 +353,7 @@ _EOF_
 	# Toggle Link to RAM
 	if [[ $INPUT == [012] ]]
 	then
-		Toggle_Link_To_Ram
+		Handle_Programs
 		(( $EXIT_CODE )) && Print '[ERROR] An issue has occurred. Please check the above output for details.'
 
 	# Enable/Disable Link to RAM on boot
@@ -402,17 +419,17 @@ _EOF_
 
 				'Link to RAM')
 					INPUT=1
-					Toggle_Link_To_Ram
+					Handle_Programs
 				;;
 
 				'Store to disk')
 					INPUT=0
-					Toggle_Link_To_Ram
+					Handle_Programs
 				;;
 
 				'Backup')
 					INPUT=2
-					Toggle_Link_To_Ram
+					Handle_Programs
 				;;
 
 				'Service')
