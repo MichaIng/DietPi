@@ -12104,12 +12104,17 @@ _EOF_
 			# Dependencies
 			Python_Deps cffi granian lxml msgspec
 
-			# RISC-V: granian needs to be compiled. With its fat LTO release profile, the compiler process reached 3.7 GiB RSS while RAM and swap of a 4 GiB system were full. Without LTO and with a single job, the build uses ~2.3 GiB in total.
+			# RISC-V: granian needs to be compiled
+			# - With its fat LTO release profile, the compiler process reached 3.7 GiB RSS while RAM and swap of a 4 GiB system were full.
+			# - Without LTO, a single job used up to 1.5 GiB RSS and ~2.6 GiB in total on a 2 GiB system. With 4 jobs and 0.6 GiB swap, the system hung.
 			local build_env=()
 			if (( $G_HW_ARCH == 11 ))
 			then
-				Min_Total_Memory 2560
-				build_env=('CARGO_PROFILE_RELEASE_LTO=off' 'CARGO_BUILD_JOBS=1')
+				Min_Total_Memory 3072
+				local max_jobs=$(( $RAM_PHYS / 1024 - 1 ))
+				(( $max_jobs > 0 )) || max_jobs=1
+				(( $max_jobs < $G_HW_CPU_CORES )) && build_env+=("CARGO_BUILD_JOBS=$max_jobs")
+				(( $RAM_PHYS < 4096 )) && build_env+=('CARGO_PROFILE_RELEASE_LTO=off')
 			fi
 
 			# Download: SearXNG is a rolling release, where every commit to the master branch is a release: https://docs.searxng.org/admin/update-searxng.html
@@ -12150,7 +12155,7 @@ _EOF_
 			G_EXEC /opt/searxng/venv/bin/python3 -m compileall -q /opt/searxng/searx
 
 			# User: Member of the redis group, if present, to access its UNIX socket for the limiter
-			Create_User -g dietpi -G redis -d /mnt/dietpi_userdata/searxng searxng
+			Create_User -G redis -d /mnt/dietpi_userdata/searxng searxng
 
 			# Settings: Preserve existing
 			G_EXEC mkdir -p /mnt/dietpi_userdata/searxng
@@ -12202,14 +12207,14 @@ ${limiter}valkey:
 ${limiter}  url: unix://${redis_sock:-/run/redis/redis-server.sock}?db=0
 _EOF_
 			fi
-			G_EXEC chown searxng:dietpi /mnt/dietpi_userdata/searxng
+			G_EXEC chown searxng:searxng /mnt/dietpi_userdata/searxng
 			G_EXEC chmod 0750 /mnt/dietpi_userdata/searxng
 
 			# Service: https://github.com/searxng/searxng/blob/master/container/entrypoint.sh
 			# - Port and bind address in settings.yml are not used by Granian, but only by the development server.
 			# - Limit blocking threads, else Granian warns about up to 512 threads: https://github.com/searxng/searxng/blob/master/container/Dockerfile
 			# - All caches are SQLite databases in /tmp, hence PrivateTmp can be used.
-			cat << '_EOF_' > /etc/systemd/system/searxng.service
+			cat << '_EOF_' > /etc/systemd/system/searxng.service || exit 1
 [Unit]
 Description=SearXNG (DietPi)
 Wants=network-online.target
