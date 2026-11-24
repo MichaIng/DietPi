@@ -255,6 +255,7 @@ Process_Software()
 			'rustdeskserver') aSERVICES[$i]='rustdesksignal rustdeskrelay' aTCP[$i]='21115 21116 21117 21118 21119' aUDP[$i]='21116';;
 			'sabnzbd') aSERVICES[$i]='sabnzbd' aTCP[$i]='8080'; (( $arch == 10 )) || aDELAY[$i]=30;; # ToDo: Solve conflict with Airsonic
 			'sambaclient') aCOMMANDS[$i]='smbclient -V';;
+			'searxng') aSERVICES[$i]='searxng' aTCP[$i]='8889';;
 			'sambaserver') aSERVICES[$i]='smbd' aTCP[$i]='139 445' aUDP[$i]='137 138';;
 			'scrypted') aSERVICES[$i]='scrypted' aTCP[$i]='10443 11080 10081';; # ports: https (secure), http (insecure), debug
 			'shairportsync') aSERVICES[$i]='shairport-sync' aTCP[$i]='5000';; # AirPlay 2 would be TCP port 7000
@@ -343,6 +344,7 @@ do
 		'vaultwarden') Process_Software sqlite;;
 		'immich') Process_Software ffmpeg nodejs redis postgresql;;
 		'paperlessngx') Process_Software redis python3;;
+		'searxng') Process_Software python3;;
 		'virtualhere'|'cups') Process_Software avahidaemon;;
 		'lasp') Process_Software apache sqlite php;;
 		'lamp') Process_Software apache mariadb php;;
