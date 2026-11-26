@@ -219,7 +219,6 @@ Process_Software()
 			'openhab') aSERVICES[$i]='openhab' aTCP[$i]='8444'; (( $emulation )) && aDELAY[$i]=600;;
 			'opensshclient') aCOMMANDS[$i]='ssh -V';;
 			'opensshserver') aSERVICES[$i]='ssh' aTCP[$i]='22';;
-			'opensshsftpserver') aCOMMANDS[$i]='test -x /usr/lib/sftp-server';;
 			'opentyrian') aCOMMANDS[$i]='/usr/games/opentyrian/opentyrian -h';;
 			'openvpn') aCOMMANDS[$i]='openvpn --version';; # aSERVICES[$i]='openvpn' aUDP[$i]='1194' GitHub Actions runners do not support the TUN module
 			'paperlessngx') aSERVICES[$i]='paperless-webserver paperless-consumer paperless-task-queue paperless-scheduler' aTCP[$i]='8010';;
@@ -258,6 +257,7 @@ Process_Software()
 			'sambaclient') aCOMMANDS[$i]='smbclient -V';;
 			'sambaserver') aSERVICES[$i]='smbd' aTCP[$i]='139 445' aUDP[$i]='137 138';;
 			'scrypted') aSERVICES[$i]='scrypted' aTCP[$i]='10443 11080 10081';; # ports: https (secure), http (insecure), debug
+			'sftpserver') aCOMMANDS[$i]='/usr/lib/sftp-server -h 2>&1 | grep '^usage:'';;
 			'shairportsync') aSERVICES[$i]='shairport-sync' aTCP[$i]='5000';; # AirPlay 2 would be TCP port 7000
 			'snapcastclient') aSERVICES[$i]='snapclient';;
 			'snapcastserver') aSERVICES[$i]='snapserver' aTCP[$i]='1704 1780';;
