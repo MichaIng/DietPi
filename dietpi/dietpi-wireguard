@@ -1144,6 +1144,7 @@ Server_Create()
 		key=$(wg genkey) || { Fail 'Generating the server key failed.'; return 1; }
 	fi
 	# IPv6 forwarding can only be enabled for all interfaces: the per-interface "forwarding" setting only switches between host and router behaviour, e.g. whether router advertisements are accepted.
+	# Docker sets the FORWARD policy to DROP, hence replies to clients need to be accepted explicitly: https://github.com/MichaIng/DietPi/issues/8500
 	# "accept_ra=2" needs to be set before, else enabling forwarding removes the default route of the LAN interface, which it got from router advertisements.
 	cat << _EOF_ > "$conf" || { rm -f "$conf"; Fail "Writing $conf failed."; return 1; }
 [Interface]
@@ -1154,10 +1155,10 @@ ListenPort = $2
 PostUp = sysctl net.ipv4.conf.%i.forwarding=1 net.ipv4.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').forwarding=1
 PostUp = sysctl net.ipv6.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').accept_ra=2
 PostUp = sysctl net.ipv6.conf.all.forwarding=1
-PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -s $net -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
-PostUp = ip6tables -A FORWARD -i %i -j ACCEPT; ip6tables -t nat -A POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
-PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -s $net -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
-PostDown = ip6tables -D FORWARD -i %i -j ACCEPT; ip6tables -t nat -D POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -A POSTROUTING -s $net -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
+PostUp = ip6tables -A FORWARD -i %i -j ACCEPT; ip6tables -A FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; ip6tables -t nat -A POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -D POSTROUTING -s $net -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
+PostDown = ip6tables -D FORWARD -i %i -j ACCEPT; ip6tables -D FORWARD -o %i -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; ip6tables -t nat -D POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
 _EOF_
 	wg-quick strip "$conf" > /dev/null || { G_EXEC rm "$conf"; Fail "The created config $conf is invalid."; return 1; }
 	G_DIETPI-NOTIFY 0 "Created server $1: $conf"

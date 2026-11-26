@@ -108,7 +108,7 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/phpmyadmin/phpm
 aREGEX[$software_id]='version='\''[^'\'']*'\'
 aREPLACE[$software_id]='version='\''$release'\'
 
-software_id='prometheusnodeexporter'
+software_id='prometheusexporter'
 aURL[$software_id]='https://api.github.com/repos/prometheus/node_exporter/releases/latest'
 aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/node_exporter-.*\.linux-$arch\.tar\.gz(?=\")"'
 aARCH[$software_id]='armv6 armv7 arm64 amd64 riscv64'
@@ -192,6 +192,11 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/louislam/uptime
 aREGEX[$software_id]='version='\''[^'\'']*'\''; '
 aREPLACE[$software_id]='version='\''$release'\''; '
 
+software_id='yuvomi'
+aURL[$software_id]='https://api.github.com/repos/ulsklyc/yuvomi/releases/latest'
+aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/yuvomi-[0-9.]*-dist\.tar\.gz(?=\")"'
+aREGEX[$software_id]='https://github.com/ulsklyc/yuvomi/releases/download/.*/yuvomi-.*-dist\.tar\.gz'
+
 software_id='forgejo'
 aURL[$software_id]='https://codeberg.org/api/v1/repos/forgejo/forgejo/releases/latest'
 aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*-linux-$arch\.xz(?=\")"'
@@ -266,8 +271,7 @@ aURL[$software_id]='https://api.github.com/repos/Spotifyd/spotifyd/releases/late
 aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/spotifyd-linux-$arch-full\.tar\.gz(?=\")"'
 aARCH[$software_id]='armv7 aarch64 x86_64'
 aARCH_CHECK[$software_id]='riscv64'
-aREGEX[$software_id]='https://github.com/Spotifyd/spotifyd/releases/download/v[^$].*/spotifyd-linux-\$arch-\$variant\.tar\.gz'
-aREPLACE[$software_id]='${release/full/\$variant}'
+aREGEX[$software_id]='https://github.com/Spotifyd/spotifyd/releases/download/v[^$].*/spotifyd-linux-\$arch-full\.tar\.gz'
 
 software_id='rclone'
 aURL[$software_id]='https://api.github.com/repos/rclone/rclone/releases/latest'
@@ -339,6 +343,11 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/immich-app/immi
 aREGEX[$software_id]='version='\''[^'\'']*'\'
 aREPLACE[$software_id]='version='\''$release'\'
 
+software_id='paperlessngx'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/paperless-ngx/paperless-ngx/releases/latest'\'' | grep -Po '\''"tag_name": *"\K[^"]+(?=")'\'
+aREGEX[$software_id]='version='\''[^'\'']*'\'
+aREPLACE[$software_id]='version='\''$release'\'
+
 software_id='uv'
 aURL[$software_id]='https://api.github.com/repos/astral-sh/uv/releases/latest'
 aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/uv-$arch\.tar\.gz(?=\")"'
@@ -350,6 +359,12 @@ aURL[$software_id]='https://api.github.com/repos/prometheus/prometheus/releases/
 aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/prometheus-[0-9][^\"\/]*\.linux-$arch\.tar\.gz(?=\")"'
 aARCH[$software_id]='armv6 armv7 arm64 amd64 riscv64'
 aREGEX[$software_id]='https://github\.com/prometheus/prometheus/releases/download/.*/prometheus-[0-9][^/]*\.linux-\$arch\.tar\.gz'
+
+software_id='solidping'
+aURL[$software_id]='https://api.github.com/repos/fclairamb/solidping/releases/latest'
+aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/solidping-linux-$arch\.gz(?=\")"'
+aARCH[$software_id]='arm64 amd64 riscv64'
+aREGEX[$software_id]='https://github\.com/fclairamb/solidping/releases/download/.*/solidping-linux-\$arch\.gz'
 
 ### URL check loop ###
 
