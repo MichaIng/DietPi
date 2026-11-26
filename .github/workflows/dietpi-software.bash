@@ -160,7 +160,6 @@ Process_Software()
 			'go') aCOMMANDS[$i]='go version';;
 			'gogs') aSERVICES[$i]='gogs' aTCP[$i]='3000';;
 			'grafana') aSERVICES[$i]='grafana-server' aTCP[$i]='3001' aDELAY[$i]=30;;
-			'greenendsftpserver') aCOMMANDS[$i]='test -x /usr/lib/sftp-server';;
 			'gzdoom') aCOMMANDS[$i]='gzdoom -norun | grep '\''^GZDoom version '\';;
 			'haproxy') aSERVICES[$i]='haproxy' aTCP[$i]='80 1338';;
 			'homeassistant') aSERVICES[$i]='home-assistant' aTCP[$i]='8123'; (( $emulation )) && aDELAY[$i]=900 || aDELAY[$i]=60;;
@@ -220,6 +219,7 @@ Process_Software()
 			'openhab') aSERVICES[$i]='openhab' aTCP[$i]='8444'; (( $emulation )) && aDELAY[$i]=600;;
 			'opensshclient') aCOMMANDS[$i]='ssh -V';;
 			'opensshserver') aSERVICES[$i]='ssh' aTCP[$i]='22';;
+			'opensshsftpserver') aCOMMANDS[$i]='test -x /usr/lib/sftp-server';;
 			'opentyrian') aCOMMANDS[$i]='/usr/games/opentyrian/opentyrian -h';;
 			'openvpn') aCOMMANDS[$i]='openvpn --version';; # aSERVICES[$i]='openvpn' aUDP[$i]='1194' GitHub Actions runners do not support the TUN module
 			'paperlessngx') aSERVICES[$i]='paperless-webserver paperless-consumer paperless-task-queue paperless-scheduler' aTCP[$i]='8010';;
