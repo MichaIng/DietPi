@@ -1150,11 +1150,12 @@ _EOF_
 		# SBC-specific Bluetooth kernel modules which need to be blacklisted, to not load automatically during boot
 		local aBLUETOOTH_MODULES=()
 		case $G_HW_MODEL in
-			73|102|103) aBLUETOOTH_MODULES+=('hci_uart');; # ROCK Pi S, NanoPi R76S/M5 official M.2 WiFi card. This kernel module is used by other SBCs, but e.g. on ROCK 4 SE it is needed as well for WiFi: https://github.com/MichaIng/DietPi/issues/6943. On RPi, it is not needed to blacklist it, since it is not loaded with dtoverlay=disable-bt
-			83|88|89|99|105) aBLUETOOTH_MODULES+=('sprdbt_tty');; # Orange Pi Zero 3/Zero 2W/3 LTS/3/4 LTS
+			64|73|91|94|102|103) aBLUETOOTH_MODULES+=('hci_uart');; # NanoPi NEO Air, ROCK Pi S, Orange Pi 5 Max/Ultra, NanoPi R76S/M5 official M.2 WiFi card. This kernel module is used by other SBCs, but e.g. on ROCK 4 SE and probably Orange Pi 3 it is needed as well for WiFi: https://github.com/MichaIng/DietPi/issues/6943. On RPi, it is not needed to blacklist it, since it is not loaded with dtoverlay=disable-bt
+			83|88|89|105) aBLUETOOTH_MODULES+=('sprdbt_tty');; # Orange Pi Zero 3/Zero 2W/3 LTS/4 LTS
 			87) [[ $G_HW_REVISION == '1.1' ]] && aBLUETOOTH_MODULES+=('sprdbt_tty');; # Orange Pi 3B v1.1
-			91|94|95) aBLUETOOTH_MODULES+=('btsdio');; # Orange Pi 5 Max/Ultra/CM5
 			107|108|111) aBLUETOOTH_MODULES+=('aic8800_btlpm');; # Orange Pi 4 Pro/Zero 3W/Zero 4 with Xunlong sun60iw2 vendor kernel in-tree AIC8800 driver
+			90) { local compatible; read -rd '' compatible < /proc/device-tree/compatible; } 2> /dev/null; [[ $compatible == 'radxa,zero-3e' ]] || aBLUETOOTH_MODULES+=('aic8800_btlpm');; # Radxa ZERO 3: Assume AIC8800 if we are not certain that it is a 3E
+			95) { local compatible; read -rd '' compatible < /proc/device-tree/compatible; } 2> /dev/null; [[ $compatible == 'rockchip,rk3588s-orangepi-cm5' ]] || aBLUETOOTH_MODULES+=('hci_uart');; # Orange Pi CM5: Assume tablet base board with AP6256 if we are not certain that it is another base board without onboard WiFi/BT
 			*) :;;
 		esac
 
@@ -1174,6 +1175,12 @@ _EOF_
 			# Remove explicit Bluetooth module loads
 			[[ -f '/etc/modules-load.d/dietpi-enable_bluetooth.conf' ]] && G_EXEC rm /etc/modules-load.d/dietpi-enable_bluetooth.conf
 
+			# Purge packages first, which stops services which might hold the kernel modules
+			if (( $G_DIETPI_INSTALL_STAGE >= 0 ))
+			then
+				G_AGP bluez bluez-firmware pi-bluetooth sprd-bluetooth aic8800-bluetooth
+			fi
+
 			# Unload and blacklist kernel modules
 			> /etc/modprobe.d/dietpi-disable_bluetooth.conf # keep as flag for dietpi-config, until we have a better idea
 			for i in "${aBLUETOOTH_MODULES[@]}"
@@ -1181,12 +1188,6 @@ _EOF_
 				G_EXEC eval "echo 'blacklist $i' >> /etc/modprobe.d/dietpi-disable_bluetooth.conf"
 				G_EXEC_NOFAIL=1 G_EXEC modprobe -rf "$i"
 			done
-
-			# Purge packages
-			if (( $G_DIETPI_INSTALL_STAGE >= 0 ))
-			then
-				G_AGP bluez bluez-firmware pi-bluetooth sprd-bluetooth
-			fi
 
 		elif [[ $INPUT_DEVICE_VALUE == 'enable' ]]
 		then
@@ -1230,14 +1231,20 @@ _EOF_
 			then
 				G_EXEC systemctl enable hciuart
 
-			# Orange Pi Zero 3/Zero 2W/3B v1.1/3 LTS/3/4 LTS: Module does not load automatically
-			elif [[ $G_HW_MODEL =~ ^(83|88|89|99|105)$ || ( $G_HW_MODEL == 87 && $G_HW_REVISION == '1.1' ) ]]
+			# Orange Pi Zero 3/Zero 2W/3B v1.1/3 LTS/4 LTS: Module does not load automatically
+			elif [[ $G_HW_MODEL =~ ^(83|88|89|105)$ || ( $G_HW_MODEL == 87 && $G_HW_REVISION == '1.1' ) ]]
 			then
 				G_EXEC eval 'echo '\''sprdbt_tty'\'' > /etc/modules-load.d/dietpi-enable_bluetooth.conf'
 				G_AG_CHECK_INSTALL_PREREQ sprd-bluetooth
 
 			# - Orange Pi 4 Pro/Zero 3W/Zero 4 with Xunlong sun60iw2 vendor kernel in-tree AIC8800 driver module does not load automatically
 			elif [[ $G_HW_MODEL =~ ^(107|108|111)$ ]]
+			then
+				G_EXEC eval 'echo '\''aic8800_btlpm'\'' > /etc/modules-load.d/dietpi-enable_bluetooth.conf'
+				G_AG_CHECK_INSTALL_PREREQ aic8800-bluetooth
+
+			# - Radxa ZERO 3W with Radxa AIC8800 driver module does not load automatically
+			elif [[ $G_HW_MODEL == 90 && ${aBLUETOOTH_MODULES[0]} == 'aic8800_btlpm' ]]
 			then
 				G_EXEC eval 'echo '\''aic8800_btlpm'\'' > /etc/modules-load.d/dietpi-enable_bluetooth.conf'
 			fi
@@ -1352,14 +1359,16 @@ Turning off IPv6 for them removes the IPv6 addresses from the server and client 
 		local aWIFI_MODULES=()
 		case $G_HW_MODEL in
 			40|44|52) aWIFI_MODULES+=('r8723bs');; # PINE A64, Pinebook, ASUS Tinker Board. ToDo: Will be rtw88_8723bs from Linux 7.4 with RTW88
-			64|95) aWIFI_MODULES+=('brcmfmac');; # NanoPi NEO Air, Orange Pi CM5. On RPi, it is not needed to blacklist it, since it is not loaded with dtoverlay=disable-wifi
+			64|99) aWIFI_MODULES+=('brcmfmac');; # NanoPi NEO Air, Orange Pi 3. On RPi, it is not needed to blacklist it, since it is not loaded with dtoverlay=disable-wifi
 			67) aWIFI_MODULES+=('8189es');; # NanoPi K1 Plus
 			73) aWIFI_MODULES+=('8723ds');; # ROCK Pi S. ToDo: rtw88_8723ds after moving to mainline driver
-			83|88|89|99|105) aWIFI_MODULES+=('sprdwl_ng');; # Orange Pi Zero 3/Zero 2W/3 LTS/3/4 LTS
+			83|88|89|105) aWIFI_MODULES+=('sprdwl_ng');; # Orange Pi Zero 3/Zero 2W/3 LTS/4 LTS
 			87) [[ $G_HW_REVISION == '1.1' ]] && aWIFI_MODULES+=('sprdwl_ng');; # Orange Pi 3B v1.1
 			91|94) ls /lib/modules/*/kernel/drivers/net/wireless/rockchip_wlan/rkwifi/bcmdhd/bcmdhd.ko* &> /dev/null && aWIFI_MODULES+=('bcmdhd') || aWIFI_MODULES+=('brcmfmac');; # Orange Pi 5 Max/Ultra
 			102|103) aWIFI_MODULES+=('rtw88_8822cs');; # NanoPi R76S/M5 official M.2 WiFi card
 			107|108|111) aWIFI_MODULES+=('aic8800_fdrv');; # Orange Pi 4 Pro/Zero 3W/Zero 4 with Xunlong sun60iw2 vendor kernel in-tree AIC8800 driver
+			90) { local compatible; read -rd '' compatible < /proc/device-tree/compatible; } 2> /dev/null; [[ $compatible == 'radxa,zero-3e' ]] || aWIFI_MODULES+=('aic8800_fdrv');; # Radxa ZERO 3: Assume AIC8800 if we are not certain that it is a 3E
+			95) { local compatible; read -rd '' compatible < /proc/device-tree/compatible; } 2> /dev/null; [[ $compatible == 'rockchip,rk3588s-orangepi-cm5' ]] || aWIFI_MODULES+=('brcmfmac');; # Orange Pi CM5: Assume tablet base board with AP6256 if we are not certain that it is another base board without onboard WiFi/BT
 			*) :;;
 		esac
 
@@ -1390,7 +1399,7 @@ Turning off IPv6 for them removes the IPv6 addresses from the server and client 
 			case $G_HW_MODEL in
 				40|44|52) G_EXEC eval 'echo '\''options r8723bs rtw_power_mgnt=0'\'' > /etc/modprobe.d/dietpi-disable_wifi_powersaving.conf';; # PINE A64, Pinebook, ASUS Tinker Board
 				67) G_EXEC eval 'echo '\''options 8189es rtw_power_mgnt=0'\'' > /etc/modprobe.d/dietpi-disable_wifi_powersaving.conf';; # NanoPi K1 Plus
-				83|88|89|99|105) G_EXEC eval 'echo '\''sprdwl_ng'\'' > /etc/modules-load.d/dietpi-enable_wifi.conf';; # Orange Pi Zero 3/Zero 2W/3 LTS/3/4 LTS: UNISOC/Spreadtrum WiFi driver module does not load automatically
+				83|88|89|105) G_EXEC eval 'echo '\''sprdwl_ng'\'' > /etc/modules-load.d/dietpi-enable_wifi.conf';; # Orange Pi Zero 3/Zero 2W/3 LTS/4 LTS: UNISOC/Spreadtrum WiFi driver module does not load automatically
 				87) [[ $G_HW_REVISION == '1.1' ]] && G_EXEC eval 'echo '\''sprdwl_ng'\'' > /etc/modules-load.d/dietpi-enable_wifi.conf';; # Orange Pi 3B v1.1: UNISOC/Spreadtrum WiFi driver module does not load automatically
 				107|108|111) G_EXEC eval 'echo '\''aic8800_fdrv'\'' > /etc/modules-load.d/dietpi-enable_wifi.conf';; # Orange Pi 4 Pro/Zero 3W/Zero 4 with Xunlong sun60iw2 vendor kernel in-tree AIC8800 driver module does not load automatically
 				*) :;;
