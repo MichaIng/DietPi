@@ -257,6 +257,7 @@ Process_Software()
 			'sambaclient') aCOMMANDS[$i]='smbclient -V';;
 			'sambaserver') aSERVICES[$i]='smbd' aTCP[$i]='139 445' aUDP[$i]='137 138';;
 			'scrypted') aSERVICES[$i]='scrypted' aTCP[$i]='10443 11080 10081';; # ports: https (secure), http (insecure), debug
+			'sftpserver') aCOMMANDS[$i]='/usr/lib/sftp-server -h 2>&1 | grep '\''^usage:'\';;
 			'shairportsync') aSERVICES[$i]='shairport-sync' aTCP[$i]='5000';; # AirPlay 2 would be TCP port 7000
 			'snapcastclient') aSERVICES[$i]='snapclient';;
 			'snapcastserver') aSERVICES[$i]='snapserver' aTCP[$i]='1704 1780';;
@@ -274,6 +275,7 @@ Process_Software()
 			'torhotspot') aSERVICES[$i]='tor' aTCP[$i]='9040' aUDP[$i]='53';;
 			'torrelay') aSERVICES[$i]='tor' aTCP[$i]='80 443 9051';;
 			'transmission') aSERVICES[$i]='transmission-daemon' aTCP[$i]='9091 51413' aUDP[$i]='51413';;
+			'tvheadend') aSERVICES[$i]='tvheadend' aTCP[$i]='9981 9982';;
 			'ubooquity') aSERVICES[$i]='ubooquity' aTCP[$i]='2038 2039'; (( $emulation )) && aDELAY[$i]=60;;
 			'unbound') aSERVICES[$i]='unbound' aUDP[$i]='53' aTCP[$i]='53'; [[ ${aSERVICES[adguardhome]} ]] && aUDP[$i]='5335' aTCP[$i]='5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed
 			'unrar') aCOMMANDS[$i]='unrar -V';;
