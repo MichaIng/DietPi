@@ -1690,6 +1690,14 @@ Names are accepted as well, e.g. "Node-RED". Legacy numeric IDs are still suppor
 		aSOFTWARE_DESC[$software_id]='Network File System server'
 		aSOFTWARE_CATX[$software_id]=14
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/file_servers/#nfs'
+		#------------------
+		software_id='sftpserver'
+		aSOFTWARE_ALIAS['opensshsftpserver']='sftpserver'
+		aSOFTWARE_NAME[$software_id]='OpenSSH SFTP Server'
+		aSOFTWARE_DESC[$software_id]='SFTP server, e.g. for Dropbear'
+		aSOFTWARE_CATX[$software_id]=14
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/file_servers/#openssh-sftp-server'
+		(( $G_DISTRO < 9 )) && aSOFTWARE_DEPS[$software_id]='opensshclient' # package dependency until Forky
 
 		# VPN Servers
 		#--------------------------------------------------------------------------------
@@ -3244,6 +3252,12 @@ _EOF_
 
 			# Mark Dropbear for uninstall
 			dpkg-query -s 'dropbear' &> /dev/null && aSOFTWARE_INSTALL_STATE[dropbear]=-1
+		fi
+
+		if To_Install sftpserver
+		then
+			# If installed as OpenSSH server dependency already, this marks it as manually installed, so that it is kept when the OpenSSH server is uninstalled.
+			G_AGI openssh-sftp-server
 		fi
 
 		if To_Install postgresql postgresql
@@ -13254,7 +13268,7 @@ _EOF_
 		G_CONFIG_INJECT 'AUTO_SETUP_DESKTOP=' "AUTO_SETUP_DESKTOP=$1" /boot/dietpi.txt
 	}
 
-	# $1: 0=None -1=Dropbear -2=OpenSSH
+	# $1: 0=None -1=Dropbear -2=OpenSSH -3=Dropbear with OpenSSH SFTP Server
 	Apply_SSHServer_Choices()
 	{
 		if (( $1 == 0 ))
@@ -13269,6 +13283,18 @@ _EOF_
 		else
 			[[ ${aSOFTWARE_INSTALL_STATE[dropbear]} == [01] ]] && aSOFTWARE_INSTALL_STATE[dropbear]=1 || aSOFTWARE_INSTALL_STATE[dropbear]=2
 			[[ ${aSOFTWARE_INSTALL_STATE[opensshserver]} == [01] ]] && aSOFTWARE_INSTALL_STATE[opensshserver]=0 || aSOFTWARE_INSTALL_STATE[opensshserver]=-1
+		fi
+
+		# OpenSSH SFTP Server: Install with Dropbear + SFTP, keep an installed one with OpenSSH, remove it with Dropbear only or no SSH server
+		if (( $1 == -3 ))
+		then
+			[[ ${aSOFTWARE_INSTALL_STATE[sftpserver]} == [01] ]] && aSOFTWARE_INSTALL_STATE[sftpserver]=1 || aSOFTWARE_INSTALL_STATE[sftpserver]=2
+
+		elif (( $1 == -2 ))
+		then
+			(( ${aSOFTWARE_INSTALL_STATE[sftpserver]} == 1 )) && aSOFTWARE_INSTALL_STATE[sftpserver]=0
+		else
+			[[ ${aSOFTWARE_INSTALL_STATE[sftpserver]} == [01] ]] && aSOFTWARE_INSTALL_STATE[sftpserver]=0 || aSOFTWARE_INSTALL_STATE[sftpserver]=-1
 		fi
 	}
 
@@ -15171,7 +15197,14 @@ _EOF_
 
 		if To_Uninstall opensshserver
 		then
-			G_AGP openssh-{,sftp-}server
+			# The OpenSSH SFTP server is kept if it was installed explicitly, else autopurged along with it.
+			G_AGP openssh-server
+		fi
+
+		if To_Uninstall sftpserver
+		then
+			# The OpenSSH server depends on the OpenSSH SFTP server, hence mark it for autoremoval only.
+			dpkg-query -s 'openssh-sftp-server' &> /dev/null && G_EXEC apt-mark auto openssh-sftp-server
 		fi
 
 		if To_Uninstall papermc
@@ -16351,7 +16384,11 @@ We allow it to take up to 30 minutes, it's process can be followed, please be pa
 
 		# Selected SSH server choice
 		local sshserver_text='None'
-		if (( ${aSOFTWARE_INSTALL_STATE[dropbear]} > 0 )); then
+		if (( ${aSOFTWARE_INSTALL_STATE[dropbear]} > 0 && ${aSOFTWARE_INSTALL_STATE[sftpserver]} > 0 )); then
+
+			sshserver_text="${aSOFTWARE_NAME[dropbear]} + SFTP"
+
+		elif (( ${aSOFTWARE_INSTALL_STATE[dropbear]} > 0 )); then
 
 			sshserver_text=${aSOFTWARE_NAME[dropbear]}
 
@@ -16478,6 +16515,7 @@ List of installed software and their online documentation URLs:
 
 					'None' ': Not required / manual setup'
 					"${aSOFTWARE_NAME[dropbear]}" ": ${aSOFTWARE_DESC[dropbear]} (recommended)"
+					"${aSOFTWARE_NAME[dropbear]} + SFTP" ": Dropbear with ${aSOFTWARE_NAME[sftpserver]}"
 					"${aSOFTWARE_NAME[opensshserver]}" ": ${aSOFTWARE_DESC[opensshserver]}"
 				)
 
@@ -16486,6 +16524,7 @@ List of installed software and their online documentation URLs:
 				G_WHIP_MENU 'Please select desired SSH server:
 \n- None: Selecting this option will uninstall all SSH servers. This reduces system resources and improves performance. Useful for users who do NOT require networked/remote terminal access.
 \n- Dropbear (recommended): Lightweight SSH server, installed by default on DietPi systems.
+\n- Dropbear + SFTP: Dropbear plus the OpenSSH SFTP server, for SFTP access and modern SCP clients.
 \n- OpenSSH: A feature-rich SSH server with SFTP/SCP support, at the cost of increased resource usage.' || return 0
 
 				# Apply selection
@@ -16493,11 +16532,12 @@ List of installed software and their online documentation URLs:
 
 					'None') Apply_SSHServer_Choices 0;;
 					"${aSOFTWARE_NAME[opensshserver]}") Apply_SSHServer_Choices -2;;
+					"${aSOFTWARE_NAME[dropbear]} + SFTP") Apply_SSHServer_Choices -3;;
 					*) Apply_SSHServer_Choices -1;;
 				esac
 
 				# Check for changes
-				for i in dropbear opensshserver
+				for i in dropbear sftpserver opensshserver
 				do
 					(( ${aSOFTWARE_INSTALL_STATE[$i]} == 1 )) && tobeinstalled_text+="\n - ${aSOFTWARE_NAME[$i]}"
 					(( ${aSOFTWARE_INSTALL_STATE[$i]} == -1 )) && toberemoved_text+="\n - ${aSOFTWARE_NAME[$i]}"
