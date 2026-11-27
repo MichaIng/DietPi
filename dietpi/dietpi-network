@@ -636,7 +636,7 @@ Change_WifiCountryCode()
 	if [[ $G_WHIP_RETURNED_VALUE == 'Manual' ]]
 	then
 		G_WHIP_INPUTBOX_REGEX='^[[:upper:]][[:upper:]]$'
-		G_WHIP_INPUTBOX_REGEX_TEXT='a 2 capital letter country code'
+		G_WHIP_INPUTBOX_REGEX_TEXT='be a 2 capital letter country code'
 		G_WHIP_DEFAULT_ITEM=$CURRENT_WIFI_COUNTRYCODE
 		G_WHIP_INPUTBOX 'Please enter a 2 capital letter country code: https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2' || return 0
 	fi
@@ -747,16 +747,22 @@ Get_Iface_Effective_Net()
 	echo "$enabled|$mode|$cidr|$gateway"
 }
 
+# Disable the given interface in its config, to not be brought up at boot. Only if the 2nd argument is "1", bring it down immediately as well.
 Disable_Conflicting_Interface()
 {
-	local iface=$1 fp
+	local iface=$1 restart=$2 fp
 	for fp in "/etc/network/interfaces.d/$iface.conf" '/etc/network/interfaces'
 	do
 		[[ -f $fp ]] || continue
 		G_EXEC_NOEXIT=1 G_EXEC sed --follow-symlinks -i "/^[[:blank:]]*\(allow-hotplug\|auto\)[[:blank:]]\+$iface\([[:blank:]]\|\$\)/s/^/#/" "$fp"
 	done
-	G_EXEC_NOFAIL=1 G_EXEC ifdown --force "$iface"
-	G_DIETPI-NOTIFY 2 "Disabled interface \"$iface\" to resolve network conflict"
+	if (( $restart ))
+	then
+		G_EXEC_NOFAIL=1 G_EXEC ifdown --force "$iface"
+		G_DIETPI-NOTIFY 2 "Disabled interface \"$iface\" to resolve network conflict"
+	else
+		G_DIETPI-NOTIFY 2 "Saved interface \"$iface\" as disabled to resolve network conflict on next reboot"
+	fi
 }
 
 # Warn if the static gateway is outside of the subnet of the static IP address: It is then not reachable, hence the default route cannot be added and "ifup" fails: https://github.com/MichaIng/DietPi/issues/7542
@@ -780,13 +786,15 @@ Check_Gateway_Subnet()
 }
 
 # Avoid two enabled interfaces on the same subnet (asymmetric routing risk) or two default routes (static gateways, or DHCP which usually assigns one)
+# - Reads and might reset the "restart" variable of the calling Apply_Current_Interface(): If changes are only saved, conflicting interfaces are only saved as disabled as well. If changes are applied, the user can choose to only save changes to all interfaces instead, which is safer when connected via SSH.
+# - Conflicting interfaces are disabled only after all conflicts have been handled, so that cancelling any dialog leaves all interfaces untouched.
 Check_Network_Conflicts()
 {
 	(( $APPLY_FORCE )) && return 0 # skip check if settings are to be applied anyway
 	(( $CURRENT_IFACE_ENABLED )) || return 0
 	[[ $CURRENT_IFACE_MODE == 'static' || $CURRENT_IFACE_MODE == 'dhcp' ]] || return 0
 	Check_Gateway_Subnet || return 1
-	local iface o_enabled o_mode o_cidr o_gateway reason
+	local iface o_enabled o_mode o_cidr o_gateway reason disable=()
 	for iface in /sys/class/net/*
 	do
 		[[ $iface != *'/lo' && -d $iface ]] || continue
@@ -823,19 +831,37 @@ Check_Network_Conflicts()
 		# Without terminal, this cannot be confirmed
 		(( $G_INTERACTIVE )) || { G_DIETPI-NOTIFY 1 "Network conflict detected: Interface \"$iface\" $reason. Use --force to apply the settings anyway."; return 1; }
 
-		G_WHIP_MENU_ARRAY=(
-			'Ignore' ': Proceed and keep both interfaces enabled (NOT recommended)'
-			'Disable' ": Disable \"$iface\" and proceed"
-		)
-		G_WHIP_MENU "[WARNING] Network conflict detected:\n\nInterface \"$iface\" $reason.\n\nHaving two enabled interfaces on the same subnet, or two default routes, can cause asymmetric traffic and break connectivity (e.g. to a connected SSH client).\n\nPlease select how to proceed:" || return 1
-		[[ $G_WHIP_RETURNED_VALUE == 'Disable' ]] && Disable_Conflicting_Interface "$iface"
+		local hint=
+		G_WHIP_MENU_ARRAY=('Ignore' ': Proceed and keep both interfaces enabled (NOT recommended)')
+		if (( $restart ))
+		then
+			G_WHIP_MENU_ARRAY+=(
+				'Disable' ": Disable \"$iface\" and apply all changes now"
+				'Save' ": Disable \"$iface\" and save all changes for next reboot"
+			)
+			hint="\n\nIf connected via SSH, saving all changes to be applied on next reboot is safer: Disabling \"$iface\" now breaks connections through it, while \"$CURRENT_IFACE\" might not come up as expected."
+		else
+			G_WHIP_MENU_ARRAY+=('Disable' ": Save \"$iface\" as disabled, to be applied next reboot")
+		fi
+		G_WHIP_MENU "[WARNING] Network conflict detected:\n\nInterface \"$iface\" $reason.\n\nHaving two enabled interfaces on the same subnet, or two default routes, can cause asymmetric traffic and break connectivity (e.g. to a connected SSH client).$hint\n\nPlease select how to proceed:" || return 1
+		case $G_WHIP_RETURNED_VALUE in
+			'Disable') disable+=("$iface");;
+			'Save') disable+=("$iface"); restart=0;;
+			*) :;;
+		esac
+	done
+	for iface in "${disable[@]}"
+	do
+		Disable_Conflicting_Interface "$iface" "$restart"
 	done
 	return 0
 }
 
+# Save the settings of the current interface. Only if the 1st argument is "1", apply them via interface restart as well.
 Apply_Current_Interface()
 {
 	[[ $CURRENT_IFACE ]] || return 1
+	local restart=${1:-0} # might be reset by Check_Network_Conflicts(), if the user chose to only save all changes to resolve a network conflict
 	# Enable interface if it is not disabled via config or CLI option explicitly
 	[[ $CURRENT_IFACE_SOURCE || $APPLY_ENABLE ]] || CURRENT_IFACE_ENABLED=1
 	if [[ $CURRENT_IFACE_MODE == 'static' && ! $CURRENT_IFACE_IP_STATIC ]]
@@ -857,7 +883,14 @@ Apply_Current_Interface()
 	fi
 	Check_Network_Conflicts || return 1
 	Write_Interface_Config
-	(( $1 )) && Restart_Interface "$CURRENT_IFACE"
+	if (( $restart ))
+	then
+		Restart_Interface "$CURRENT_IFACE"
+
+	elif (( ${1:-0} ))
+	then
+		G_DIETPI-NOTIFY 2 "Saved changes to \"$CURRENT_IFACE\", to be applied on next reboot"
+	fi
 	PRESERVE_SELECTED_SETTINGS=0 # load settings in interface menu from config files again, now that we have written them
 }
 
@@ -1029,7 +1062,7 @@ It is not that well suited to address flaky signals. If a single AP signal is ju
 		;;
 		'Interval')
 			G_WHIP_INPUTBOX_REGEX='^([3-9]|[1-9][0-9]+)$'
-			G_WHIP_INPUTBOX_REGEX_TEXT='a number of seconds of 3 or higher'
+			G_WHIP_INPUTBOX_REGEX_TEXT='be a number of seconds of 3 or higher'
 			G_WHIP_DEFAULT_ITEM=$interval
 			G_WHIP_INPUTBOX 'Please enter the interval in seconds between connection checks (min 3):' || return 0
 			G_CONFIG_INJECT 'CONFIG_WIFI_MONITOR_INTERVAL=' "CONFIG_WIFI_MONITOR_INTERVAL=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt

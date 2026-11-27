@@ -31,7 +31,7 @@
 	#------------------------------------------------------------------------------------------------
 
 	# Core globals
-	G_PROGRAM_NAME='DietPi-Installer'
+	G_PROGRAM_NAME='dietpi-installer'
 
 	# Input variables
 	[[ $TEST_KERNEL == 1 ]] || TEST_KERNEL=0
@@ -42,7 +42,7 @@
 	# Critical checks and requirements to run this script
 	#------------------------------------------------------------------------------------------------
 	# Exit path for non-root executions
-	if (( $UID ))
+	if (( $EUID ))
 	then
 		echo -e '[FAILED] Root privileges required, please run this script with "sudo"\nIn case install the "sudo" package with root privileges:\n\t# apt install sudo\n'
 		exit 1
@@ -161,7 +161,7 @@ _EOF_
 	fi
 
 	# Assure no obsolete .hw_model is loaded
-	[[ -f '/boot/dietpi/.hw_model' ]] && rm -f /boot/dietpi/.hw_model
+	[[ -f '/boot/dietpi/.hw_model' ]] && rm /boot/dietpi/.hw_model
 
 	# Load
 	# shellcheck source-path=dietpi/func source-path=/boot/dietpi/func
@@ -173,7 +173,7 @@ _EOF_
 	rm dietpi-globals
 
 	# Reset G_PROGRAM_NAME, which was set to empty string by sourcing dietpi-globals
-	readonly G_PROGRAM_NAME='DietPi-Installer'
+	readonly G_PROGRAM_NAME='dietpi-installer'
 	G_INIT
 
 	# Apply Git info
@@ -243,7 +243,7 @@ _EOF_
 		readonly G_NOTIFY_3_MODE='Step'
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "[$SETUP_STEP] Detecting existing DietPi system"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
-		if [[ -d '/DietPi' || -d '/boot/dietpi' ]]
+		if [[ -d '/boot/dietpi' ]]
 		then
 			G_DIETPI-NOTIFY 2 'DietPi system found, uninstalling old instance...'
 
@@ -258,13 +258,9 @@ _EOF_
 			done
 
 			# Delete any previous existing data
-			# - Pre-v6.29: /DietPi mount point
-			findmnt /DietPi > /dev/null && G_EXEC umount -R /DietPi
-			[[ -d '/DietPi' ]] && rm -R /DietPi
+			# - Pre-v10.4: /var/tmp/dietpi, actually auto-cleaned by systemd-tmpfiles after 30 days without access
 			G_EXEC rm -Rf /{boot,mnt,etc,var/lib,var/tmp,run}/*dietpi*
-			G_EXEC rm -f /etc{,/cron.*,/{bashrc,profile,sysctl,network/if-up,udev/rules}.d}/{,.}*dietpi*
-		else
-			G_DIETPI-NOTIFY 2 'No DietPi system found, skipping old instance uninstall...'
+			G_EXEC rm -f /etc{,/cron.*,/{bashrc,profile,sysctl,network/if-up,udev/rules,apt/apt.conf}.d}/{,.}*dietpi*
 		fi
 
 		#------------------------------------------------------------------------------------------------
@@ -445,6 +441,7 @@ _EOF_
 						'83' ': Orange Pi Zero 3'
 						'88' ': Orange Pi Zero 2W'
 						'108' ': Orange Pi Zero 3W'
+						'111' ': Orange Pi Zero 4'
 						'110' ': Orange Pi 6/6 Plus'
 						'86' ': ASUS Tinker Board 2'
 						'109' ': LubanCat 4'
@@ -524,7 +521,7 @@ _EOF_
 				G_WHIP_BUTTON_OK_TEXT='Continue'
 				G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 				if ! G_WHIP_YESNO '[WARNING] The boot drive does not contain a partition table!
-\nWithout a partition table, the bootloader cannot be flashed, which can leave this system unbootable. It is however expected with some VPS providers, like Linode, which use external bootloaders. If this is the case, hit "Continue" to run the DietPi-Installer regardless.'
+\nWithout a partition table, the bootloader cannot be flashed, which can leave this system unbootable. It is however expected with some VPS providers, like Linode, which use external bootloaders. If this is the case, hit "Continue" to run the dietpi-installer regardless.'
 				then
 					if (( $G_INTERACTIVE ))
 					then
@@ -633,12 +630,16 @@ _EOF_
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "[$SETUP_STEP] Downloading and installing DietPi source code"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 
-		G_EXEC_DESC='Downloading source code' G_EXEC curl -sSfLO "https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.tar.gz"
+		G_EXEC_DESC='Downloading source archive' G_EXEC curl -sSfLO "https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.tar.gz"
 		local dir="DietPi-${G_GITBRANCH//\//-}" # GitHub translates forward slashes into dashes
-		[[ -d $dir ]] && G_EXEC_DESC='Removing old source code' G_EXEC rm -R "$dir"
-		G_EXEC_DESC='Unpacking source code' G_EXEC tar xf "${G_GITBRANCH##*/}.tar.gz" # Support for Git branch names with forward slashes
-		G_EXEC_DESC='Removing unused files' G_EXEC rm -f "${G_GITBRANCH##*/}.tar.gz" "$dir/"{pre-patch_file,patch_file,server_version-6}
-		G_EXEC_DESC='Hardening update archive mode' G_EXEC chmod -R g-w "$dir"
+		[[ -d $dir ]] && G_EXEC_DESC='Removing old source tree' G_EXEC rm -R "$dir"
+		G_EXEC_DESC='Unpacking source archive' G_EXEC tar xf "${G_GITBRANCH##*/}.tar.gz" # Support for Git branch names with forward slashes
+		G_EXEC_DESC='Removing source archive' G_EXEC rm "${G_GITBRANCH##*/}.tar.gz"
+		G_EXEC_DESC='Hardening source archive mode' G_EXEC chmod -R g-w "$dir"
+
+		# Container until next release: Patch ext3/4 journal check when using master branch
+		# shellcheck disable=SC2016
+		[[ $G_HW_MODEL == 75 && $G_GITBRANCH == 'master' ]] && G_EXEC sed --follow-symlinks -i 's|$G_DIETPI_INSTALL_STAGE == 0 && $(findmnt -Ufnro FSTYPE /)|$G_DIETPI_INSTALL_STAGE == 0 \&\& -b $G_ROOTFS_DEV \&\& $(findmnt -Ufnro FSTYPE /)|' "$dir/dietpi/dietpi-login"
 
 		G_DIETPI-NOTIFY 2 'Moving kernel and boot configuration to /boot'
 		[[ -d '/boot' ]] || G_EXEC mkdir /boot
@@ -671,7 +672,7 @@ _EOF_
 			G_EXEC ln -sf /etc/kernel/post{inst,rm}.d/dietpi-initramfs_cleanup
 
 		# SBCs using Armbian build system for kernel/bootloader packages and boot.scr
-		elif [[ $G_HW_MODEL =~ ^(12|13|14|15|16|17|18|19|40|42|43|44|45|46|47|48|52|54|55|56|57|58|59|60|63|64|65|66|67|68|72|73|74|76|77|78|79|80|82|83|85|86|87|88|89|90|91|92|93|94|95|96|99|100|101|102|103|104|105|106|107|108|109)$ ]]
+		elif [[ $G_HW_MODEL =~ ^(12|13|14|15|16|17|18|19|40|42|43|44|45|46|47|48|52|54|55|56|57|58|59|60|63|64|65|66|67|68|72|73|74|76|77|78|79|80|82|83|85|86|87|88|89|90|91|92|93|94|95|96|99|100|101|102|103|104|105|106|107|108|109|111)$ ]]
 		then
 			# Amlogic 64-bit
 			armbian_packages=1
@@ -769,7 +770,7 @@ setenv bootlabel "DietPi"' /boot/boot.cmd
 						esac
 					;;
 					85) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3588s-rock-5a.dtb' /boot/dietpiEnv.txt;;
-					104) [[ $RK35XX_MAINLINE == 1 ]] && G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3528-nanopi-zero2.dtb' /boot/dietpiEnv.txt || G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3528-nanopi-rev01.dtb' /boot/dietpiEnv.txt;;
+					104) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3528-nanopi-zero2.dtb' /boot/dietpiEnv.txt;;
 					*) :;;
 				esac
 				# Overlay prefix
@@ -791,8 +792,8 @@ setenv bootlabel "DietPi"' /boot/boot.cmd
 					79|91|109) G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=rockchip-rk3588 rk3588' /boot/dietpiEnv.txt;; # RK3588 mainline + vendor
 					19|87|100|101) G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=rockchip-rk3566 rockchip-rk3568-hk' /boot/dietpiEnv.txt;; # RK3566 mainline
 					18|76) G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=rockchip-rk3568-hk rockchip-rk3566' /boot/dietpiEnv.txt;; # RK3568 mainline
-					102|103) G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=rk3576 rockchip' /boot/dietpiEnv.txt;; # RK3576 vendor + mainline
-					104) G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=rk3528 rockchip-rk3528' /boot/dietpiEnv.txt;; # RK3528 vendor + mainline
+					102|103) G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=rockchip-rk3576 rk3576' /boot/dietpiEnv.txt;; # RK3576 mainline + vendor
+					104) G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=rockchip-rk3528 rk3528' /boot/dietpiEnv.txt;; # RK3528 mainline + vendor
 					*) G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=rockchip' /boot/dietpiEnv.txt;;
 				esac
 				# Overlays
@@ -808,7 +809,7 @@ setenv bootlabel "DietPi"' /boot/boot.cmd
 					73) G_CONFIG_INJECT 'consoleargs=' 'consoleargs=console=ttyS0,1500000' /boot/dietpiEnv.txt;; # RK3308 headless mainline
 					47|55|56|100) G_CONFIG_INJECT 'consoleargs=' 'consoleargs=console=ttyS2,1500000' /boot/dietpiEnv.txt;; # headless mainline
 					91|94|95) [[ $RK35XX_MAINLINE == 1 ]] && G_EXEC sed --follow-symlinks -i 's/ttyAML0,115200/ttyS2,1500000/' /boot/dietpiEnv.txt || G_EXEC sed --follow-symlinks -i 's/ttyAML0,115200/ttyFIQ0,1500000/' /boot/dietpiEnv.txt;; # RK3588 mainline or vendor
-					104) [[ $RK35XX_MAINLINE == 1 ]] && G_CONFIG_INJECT 'consoleargs=' 'consoleargs=console=ttyS0,1500000' /boot/dietpiEnv.txt || G_CONFIG_INJECT 'consoleargs=' 'consoleargs=console=ttyFIQ0,1500000' /boot/dietpiEnv.txt;; # RK3528/RK3576 headless mainline or vendor
+					104) G_CONFIG_INJECT 'consoleargs=' 'consoleargs=console=ttyS0,1500000' /boot/dietpiEnv.txt;; # RK3528/RK3576 headless mainline
 					102|103) G_EXEC sed --follow-symlinks -i 's/ttyAML0,115200/ttyS0,1500000/' /boot/dietpiEnv.txt;; # RK3528/RK3576 mainline
 					*) G_EXEC sed --follow-symlinks -i 's/ttyAML0,115200/ttyS2,1500000/' /boot/dietpiEnv.txt;; # mainline
 				esac
@@ -862,7 +863,7 @@ setenv bootlabel "DietPi"' /boot/boot.cmd
 				esac
 
 			# Allwinner A733 64-bit vendor
-			elif [[ $G_HW_MODEL =~ ^(107|108)$ ]]
+			elif [[ $G_HW_MODEL =~ ^(107|108|111)$ ]]
 			then
 				G_CONFIG_INJECT 'setenv kernel_addr_r ' 'setenv kernel_addr_r "0x41000000"' /boot/boot.cmd
 				G_CONFIG_INJECT 'setenv fdt_addr_r ' 'setenv fdt_addr_r "0x4a000000"' /boot/boot.cmd
@@ -872,6 +873,7 @@ setenv bootlabel "DietPi"' /boot/boot.cmd
 				case $G_HW_MODEL in
 					107) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=allwinner/sun60i-a733-orangepi-4-pro.dtb' /boot/dietpiEnv.txt;;
 					108) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=allwinner/sun60i-a733-orangepi-zero3w.dtb' /boot/dietpiEnv.txt;;
+					111) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=allwinner/sun60i-a733-orangepi-zero4.dtb' /boot/dietpiEnv.txt;;
 					*) :;;
 				esac
 				# Overlay prefix
@@ -1260,23 +1262,24 @@ _EOF_
 				88) model='orangepizero2w' kernel='sunxi64';;
 				89) model='orangepi3-lts' kernel='sunxi64';;
 				90) model='radxa-zero3' kernel='rockchip64';;
-				91) model='orangepi5-max' kernel='rk35xx' branch='vendor';; # mainline Linux dts does not support onboard WiFi, and brcmfmac probably does neither
+				91) model='orangepi5-max' kernel='rk35xx' branch='vendor';; # mainline Linux dts and brcmfmac does not support onboard WiFi
 				92) model='nanopi-m6' kernel='rockchip64';;
 				93) model='orangepi5pro' kernel='rockchip64';;
-				94) model='orangepi5-ultra' kernel='rk35xx' branch='vendor';; # mainline Linux dts does not support onboard WiFi, and brcmfmac probably does neither
-				95) model='orangepicm5' kernel='rk35xx' branch='vendor';;
+				94) model='orangepi5-ultra' kernel='rk35xx' branch='vendor';; # mainline Linux dts and brcmfmac does not support onboard WiFi
+				95) model='orangepicm5' kernel='rk35xx' branch='vendor';; # mainline lacks tabled base board device tree
 				96) model='orangepi-4a' kernel='sunxi64';;
 				99) model='orangepi3' kernel='sunxi64';;
 				100) model='nanopi-r3s' kernel='rockchip64';;
 				101) model='nanopi-r3s-lts' kernel='rockchip64';;
 				102) model='nanopi-r76s' kernel='rockchip64';;
 				103) model='nanopi-m5' kernel='rockchip64';;
-				104) model='nanopi-zero2' kernel='rk35xx' branch='vendor';;
+				104) model='nanopi-zero2' kernel='rockchip64';;
 				105) model='orangepi4-lts' kernel='rockchip64';;
 				106) model='orangepi5b' kernel='rockchip64';;
 				107) model='orangepi4pro' kernel='sun60iw2' branch='vendor';;
 				108) model='orangepizero3w' kernel='sun60iw2' branch='vendor';;
 				109) model='lubancat-4' kernel='rockchip64';;
+				111) model='orangepizero4' kernel='sun60iw2' branch='vendor';;
 				*) G_DIETPI-NOTIFY 1 "Unknown hardware ID \"$G_HW_MODEL\". Aborting ..."; exit 1;;
 			esac
 
@@ -1358,7 +1361,7 @@ fi' /boot/boot.cmd
 
 			# Compile U-Boot script
 			local arch='arm'
-			(( $G_HW_ARCH == 3 && $G_HW_MODEL != 107 && $G_HW_MODEL != 108 )) && arch='arm64' # Orange Pi Allwinner vendor U-Boot is 32-bit
+			[[ $G_HW_ARCH == 3 && ! $G_HW_MODEL =~ ^(107|108|111)$ ]] && arch='arm64' # Orange Pi Allwinner sun60iw2 vendor U-Boot is 32-bit
 			[[ -f '/boot/boot.cmd' ]] && G_EXEC mkimage -C none -A "$arch" -T script -d /boot/boot.cmd /boot/boot.scr
 
 			# Flash U-Boot
@@ -1891,7 +1894,7 @@ _EOF_
 		[[ -f '/etc/rc.local' ]] && G_EXEC rm /etc/rc.local # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/rc.local
 		[[ -d '/etc/systemd/system/rc-local.service.d' ]] && G_EXEC rm -R /etc/systemd/system/rc-local.service.d # Raspberry Pi OS
 		[[ -d '/etc/systemd/system/rc.local.service.d' ]] && G_EXEC rm -R /etc/systemd/system/rc.local.service.d
-		#	Below required if DietPi-Installer is executed from chroot/container, so RPi firstrun scripts are not executed
+		#	Below required if dietpi-installer is executed from chroot/container, so RPi firstrun scripts are not executed
 		[[ -f '/etc/init.d/resize2fs_once' ]] && G_EXEC rm /etc/init.d/resize2fs_once # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/resize2fs_once
 		# - Remove all autologin configs for all TTYs: https://github.com/MichaIng/DietPi/issues/3570#issuecomment-648988475, https://github.com/MichaIng/DietPi/issues/3628#issuecomment-653693758
 		G_EXEC rm -f /etc/systemd/system/*getty@*.service.d/*autologin*.conf
@@ -1941,7 +1944,7 @@ _EOF_
 		#-----------------------------------------------------------------------------------
 		# Dirs
 		G_DIETPI-NOTIFY 2 'Generating DietPi directories'
-		G_EXEC mkdir -p /var/lib/dietpi/{postboot.d,dietpi-software/installed,logs/dietpi-ramlog_store}
+		G_EXEC mkdir -p /var/lib/dietpi/{postboot.d,logs}
 		G_EXEC mkdir -p /mnt/{dietpi_userdata,samba,nfs_client}
 		G_EXEC chgrp -R dietpi /mnt/{dietpi_userdata,samba,nfs_client}
 		G_EXEC find /mnt/{dietpi_userdata,samba,nfs_client} -type d -exec chmod 0775 {} +
@@ -2113,7 +2116,7 @@ _EOF_'
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyAML0
 
 		# Allwinner, StarFive, Amlogic S905X5M, ROCK Pi S, RK3528/RK3576 mainline
-		elif [[ $kernel == 'sunxi' || $kernel == 'sunxi64' || $kernel == 'sun60iw2' || $G_HW_MODEL =~ ^(13|73|81|84)$ || ( $G_HW_MODEL =~ ^(102|103|104)$ && $kernel == 'rockchip64' ) ]]
+		elif [[ $kernel == 'sunxi' || $kernel == 'sunxi64' || $kernel == 'sun60iw2' || $G_HW_MODEL =~ ^(13|73|81|84|102|103|104)$ ]]
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS0
 
@@ -2394,6 +2397,9 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Setting initial install stage to -1 (first boot)'
 		G_EXEC eval 'echo -1 > /boot/dietpi/.install_stage'
+
+		G_DIETPI-NOTIFY 2 'Creating pre-login banner /etc/issue.d/dietpi-banner.issue'
+		G_EXEC /boot/dietpi/func/dietpi-banner issue
 
 		if [[ $IMAGE_CREATOR$PREIMAGE_INFO != 00 ]]
 		then

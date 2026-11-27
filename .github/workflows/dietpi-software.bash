@@ -97,7 +97,7 @@ emulation=0
 # - PostgreSQL and dependants (Synapse): https://gitlab.com/qemu-project/qemu/-/issues/3068
 # - WireGuard: "Unable to modify/access interface: Protocol not supported"
 # - Docker containers (Roon Extension Manager and Portainer): Docker daemon fails with "iptables: Failed to initialize nft: Protocol not supported" and similar error with iptables-legacy
-[[ $arch == 11 && $emulation == 1 && $SOFTWARE =~ (^| )(roonextensionmanager|synapse|wireguard|portainer|postgresql)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager, PostgreSQL, WireGuard, Portainer, and Synapse from test installs as they fail in emulated RISC-V containers'; SOFTWARE=$(sed -E 's/(^| )(roonextensionmanager|synapse|wireguard|portainer|postgresql)( |$)/\1\3/g' <<< "$SOFTWARE"); }
+[[ $arch == 11 && $emulation == 1 && $SOFTWARE =~ (^| )(roonextmanager|synapse|wireguard|portainer|postgresql)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager, PostgreSQL, WireGuard, Portainer, and Synapse from test installs as they fail in emulated RISC-V containers'; SOFTWARE=$(sed -E 's/(^| )(roonextmanager|synapse|wireguard|portainer|postgresql)( |$)/\1\3/g' <<< "$SOFTWARE"); }
 
 ##########################################
 # Create service and port lists
@@ -169,7 +169,6 @@ Process_Software()
 			'icecast') aSERVICES[$i]='icecast2' aTCP[$i]='8000' aCOMMANDS[$i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start on GitHub runner as it requires a hardware capture device, and those runners do not provide the dummy audio kernel module
 			'immich') aSERVICES[$i]='immich' aTCP[$i]='2283';;
 			'immichml') aSERVICES[$i]='immich-ml' aTCP[$i]='3003';;
-			'paperlessngx') aSERVICES[$i]='paperless-webserver paperless-consumer paperless-task-queue paperless-scheduler' aTCP[$i]='8010';;
 			'influxdb') aSERVICES[$i]='influxdb' aTCP[$i]='8086 8088';;
 			'jackett') aSERVICES[$i]='jackett' aTCP[$i]='9117';;
 			'javajdk') aCOMMANDS[$i]='javac -version';;
@@ -223,6 +222,7 @@ Process_Software()
 			'opensshserver') aSERVICES[$i]='ssh' aTCP[$i]='22';;
 			'opentyrian') aCOMMANDS[$i]='/usr/games/opentyrian/opentyrian -h';;
 			'openvpn') aCOMMANDS[$i]='openvpn --version';; # aSERVICES[$i]='openvpn' aUDP[$i]='1194' GitHub Actions runners do not support the TUN module
+			'paperlessngx') aSERVICES[$i]='paperless-webserver paperless-consumer paperless-task-queue paperless-scheduler' aTCP[$i]='8010';;
 			'papermc') aSERVICES[$i]='papermc' aTCP[$i]='25565 25575' aDELAY[$i]=60; (( $emulation )) && aDELAY[$i]=900;;
 			'php') case $DISTRO in
 				'bookworm') aSERVICES[$i]='php8.2-fpm';;
@@ -230,11 +230,12 @@ Process_Software()
 			esac;;
 			'pihole') aSERVICES[$i]='pihole-FTL' aUDP[$i]='53';;
 			'plex') aSERVICES[$i]='plexmediaserver' aTCP[$i]='32400';;
+			'podman') aCOMMANDS[$i]='podman info';;
 			'portainer') aTCP[$i]='9002 9442' SYSCALLS+=' add_key keyctl bpf';;
 			'postgresql') aSERVICES[$i]='postgresql';;
 			'proftpd') aSERVICES[$i]='proftpd' aTCP[$i]='21';;
 			'prometheus') aSERVICES[$i]='prometheus' aTCP[$i]='9090' aCOMMANDS[$i]='curl -sSf '\''http://127.0.0.1:9090/api/v1/query?query=up'\'' | grep '\''"status":"success"'\';;
-			'prometheusnodeexporter') aSERVICES[$i]='node_exporter' aTCP[$i]='9100';;
+			'prometheusexporter') aSERVICES[$i]='node_exporter' aTCP[$i]='9100';;
 			'prowlarr') aSERVICES[$i]='prowlarr' aTCP[$i]='9696';;
 			'python3') aCOMMANDS[$i]='python3 -V';;
 			'qbittorrent') aSERVICES[$i]='qbittorrent' aTCP[$i]='1340 6881';;
@@ -246,7 +247,7 @@ Process_Software()
 			'remoteit') aSERVICES[$i]='schannel' aUDP[$i]='5980';; # remoteit@.service service listens on random high UDP port
 			'restic') aCOMMANDS[$i]='restic version';;
 			'roonbridge') aSERVICES[$i]='roonbridge' aUDP[$i]='9003';;
-			'roonextensionmanager') aSERVICES[$i]='roon-extension-manager' SYSCALLS+=' add_key keyctl bpf';;
+			'roonextmanager') aSERVICES[$i]='roon-extension-manager' SYSCALLS+=' add_key keyctl bpf';;
 			'roonserver') aSERVICES[$i]='roonserver';; # Listens on a variety of different port ranges
 			'rpimonitor') aSERVICES[$i]='rpimonitor' aTCP[$i]='8888';;
 			'rsyslog') aSERVICES[$i]='rsyslog';;
@@ -257,6 +258,7 @@ Process_Software()
 			'sambaclient') aCOMMANDS[$i]='smbclient -V';;
 			'sambaserver') aSERVICES[$i]='smbd' aTCP[$i]='139 445' aUDP[$i]='137 138';;
 			'scrypted') aSERVICES[$i]='scrypted' aTCP[$i]='10443 11080 10081';; # ports: https (secure), http (insecure), debug
+			'sftpserver') aCOMMANDS[$i]='/usr/lib/sftp-server -h 2>&1 | grep '\''^usage:'\';;
 			'shairportsync') aSERVICES[$i]='shairport-sync' aTCP[$i]='5000';; # AirPlay 2 would be TCP port 7000
 			'snapcastclient') aSERVICES[$i]='snapclient';;
 			'snapcastserver') aSERVICES[$i]='snapserver' aTCP[$i]='1704 1780';;
@@ -274,6 +276,7 @@ Process_Software()
 			'torhotspot') aSERVICES[$i]='tor' aTCP[$i]='9040' aUDP[$i]='53';;
 			'torrelay') aSERVICES[$i]='tor' aTCP[$i]='80 443 9051';;
 			'transmission') aSERVICES[$i]='transmission-daemon' aTCP[$i]='9091 51413' aUDP[$i]='51413';;
+			'tvheadend') aSERVICES[$i]='tvheadend' aTCP[$i]='9981 9982';;
 			'ubooquity') aSERVICES[$i]='ubooquity' aTCP[$i]='2038 2039'; (( $emulation )) && aDELAY[$i]=60;;
 			'unbound') aSERVICES[$i]='unbound' aUDP[$i]='53' aTCP[$i]='53'; [[ ${aSERVICES[adguardhome]} ]] && aUDP[$i]='5335' aTCP[$i]='5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed
 			'unrar') aCOMMANDS[$i]='unrar -V';;
@@ -334,7 +337,7 @@ do
 		'gogs'|'gitea'|'forgejo') Process_Software opensshclient git mariadb;;
 		'torhotspot') Process_Software wifihotspot;;
 		'synapse') Process_Software postgresql;;
-		'roonextensionmanager'|'dockercompose'|'portainer') Process_Software docker;;
+		'roonextmanager'|'dockercompose'|'portainer') Process_Software docker;;
 		'adsbfeeder') Process_Software git dockercompose docker;;
 		'pispc') Process_Software wiringpi;;
 		'bazarr') (( $arch == 10 || $arch == 3 )) || Process_Software unrar;;
@@ -500,16 +503,16 @@ then
 		[[ -f $i ]] || continue
 		grep -Eq '^(Import|Load)Credential=' "$i" || continue
 		G_EXEC mkdir "${i/lib/etc}.d"
-		G_EXEC eval "echo -e '[Service]\nImportCredential=\nLoadCredential=' > '${i/lib/etc}.d/dietpi-no-credentials.conf'"
+		G_EXEC eval "echo -e '[Service]\nImportCredential=\nLoadCredential=' > '${i/lib/etc}.d/zz-dietpi-no-credentials.conf'"
 	done
 
 	# PrivateUsers causes "Failed to set up user namespacing"
 	# ProtectHome/ProtectSystem/PrivateTmp/... cause "Failed to set up mount namespacing: Invalid argument": https://github.com/systemd/systemd/issues/39951
 	# shellcheck disable=SC2068
-	for i in ${aSERVICES[@]}
+	for i in 'systemd-logind' ${aSERVICES[@]}
 	do
 		G_EXEC mkdir "rootfs/etc/systemd/system/$i.service.d"
-		G_EXEC eval "echo -e '[Service]\nPrivateUsers=0\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths=\nProtectProc=default\nProcSubset=all\nNoExecPaths=\nExecPaths=\nInaccessiblePaths=' > 'rootfs/etc/systemd/system/$i.service.d/dietpi-container.conf'"
+		G_EXEC eval "echo -e '[Service]\nPrivateUsers=0\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths=\nProtectProc=default\nProcSubset=all\nNoExecPaths=\nExecPaths=\nInaccessiblePaths=' > 'rootfs/etc/systemd/system/$i.service.d/zz-dietpi-no-namespacing.conf'"
 	done
 
 	# Failing 32-bit ARM Rust builds on ext4 with 64-bit host: https://github.com/rust-lang/cargo/issues/9545
@@ -587,6 +590,13 @@ _EOF_'
 	# apparmor="DENIED" operation="sendmsg" class="net" profile="/snap/snapd/24792/usr/lib/snapd/snap-confine" pid=218663 comm="snap-confine" family="unix" sock_type="stream" protocol=0 requested_mask="send" denied_mask="send"
 	G_EXEC mkdir -p /var/lib/snapd/apparmor/snap-confine.internal
 	G_EXEC eval 'echo '\''include <abstractions/base>'\'' > /var/lib/snapd/apparmor/snap-confine.internal/net'
+fi
+
+# Podman in QEMU-emulated container: QEMU does not implement set_robust_list, hence use file locks to allow "podman info" test.
+if (( $emulation && ${aINSTALL[podman]:-0} ))
+then
+	G_EXEC mkdir -p rootfs/etc/containers/containers.conf.d
+	G_EXEC eval 'echo -e '\''[engine]\nlock_type = "file"'\'' > rootfs/etc/containers/containers.conf.d/99-qemu-container.conf'
 fi
 
 # Check for service status, ports and commands

@@ -108,7 +108,7 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/phpmyadmin/phpm
 aREGEX[$software_id]='version='\''[^'\'']*'\'
 aREPLACE[$software_id]='version='\''$release'\'
 
-software_id='prometheusnodeexporter'
+software_id='prometheusexporter'
 aURL[$software_id]='https://api.github.com/repos/prometheus/node_exporter/releases/latest'
 aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/node_exporter-.*\.linux-$arch\.tar\.gz(?=\")"'
 aARCH[$software_id]='armv6 armv7 arm64 amd64 riscv64'

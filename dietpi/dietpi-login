@@ -174,13 +174,15 @@ Would you like to restart the first run setup and installation?"
 			# - Always remove PID file when script is exited/terminated/killed
 			trap '[[ -f $FP_DIETPI_FIRSTRUNSETUP_PID ]] && rm $FP_DIETPI_FIRSTRUNSETUP_PID' EXIT
 
-			if [[ $G_DIETPI_INSTALL_STAGE == 0 && $(findmnt -Ufnro FSTYPE /) == 'ext'[34] ]] && { [[ ! -e $G_ROOTFS_DEV ]] || ! tune2fs -l "$G_ROOTFS_DEV" | grep -q 'has_journal'; }
+			# Check whether ext3/4 root filesystems have a journal
+			if [[ $G_DIETPI_INSTALL_STAGE == 0 && $G_ROOTFS_DEV && $(findmnt -Ufnro FSTYPE /) == 'ext'[34] ]]
 			then
-				# Allow to proceed if $G_ROOTFS_DEV does not exist, where we assume the image was started as container without block device access
-				if [[ -e $G_ROOTFS_DEV ]]
+				# Access to block device: check via tune2fs
+				if [[ -b $G_ROOTFS_DEV ]]
 				then
-					# shellcheck disable=SC2016
-					G_WHIP_MSG '[FAILED] ext3 or ext4 rootfs without journal detected
+					tune2fs -l "$G_ROOTFS_DEV" | grep -q 'has_journal' || {
+						# shellcheck disable=SC2016
+						G_WHIP_MSG '[FAILED] ext3 or ext4 rootfs without journal detected
 \next3 and ext4 root filesystems are expected to contain a filesystem journal to protect against data loss. That it is missing is most likely the result of a failed resize script. Please collect the output of the following commands and open an issue on our GitHub repository or forum:
 \njournalctl -u dietpi-fs_partition_resize
 cat /var/lib/dietpi/logs/fs_partition_resize.log
@@ -188,9 +190,13 @@ cat /var/lib/dietpi/logs/fs_partition_resize.log
 Forum: https://dietpi.com/forum/c/troubleshooting/10
 \nIf you aim to solve this yourself, the resize script is located at /var/lib/dietpi/services/fs_partition_resize.sh. Alternatively, a journal can be added with "tune2fs -j $G_ROOTFS_DEV".
 Let us know if you actually intend to run this system without journal. This check is done on first boot only, hence adding it temporarily and removing it afterwards works.'
+						exit 1
+					}
 
-					exit 1
-				else
+				# No access to block device (i.e. container system), but procfs exposes the journal properties: use a missing entry for the rootfs as fallback indicator
+				elif [[ -d '/proc/fs/jbd2' && ! -f /proc/fs/jbd2/${G_ROOTFS_DEV#/dev/}/info ]]
+				then
+					# Show a warning, but allow to proceed, since this can only be solved from the host, or may be unnecessary for throwaway build/test containers
 					G_WHIP_MSG "[ WARN ] ext3 or ext4 rootfs without journal detected
 \next3 and ext4 root filesystems are expected to contain a filesystem journal to protect against data loss. It is missing since the detected rootfs device node $G_ROOTFS_DEV was not found, where we assume the image was started as container without block device access. You may want to open an issue at our GitHub or forum if this assumption is false.
 \nIf this is a container, the journal can be created on the container host using the command \"tune2fs -j /dev/loop0p1\", with the loop device node as example. If this is a temporary image for testing or building, you may ignore this warning."
