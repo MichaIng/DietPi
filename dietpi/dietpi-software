@@ -1236,6 +1236,15 @@ Names are accepted as well, e.g. "Node-RED". Legacy numeric IDs are still suppor
 		aSOFTWARE_CATX[$software_id]=6
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/social/#soju'
 		aSOFTWARE_DEPS[$software_id]='go'
+		#------------------
+		software_id='searxng'
+		aSOFTWARE_NAME[$software_id]='SearXNG'
+		aSOFTWARE_DESC[$software_id]='Privacy-respecting metasearch engine'
+		aSOFTWARE_CATX[$software_id]=6
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/social/#searxng'
+		aSOFTWARE_DEPS[$software_id]='python3'
+		# ARMv6: No granian wheel, and building it takes hours and too much memory: https://github.com/piwheels/packages/issues/667
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=0
 
 		# Camera & Surveillance
 		#--------------------------------------------------------------------------------
@@ -2400,6 +2409,13 @@ Names are accepted as well, e.g. "Node-RED". Legacy numeric IDs are still suppor
 			G_DIETPI-NOTIFY 2 "${aSOFTWARE_NAME[ffmpeg]} will be installed"
 		fi
 
+		# If the SearXNG limiter is enabled, Redis is required as its database
+		if (( ${aSOFTWARE_INSTALL_STATE[searxng]} == 1 && ${aSOFTWARE_INSTALL_STATE[redis]} == 0 )) && grep -q '^[[:blank:]]*SOFTWARE_SEARXNG_LIMITER=1' /boot/dietpi.txt
+		then
+			aSOFTWARE_INSTALL_STATE[redis]=1
+			G_DIETPI-NOTIFY 2 "${aSOFTWARE_NAME[redis]} will be installed"
+		fi
+
 		# Loop through marked software to resolve dependencies each
 		local i
 		for i in "${aSOFTWARE_IDS[@]}"
@@ -2886,14 +2902,21 @@ sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
 						fi
 						set -- "$@" cffi
 					;;
+					# - The build system installs Rust automatically, but this fails on RISC-V due to a wrong target triple (riscv64 instead of riscv64gc).
+					'granian') (( $G_HW_ARCH == 11 )) && rust=1 aDEPS+=('gcc');;
 					'greenlet-v113') (( $python_version > 311 || ( $G_HW_ARCH < 3 && ! $piwheels ) || $G_HW_ARCH == 11 )) && aDEPS+=('g++');;
 					'isal') (( ( $G_HW_ARCH < 3 && ! $piwheels ) || $G_HW_ARCH == 11 )) && aDEPS+=('make');;
 					'libsass') (( $piwheels || $G_HW_ARCH == 10 )) || aDEPS+=('g++');;
-					'lxml') (( $G_HW_ARCH == 1 && ! $piwheels )) && aDEPS+=('libxslt1-dev');;
+					'lxml')
+						(( $G_HW_ARCH == 1 && ! $piwheels )) && aDEPS+=('libxslt1-dev')
+						# piwheels builds are linked against the shared libraries libxml2, libxslt and libexslt: https://www.piwheels.org/project/lxml/
+						(( $piwheels )) && aDEPS+=('libxslt1.1')
+					;;
 					'matrix-synapse')
 						(( ( $G_HW_ARCH < 3 && ! $piwheels ) || $G_HW_ARCH == 11 )) && rust=1 aDEPS+=('gcc')
 						set -- "$@" bcrypt cffi cryptography pillow pydantic pynacl
 					;;
+					'msgspec') (( $G_HW_ARCH < 3 && ! $piwheels )) && aDEPS+=('gcc');;
 					'netifaces') (( $piwheels )) || aDEPS+=('gcc');;
 					'numpy')
 						if (( ( $G_HW_ARCH < 3 && ! $piwheels ) || $G_HW_ARCH == 11 ))
@@ -12140,6 +12163,159 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
+		if To_Install searxng searxng
+		then
+			# Dependencies
+			Python_Deps cffi granian lxml msgspec
+
+			# RISC-V: granian needs to be compiled
+			# - With its fat LTO release profile, the compiler process reached 3.7 GiB RSS while RAM and swap of a 4 GiB system were full.
+			# - Without LTO, a single job used up to 1.5 GiB RSS and ~2.6 GiB in total on a 2 GiB system. With 4 jobs and 0.6 GiB swap, the system hung.
+			local build_env=()
+			if (( $G_HW_ARCH == 11 ))
+			then
+				Min_Total_Memory 3072
+				local max_jobs=$(( $RAM_PHYS / 1024 - 1 ))
+				(( $max_jobs > 0 )) || max_jobs=1
+				(( $max_jobs < $G_HW_CPU_CORES )) && build_env+=("CARGO_BUILD_JOBS=$max_jobs")
+				(( $RAM_PHYS < 4096 )) && build_env+=('CARGO_PROFILE_RELEASE_LTO=off')
+			fi
+
+			# Download: SearXNG is a rolling release, where every commit to the master branch is a release: https://docs.searxng.org/admin/update-searxng.html
+			# - The latest commit hash is obtained for the version string.
+			local commit=$(curl -sSfL 'https://api.github.com/repos/searxng/searxng/commits/master' | grep -m1 -Po '^  "sha": *"\K[0-9a-f]{40}(?=")')
+			[[ $commit ]] || { commit='master'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} commit detection failed. The latest archive of the \"master\" branch will be installed, but the shown version will lack the commit hash. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			Download_Install "https://github.com/searxng/searxng/archive/$commit.tar.gz"
+
+			# Version file: Without it, the version is obtained via Git, else SearXNG fails to start: https://github.com/searxng/searxng/blob/master/searx/version.py
+			# - Same format as upstream generates it, with the commit date, which is the modification time of all files in the archive
+			local version=$(date -ud "@$(stat -c '%Y' "searxng-$commit/requirements.txt")" '+%Y.%-m.%-d')
+			[[ $commit == 'master' ]] || version+="+${commit:0:9}"
+			cat << _EOF_ > "searxng-$commit/searx/version_frozen.py" || exit 1
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# pylint: disable=missing-module-docstring
+# this file is generated automatically by DietPi-Software
+
+VERSION_STRING = "$version"
+VERSION_TAG = "$version"
+DOCKER_TAG = "${version/+/-}"
+GIT_URL = "https://github.com/searxng/searxng"
+GIT_BRANCH = "master"
+_EOF_
+			# Install: Only the "searx" package directory and requirements are needed. Replace the code of an existing instance, but keep the venv.
+			G_EXEC mkdir -p /opt/searxng
+			[[ -d '/opt/searxng/searx' ]] && G_EXEC rm -R /opt/searxng/searx
+			G_EXEC mv "searxng-$commit/"{searx,requirements.txt,requirements-server.txt} /opt/searxng/
+			G_EXEC rm -R "searxng-$commit"
+
+			# Install the Python dependencies into a virtual environment at /opt/searxng/venv
+			# - The searx package itself does not need to be installed, as it is run from /opt/searxng.
+			# - Eager upgrade strategy to upgrade dependencies of an existing venv as well
+			Remove_old_venv /opt/searxng/venv
+			G_EXEC python3 -m venv --upgrade-deps /opt/searxng/venv
+			G_EXEC_OUTPUT=1 G_EXEC env "${build_env[@]}" /opt/searxng/venv/bin/pip install -U --upgrade-strategy eager -r /opt/searxng/requirements.txt -r /opt/searxng/requirements-server.txt
+			# - Precompile the searx package, as the service user cannot write the bytecode cache to /opt/searxng. This speeds up service starts, e.g. by 2 seconds on a Raspberry Pi 3.
+			G_EXEC /opt/searxng/venv/bin/python3 -m compileall -q /opt/searxng/searx
+
+			# User: Member of the redis group, if present, to access its UNIX socket for the limiter
+			Create_User -G redis -d /mnt/dietpi_userdata/searxng searxng
+
+			# Settings: Preserve existing
+			G_EXEC mkdir -p /mnt/dietpi_userdata/searxng
+			if [[ ! -f '/mnt/dietpi_userdata/searxng/settings.yml' ]]
+			then
+				# Contact URL: Needs to be a valid "https?:" or "mailto:" URL, or empty to leave it unset
+				local regex='^((https?://|mailto:)[^[:space:]"\]+)?$'
+				G_WHIP_DEFAULT_ITEM=$(sed -n '/^[[:blank:]]*SOFTWARE_SEARXNG_CONTACT_URL=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+				G_WHIP_NOCANCEL=1
+				G_WHIP_INPUTBOX_REGEX=$regex
+				G_WHIP_INPUTBOX_REGEX_TEXT='be an "https://" or "http://" URL, or an email address with "mailto:" prefix, or empty'
+				G_WHIP_INPUTBOX '[OPTION] SearXNG contact URL
+\nPlease enter a contact URL for the maintainer of this SearXNG instance, either a website as "https://" URL, or an email address as "mailto:" URL. Leave it empty to not set one.
+\nIt is sent with requests to search engines which require contact information, like Wikipedia, Wikidata, Arch Linux Wiki and Marginalia. The Wikipedia, Wikidata and OpenStreetMap engines are disabled without it, as required by the Wikimedia User-Agent policy:
+- https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy
+\nIt is shown as well on every page of the SearXNG web interface, as "Contact instance maintainer" link.
+\nIt can be changed later in /mnt/dietpi_userdata/searxng/settings.yml.'
+				local contact_url=$G_WHIP_RETURNED_VALUE contact='#'
+				if [[ ! $contact_url =~ $regex ]]
+				then
+					G_DIETPI-NOTIFY 1 "The contact URL \"$contact_url\" is invalid and will be ignored. It needs to be an \"https://\" or \"http://\" URL, or an email address with \"mailto:\" prefix."
+					contact_url=
+				fi
+				[[ $contact_url ]] && contact=
+
+				# Limiter: Enable it, if chosen, else add the settings commented, for users to enable it manually
+				local limiter='#' redis_sock
+				grep -q '^[[:blank:]]*SOFTWARE_SEARXNG_LIMITER=1' /boot/dietpi.txt && limiter=
+				[[ -f '/etc/redis/redis.conf' ]] && redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' /etc/redis/redis.conf | mawk '{print $2}')
+
+				G_EXEC install -o searxng -g root -m 0600 /dev/null /mnt/dietpi_userdata/searxng/settings.yml
+				cat << _EOF_ > /mnt/dietpi_userdata/searxng/settings.yml || exit 1
+# SearXNG settings: https://docs.searxng.org/admin/settings/index.html
+# Only changes to the defaults need to be added: https://github.com/searxng/searxng/blob/master/searx/settings.yml
+use_default_settings: true
+
+# Contact URL of the instance maintainer, sent to search engines like Wikipedia and shown on every page: "https://" or "mailto:" URL
+# - The Wikipedia, Wikidata and OpenStreetMap engines are disabled without it: https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy
+${contact}general:
+${contact}  contact_url: "${contact_url:-mailto:admin@example.org}"
+
+server:
+  secret_key: "$(od -An -tx1 -N32 /dev/random | tr -d ' \n')"
+  # Bot protection and rate limiting, requires Redis: https://docs.searxng.org/admin/searx.limiter.html
+  ${limiter}limiter: true
+
+# Redis connection, required for the limiter, the searxng user needs to be member of the redis group
+${limiter}valkey:
+${limiter}  url: unix://${redis_sock:-/run/redis/redis-server.sock}?db=0
+_EOF_
+			fi
+
+			# Web UI port and bind host: Preserve existing
+			[[ -f '/mnt/dietpi_userdata/searxng/searxng.env' ]] || cat << '_EOF_' > /mnt/dietpi_userdata/searxng/searxng.env || exit 1
+# Web UI port and bind host, use "::" to listen on IPv6 as well
+GRANIAN_HOST=0.0.0.0
+GRANIAN_PORT=8889
+_EOF_
+			G_EXEC chown searxng:searxng /mnt/dietpi_userdata/searxng
+			G_EXEC chmod 0750 /mnt/dietpi_userdata/searxng
+
+			# Service: https://github.com/searxng/searxng/blob/master/container/entrypoint.sh
+			# - Port and bind address in settings.yml are not used by Granian, but only by the development server.
+			# - Limit blocking threads, else Granian warns about up to 512 threads: https://github.com/searxng/searxng/blob/master/container/Dockerfile
+			# - All caches are SQLite databases in /tmp, hence PrivateTmp can be used.
+			cat << '_EOF_' > /etc/systemd/system/searxng.service || exit 1
+[Unit]
+Description=SearXNG (DietPi)
+Wants=network-online.target
+After=network-online.target redis-server.service
+
+[Service]
+SyslogIdentifier=SearXNG
+User=searxng
+WorkingDirectory=/opt/searxng
+Environment=SEARXNG_SETTINGS_PATH=/mnt/dietpi_userdata/searxng/settings.yml GRANIAN_INTERFACE=wsgi GRANIAN_BLOCKING_THREADS=4 GRANIAN_PROCESS_NAME=searxng
+EnvironmentFile=-/mnt/dietpi_userdata/searxng/searxng.env
+ExecStartPre=/bin/test -e /mnt/dietpi_userdata/searxng/searxng.env
+ExecStart=/opt/searxng/venv/bin/granian searx.webapp:app
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=1
+PrivateTmp=1
+PrivateDevices=1
+ProtectKernelTunables=1
+ProtectKernelModules=1
+ProtectControlGroups=1
+ProtectKernelLogs=1
+ProtectClock=1
+NoNewPrivileges=1
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+		fi
+
 		if To_Install whodb whodb
 		then
 			case $G_HW_ARCH in
@@ -15411,6 +15587,12 @@ _EOF_
 			[[ -d '/mnt/dietpi_userdata/spotifyd' ]] && G_EXEC rm -R /mnt/dietpi_userdata/spotifyd
 		fi
 
+		if To_Uninstall searxng
+		then
+			Remove_Service searxng 1 1
+			G_EXEC rm -Rf /opt/searxng /mnt/dietpi_userdata/searxng
+		fi
+
 		if To_Uninstall soju
 		then
 			Remove_Service soju 1 1
@@ -16301,6 +16483,23 @@ We allow it to take up to 30 minutes, it's process can be followed, please be pa
 \n[ INFO ] mjpg-streamer will not be compiled with all available plugins by default.
 \nIf you require other input or output plugins, simply install the required dependencies. Plugins will be compiled automatically if dependencies are met.
 \nFor available plugins and their dependencies, watch the info printed during the build and check out the official GitHub repository: https://github.com/jacksonliam/mjpg-streamer'
+
+		# SearXNG: Offer to enable the limiter, which requires Redis. Redis is marked for install via Mark_Dependencies(), so that this works for CLI installs as well.
+		if (( ${aSOFTWARE_INSTALL_STATE[searxng]} == 1 ))
+		then
+			G_WHIP_DEFAULT_ITEM=$(grep -cm1 '^[[:blank:]]*SOFTWARE_SEARXNG_LIMITER=1' /boot/dietpi.txt)
+			if G_WHIP_BUTTON_OK_TEXT='Enable' G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO '[OPTION] SearXNG limiter
+\nThe limiter protects SearXNG against bots and excessive requests: Requests from non-browser clients are blocked, and clients sending too many search requests (15 within 20 seconds) are blocked temporarily. Otherwise, bot requests are passed through to the search engines, which then show CAPTCHAs or block your instance.
+\nIt applies to clients in your local network as well. It requires Redis, which will be installed if missing.
+\n- https://docs.searxng.org/admin/searx.limiter.html
+\nIt can be enabled later in /mnt/dietpi_userdata/searxng/settings.yml as well.
+\nDo you want to enable the limiter?'
+			then
+				G_CONFIG_INJECT 'SOFTWARE_SEARXNG_LIMITER=' 'SOFTWARE_SEARXNG_LIMITER=1' /boot/dietpi.txt
+			else
+				G_CONFIG_INJECT 'SOFTWARE_SEARXNG_LIMITER=' 'SOFTWARE_SEARXNG_LIMITER=0' /boot/dietpi.txt
+			fi
+		fi
 
 		# Offer to install Unbound along with AdGuard Home and Pi-hole
 		if (( ${aSOFTWARE_INSTALL_STATE[pihole]} == 1 || ${aSOFTWARE_INSTALL_STATE[adguardhome]} == 1 ))
